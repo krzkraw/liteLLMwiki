@@ -1,0 +1,39 @@
+{
+  "name": "litert-gemma-chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "smoke": "node scripts/browser-smoke.mjs",
+    "smoke:model": "node scripts/browser-smoke.mjs --require-model",
+    "smoke:executable": "node scripts/executable-smoke.mjs",
+    "e2e:generate": "node scripts/e2e-generate.mjs",
+    "build:sidecar": "node scripts/build-native-runner.mjs",
+    "prepare:wasm": "node scripts/sync-wasm.mjs",
+    "postinstall": "node scripts/sync-wasm.mjs",
+    "check:model": "node scripts/check-model.mjs",
+    "download:model": "node scripts/download-model.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@litert-lm/core": "0.13.1",
+    "lucide-react": "0.562.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@webgpu/types": "0.1.68",
+    "jsdom": "27.3.0",
+    "playwright": "^1.61.0",
+    "typescript": "5.9.3",
+    "vite": "8.0.16",
+    "vitest": "4.1.9"
+  }
+}

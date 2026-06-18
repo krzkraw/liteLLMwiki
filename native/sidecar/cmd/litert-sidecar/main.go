@@ -1,0 +1,395 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"litert-sidecar/internal/litert"
+	"litert-sidecar/internal/platform"
+	"litert-sidecar/internal/proxy"
+	"litert-sidecar/internal/server"
+)
+
+func main() {
+	addr := flag.String("addr", platform.DefaultListenAddr, "sidecar listen address")
+	upstream := flag.String("upstream", platform.DefaultUpstreamURL, "litert-lm server URL")
+	launchRuntime := flag.Bool("launch-runtime", true, "start and manage a litert-lm serve child process")
+	runtimeExe := flag.String("runtime-exe", "", "path to litert-lm executable; defaults to PATH or bundled executable")
+	runtimeHost := flag.String("runtime-host", litert.DefaultRuntimeHost, "litert-lm serve host")
+	runtimePort := flag.Int("runtime-port", litert.DefaultRuntimePort, "litert-lm serve port")
+	modelFile := flag.String("model-file", litert.FindDefaultModelFile(), "local .litertlm file to import before serving")
+	modelID := flag.String("model-id", litert.DefaultModelID, "LiteRT-LM registry model ID used by the web UI")
+	importModel := flag.Bool("import-model", true, "import -model-file into the LiteRT-LM registry when missing")
+	runtimeVerbose := flag.Bool("runtime-verbose", false, "pass --verbose to litert-lm serve")
+	flag.Parse()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	upstreamProxy, err := proxy.New(*upstream)
+	if err != nil {
+		log.Fatalf("create upstream proxy: %v", err)
+	}
+
+	logs := server.NewLogBroadcaster(512)
+	statusEvents := server.NewStatusBroadcaster()
+	runtimeManager := litert.NewManager(litert.Config{
+		Launch:      *launchRuntime,
+		Executable:  *runtimeExe,
+		Host:        *runtimeHost,
+		Port:        *runtimePort,
+		ModelFile:   *modelFile,
+		ModelID:     *modelID,
+		ImportModel: *importModel,
+		Verbose:     *runtimeVerbose,
+		Stdout:      logs.Writer("runtime", "stdout", os.Stdout),
+		Stderr:      logs.Writer("runtime", "stderr", os.Stderr),
+		OnStatusChange: func(litert.RuntimeStatus) {
+			statusEvents.Publish()
+		},
+	})
+	if err := runtimeManager.Start(ctx); err != nil {
+		log.Printf("litert-lm runtime is not ready: %v", err)
+	}
+	if err := retargetProxyToRuntimeManager(upstreamProxy, runtimeManager); err != nil {
+		log.Printf("retarget sidecar proxy: %v", err)
+	}
+
+	runtimeController := runtimeControllerAdapter{
+		manager: runtimeManager,
+		logs:    logs,
+		proxy:   upstreamProxy,
+	}
+	handler := server.New(server.Options{
+		Proxy:             upstreamProxy,
+		RuntimeController: runtimeController,
+		Logs:              logs,
+		StatusEvents:      statusEvents,
+		BackendReporter: func(ctx context.Context) ([]server.BackendStatus, error) {
+			status := runtimeManager.Status()
+			return reportBackends(ctx, status.Upstream, status.ModelID)
+		},
+		MultimodalRunner: func(
+			ctx context.Context,
+			request server.MultimodalRunRequest,
+		) (server.MultimodalRunResponse, error) {
+			config := runtimeManager.ConfigSnapshot()
+			return runMultimodal(
+				ctx,
+				config.Executable,
+				config.ModelFile,
+				config.ModelID,
+				config.HuggingFaceToken,
+				config.ImportModel,
+				request,
+			)
+		},
+	}).Handler()
+	httpServer := &http.Server{
+		Addr:              *addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	log.Printf("litert sidecar listening on http://%s", *addr)
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- httpServer.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("serve sidecar: %v", err)
+		}
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown sidecar: %v", err)
+	}
+	if err := runtimeManager.Stop(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("stop litert-lm runtime: %v", err)
+	}
+}
+
+func retargetProxyToRuntimeManager(upstreamProxy *proxy.Proxy, manager *litert.Manager) error {
+	if upstreamProxy == nil || manager == nil {
+		return nil
+	}
+
+	config := manager.ConfigSnapshot()
+	if !config.Launch {
+		return nil
+	}
+
+	upstream := strings.TrimSpace(manager.Status().Upstream)
+	if upstream == "" {
+		return nil
+	}
+
+	return upstreamProxy.SetTarget(upstream)
+}
+
+type runtimeControllerAdapter struct {
+	manager *litert.Manager
+	logs    *server.LogBroadcaster
+	proxy   *proxy.Proxy
+}
+
+func (a runtimeControllerAdapter) Start(
+	ctx context.Context,
+	mode server.RuntimeMode,
+	config server.RuntimeControlConfig,
+) error {
+	if err := a.manager.StartModeWithConfig(
+		ctx,
+		litert.RuntimeMode(mode),
+		toLiteRTConfigPatch(config),
+	); err != nil {
+		return err
+	}
+
+	return a.retargetProxy(config)
+}
+
+func (a runtimeControllerAdapter) Stop(ctx context.Context) error {
+	return a.manager.Stop(ctx)
+}
+
+func (a runtimeControllerAdapter) Restart(
+	ctx context.Context,
+	mode server.RuntimeMode,
+	config server.RuntimeControlConfig,
+) error {
+	if err := a.manager.RestartWithConfig(
+		ctx,
+		litert.RuntimeMode(mode),
+		toLiteRTConfigPatch(config),
+	); err != nil {
+		return err
+	}
+
+	return a.retargetProxy(config)
+}
+
+func (a runtimeControllerAdapter) Status() server.RuntimeStatus {
+	status := toServerRuntimeStatus(a.manager.Status())
+	if a.logs != nil {
+		status.LogSequence = a.logs.LatestSeq()
+	}
+	return status
+}
+
+func (a runtimeControllerAdapter) retargetProxy(config server.RuntimeControlConfig) error {
+	if a.proxy == nil {
+		return nil
+	}
+
+	upstream := ""
+	if config.LaunchRuntime != nil && !*config.LaunchRuntime {
+		upstream = strings.TrimSpace(config.Upstream)
+	}
+	if upstream == "" {
+		upstream = a.manager.Status().Upstream
+	}
+	if upstream == "" {
+		return nil
+	}
+
+	return a.proxy.SetTarget(upstream)
+}
+
+func toLiteRTConfigPatch(config server.RuntimeControlConfig) litert.ConfigPatch {
+	return litert.ConfigPatch{
+		Launch:           config.LaunchRuntime,
+		Executable:       config.RuntimeExe,
+		Host:             config.RuntimeHost,
+		Port:             config.RuntimePort,
+		Upstream:         config.Upstream,
+		ModelFile:        config.ModelFile,
+		ModelID:          config.ModelID,
+		HuggingFaceToken: config.HuggingFaceToken,
+		ImportModel:      config.ImportModel,
+		Verbose:          config.RuntimeVerbose,
+	}
+}
+
+func toServerRuntimeStatus(status litert.RuntimeStatus) server.RuntimeStatus {
+	return server.RuntimeStatus{
+		State:       status.State,
+		Executable:  status.Executable,
+		Version:     status.Version,
+		ModelID:     status.ModelID,
+		ModelFile:   status.ModelFile,
+		Upstream:    status.Upstream,
+		Mode:        status.Mode,
+		LogSequence: status.LogSequence,
+		Detail:      status.Detail,
+	}
+}
+
+func runMultimodal(
+	ctx context.Context,
+	runtimeExe string,
+	modelFile string,
+	modelID string,
+	configuredHuggingFaceToken string,
+	importModel bool,
+	request server.MultimodalRunRequest,
+) (server.MultimodalRunResponse, error) {
+	exe, err := findRuntimeExecutable(runtimeExe)
+	if err != nil {
+		return server.MultimodalRunResponse{}, err
+	}
+
+	runModelID := modelID
+	if request.ModelID != "" {
+		runModelID = request.ModelID
+	}
+	huggingFaceToken := strings.TrimSpace(request.HuggingFaceToken)
+	if huggingFaceToken == "" {
+		huggingFaceToken = strings.TrimSpace(configuredHuggingFaceToken)
+	}
+	if importModel {
+		if err := litert.EnsureModelImportedWithHuggingFaceToken(ctx, exe, modelFile, runModelID, huggingFaceToken); err != nil {
+			return server.MultimodalRunResponse{}, err
+		}
+	}
+
+	text, err := litert.RunOnce(ctx, exe, litert.RunRequest{
+		ModelID:                         runModelID,
+		Backend:                         request.Backend,
+		VisionBackend:                   request.VisionBackend,
+		AudioBackend:                    request.AudioBackend,
+		Prompt:                          request.Prompt,
+		MaxNumTokens:                    request.MaxNumTokens,
+		TopK:                            request.TopK,
+		TopP:                            request.TopP,
+		Temperature:                     request.Temperature,
+		Seed:                            request.Seed,
+		Preset:                          request.Preset,
+		NoTemplate:                      request.NoTemplate,
+		FilterChannelContentFromKVCache: request.FilterChannelContentFromKVCache,
+		EnableSpeculativeDecoding:       request.EnableSpeculativeDecoding,
+		Cache:                           request.Cache,
+		Verbose:                         request.Verbose,
+		FromHuggingFaceRepo:             request.FromHuggingFaceRepo,
+		HuggingFaceToken:                huggingFaceToken,
+		AttachmentPaths:                 request.AttachmentPaths,
+	})
+	if err != nil {
+		return server.MultimodalRunResponse{}, err
+	}
+
+	return server.MultimodalRunResponse{Text: text}, nil
+}
+
+func findRuntimeExecutable(runtimeExe string) (string, error) {
+	if runtimeExe != "" {
+		return litert.FindExecutable(runtimeExe)
+	}
+
+	return litert.FindExecutable()
+}
+
+type modelsResponse struct {
+	Data []modelRecord `json:"data"`
+}
+
+type modelRecord struct {
+	ID string `json:"id"`
+}
+
+func reportBackends(
+	ctx context.Context,
+	upstream string,
+	modelID string,
+) ([]server.BackendStatus, error) {
+	modelIDs, err := fetchModelIDs(ctx, upstream)
+	if err != nil {
+		return nil, err
+	}
+
+	evidence := platform.BackendEvidenceFromModelIDs(modelID, modelIDs)
+	statuses := make([]server.BackendStatus, 0, len(evidence))
+	for _, item := range evidence {
+		statuses = append(statuses, server.BackendStatus{
+			Backend: item.Backend,
+			State:   item.State,
+			Detail:  item.Detail,
+		})
+	}
+
+	return statuses, nil
+}
+
+func fetchModelIDs(ctx context.Context, upstream string) ([]string, error) {
+	modelsURL, err := modelsEndpoint(upstream)
+	if err != nil {
+		return nil, err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create models request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("fetch models: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("fetch models: status %d", response.StatusCode)
+	}
+
+	var body modelsResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("decode models response: %w", err)
+	}
+
+	modelIDs := make([]string, 0, len(body.Data))
+	for _, item := range body.Data {
+		if item.ID != "" {
+			modelIDs = append(modelIDs, item.ID)
+		}
+	}
+
+	return modelIDs, nil
+}
+
+func modelsEndpoint(upstream string) (string, error) {
+	parsed, err := url.Parse(upstream)
+	if err != nil {
+		return "", fmt.Errorf("parse upstream url: %w", err)
+	}
+
+	path := strings.TrimRight(parsed.Path, "/")
+	if path == "" {
+		path = "/v1"
+	}
+	if !strings.HasSuffix(path, "/v1") {
+		path += "/v1"
+	}
+	parsed.Path = path + "/models"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+
+	return parsed.String(), nil
+}

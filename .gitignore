@@ -1,0 +1,29 @@
+.DS_Store
+
+# JavaScript dependencies and build output
+demo/node_modules/
+demo/dist/
+demo/coverage/
+demo/.vite/
+demo/public/vendor/
+
+# Local model binaries are hosted separately, never in this repo.
+demo/models/*
+!demo/models/README.md
+*.litertlm
+*.litertlm.partial
+*.litertlm.parts/
+
+# Native sidecar release/debug artifacts
+demo/native/sidecar/litert-sidecar-*/
+native/sidecar/dist/
+native/sidecar/bin/
+native/sidecar/litert-sidecar
+native/sidecar/litert-sidecar.exe
+
+# Local runtime scratch
+tmp/
+.cache/
+.venv/
+__pycache__/
+*.log

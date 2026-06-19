@@ -9,16 +9,20 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"litert-sidecar/internal/litert"
 )
 
 const DefaultMainRunnerID = "main-litert"
+
+const DefaultLlamaExecutableName = "llama-server"
 
 type Runtime string
 
@@ -503,11 +507,73 @@ func (s *Supervisor) startRecord(ctx context.Context, record *runnerRecord) erro
 	switch record.snapshot.Runtime {
 	case RuntimeLiteRT:
 		return s.startLiteRTRunner(ctx, record)
+	case RuntimeLlamaCPP:
+		return s.startLlamaRunner(ctx, record)
 	default:
 		err := fmt.Errorf("runtime %q cannot be started yet", record.snapshot.Runtime)
 		s.markUnavailable(record, err)
 		return err
 	}
+}
+
+func (s *Supervisor) startLlamaRunner(ctx context.Context, record *runnerRecord) error {
+	exe, err := findExecutable(record.executable, DefaultLlamaExecutableName)
+	if err != nil {
+		s.markUnavailable(record, err)
+		return err
+	}
+
+	snapshot := s.runnerSnapshot(record)
+	if strings.TrimSpace(snapshot.ModelPath) == "" {
+		err := errors.New("llama.cpp model path is required")
+		s.markUnavailable(record, err)
+		return err
+	}
+	if stat, err := os.Stat(snapshot.ModelPath); err != nil || stat.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("%s is a directory", snapshot.ModelPath)
+		}
+		err = fmt.Errorf("llama.cpp model file %q is not usable: %w", snapshot.ModelPath, err)
+		s.markUnavailable(record, err)
+		return err
+	}
+
+	version := detectExecutableVersion(exe)
+	s.updateRecord(record, func(next *RunnerSnapshot) {
+		next.State = StateStarting
+		next.Executable = exe
+		next.Version = version
+		next.Upstream = litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
+		next.Command = nil
+		next.Detail = "Starting llama.cpp OpenAI-compatible server."
+		next.LastError = ""
+	})
+
+	cmd := buildLlamaServerCommand(ctx, exe, snapshot)
+	cmd.Stdout = s.writer(record.snapshot.ID, "stdout", s.stdoutTee)
+	cmd.Stderr = s.writer(record.snapshot.ID, "stderr", s.stderrTee)
+	if err := cmd.Start(); err != nil {
+		err := fmt.Errorf("start llama-server: %w", err)
+		s.markUnavailable(record, err)
+		return err
+	}
+
+	done := make(chan error, 1)
+	s.mu.Lock()
+	record.cmd = cmd
+	record.done = done
+	record.stopped = false
+	record.snapshot.State = StateRunning
+	record.snapshot.PID = cmd.Process.Pid
+	record.snapshot.Command = append([]string(nil), cmd.Args...)
+	record.snapshot.Upstream = litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
+	record.snapshot.Detail = "llama.cpp server process is running."
+	record.snapshot.LastError = ""
+	s.mu.Unlock()
+	s.publishStatusChange()
+
+	go s.wait(ctx, record.snapshot.ID, cmd, done)
+	return nil
 }
 
 func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord) error {
@@ -884,8 +950,78 @@ func isRuntimeMode(mode RuntimeMode) bool {
 }
 
 func findLiteRTExecutable(configured string) (string, error) {
+	return findExecutable(configured, litert.DefaultExecutableName)
+}
+
+func findExecutable(configured string, defaultName string) (string, error) {
 	if strings.TrimSpace(configured) != "" {
-		return litert.FindExecutable(configured)
+		return resolveExecutablePath(configured)
 	}
-	return litert.FindExecutable()
+	return resolveExecutablePath(defaultName)
+}
+
+func buildLlamaServerCommand(ctx context.Context, exe string, snapshot RunnerSnapshot) *exec.Cmd {
+	modelID := snapshot.ModelID
+	if modelID == "" {
+		modelID = snapshot.ID
+	}
+
+	args := []string{
+		"-m",
+		snapshot.ModelPath,
+		"--alias",
+		modelID,
+		"--host",
+		snapshot.Host,
+		"--port",
+		strconv.Itoa(snapshot.Port),
+	}
+	if usesGPUBackend(snapshot.Backend) {
+		args = append(args, "--n-gpu-layers", "999")
+	}
+
+	return exec.CommandContext(ctx, exe, args...)
+}
+
+func usesGPUBackend(backend Backend) bool {
+	switch backend {
+	case BackendGPU, BackendMetal, BackendVulkan, BackendCUDA, BackendOpenVINO, BackendSYCL, BackendNPU:
+		return true
+	default:
+		return false
+	}
+}
+
+func detectExecutableVersion(exe string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	output, err := exec.CommandContext(ctx, exe, "--version").CombinedOutput()
+	if err != nil {
+		return "unknown"
+	}
+	version := strings.TrimSpace(string(output))
+	if version == "" {
+		return "unknown"
+	}
+	return version
+}
+
+func resolveExecutablePath(candidate string) (string, error) {
+	if strings.ContainsRune(candidate, os.PathSeparator) || filepath.IsAbs(candidate) {
+		if stat, err := os.Stat(candidate); err == nil && !stat.IsDir() && isExecutable(stat.Mode()) {
+			return filepath.Abs(candidate)
+		}
+		return "", os.ErrNotExist
+	}
+
+	return exec.LookPath(candidate)
+}
+
+func isExecutable(mode os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+
+	return mode&0o111 != 0
 }

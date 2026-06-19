@@ -152,6 +152,68 @@ func TestSupervisorSerializesConcurrentStarts(t *testing.T) {
 	}
 }
 
+func TestSupervisorStartsLlamaCPPMainRunner(t *testing.T) {
+	t.Parallel()
+
+	exe, argsFile := writeLlamaHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "gemma.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	var childOutput bytes.Buffer
+	logs := server.NewLogBroadcaster(16)
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{
+			Launch: false,
+			Host:   "127.0.0.1",
+			Port:   9381,
+		},
+		Logs:      logs,
+		StdoutTee: &childOutput,
+		StderrTee: &childOutput,
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:         "main-llamacpp",
+		Runtime:    RuntimeLlamaCPP,
+		Role:       RoleMain,
+		Backend:    BackendMetal,
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "gemma4-gguf",
+		Host:       "127.0.0.1",
+		Port:       9491,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create llama runner: %v", err)
+	}
+
+	if err := supervisor.StartRunner(context.Background(), runnerID); err != nil {
+		t.Fatalf("start llama runner: %v", err)
+	}
+	args := readHelperArgs(t, argsFile, &childOutput, 1)
+	if got, ok := supervisor.UpstreamForPath("/v1/chat/completions"); !ok || got != "http://127.0.0.1:9491" {
+		t.Fatalf("chat upstream = %q/%v, want llama runner", got, ok)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := supervisor.StopRunner(stopCtx, runnerID); err != nil {
+		t.Fatalf("stop llama runner: %v", err)
+	}
+
+	for _, want := range []string{
+		"-m " + modelPath,
+		"--alias gemma4-gguf",
+		"--host 127.0.0.1",
+		"--port 9491",
+		"--n-gpu-layers 999",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("llama args = %q, want %q", args, want)
+		}
+	}
+}
+
 func TestSupervisorStartsDefaultLiteRTWithControlPatch(t *testing.T) {
 	t.Parallel()
 
@@ -275,6 +337,28 @@ func writeLiteRTHelper(t *testing.T) (string, string) {
 	return exe, argsFile
 }
 
+func writeLlamaHelper(t *testing.T) (string, string) {
+	t.Helper()
+	if os.Getenv("SUPERVISOR_LLAMA_HELPER") == "1" {
+		t.Fatal("helper should not run in parent test process")
+	}
+	if isWindows() {
+		t.Skip("shell helper is unix-specific")
+	}
+
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	exe := filepath.Join(dir, "llama-server-test")
+	script := "#!/bin/sh\n" +
+		"SUPERVISOR_LLAMA_HELPER=1 ARGS_FILE=" + shellQuote(argsFile) + " exec " +
+		shellQuote(os.Args[0]) + " -test.run=TestSupervisorLlamaHelperProcess -- \"$@\"\n"
+	if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+
+	return exe, argsFile
+}
+
 func readHelperArgs(t *testing.T, path string, output *bytes.Buffer, wantLines int) string {
 	t.Helper()
 
@@ -342,6 +426,41 @@ func TestSupervisorLiteRTHelperProcess(t *testing.T) {
 		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 		<-signals
 	}
+}
+
+func TestSupervisorLlamaHelperProcess(t *testing.T) {
+	if os.Getenv("SUPERVISOR_LLAMA_HELPER") != "1" {
+		return
+	}
+
+	args := helperArgs()
+	if len(args) > 0 && args[0] == "--version" {
+		fmt.Fprintln(os.Stdout, "llama-helper-version")
+		return
+	}
+
+	argsFile := os.Getenv("ARGS_FILE")
+	if argsFile == "" {
+		fmt.Fprintln(os.Stderr, "ARGS_FILE is required")
+		os.Exit(2)
+	}
+	file, err := os.OpenFile(argsFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open args: %v\n", err)
+		os.Exit(2)
+	}
+	if _, err := fmt.Fprintln(file, strings.Join(args, " ")); err != nil {
+		fmt.Fprintf(os.Stderr, "write args: %v\n", err)
+		os.Exit(2)
+	}
+	if err := file.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "close args: %v\n", err)
+		os.Exit(2)
+	}
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	<-signals
 }
 
 func helperArgs() []string {

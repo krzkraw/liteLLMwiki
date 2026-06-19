@@ -728,6 +728,47 @@ function Stop-DevServer {
   }
 }
 
+function Get-NpmStartProcessSpec {
+  $RunningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows
+  )
+
+  if ($RunningOnWindows) {
+    foreach ($Name in @("npm.cmd", "npm.exe")) {
+      $Command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($null -ne $Command) {
+        return [pscustomobject]@{
+          FilePath = $Command.Source
+          PrefixArgs = [string[]]@()
+        }
+      }
+    }
+
+    $ComSpec = $env:ComSpec
+    if ([string]::IsNullOrWhiteSpace($ComSpec)) {
+      $ComSpec = "cmd.exe"
+    }
+
+    return [pscustomobject]@{
+      FilePath = $ComSpec
+      PrefixArgs = [string[]]@("/d", "/s", "/c", "npm")
+    }
+  }
+
+  $NpmCommand = Get-Command "npm" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -ne $NpmCommand) {
+    return [pscustomobject]@{
+      FilePath = $NpmCommand.Source
+      PrefixArgs = [string[]]@()
+    }
+  }
+
+  return [pscustomobject]@{
+    FilePath = "npm"
+    PrefixArgs = [string[]]@()
+  }
+}
+
 function Run-SmokeTests {
   Write-Host ""
   Write-Host "==> Starting temporary web UI for smoke tests at $SmokeUrl"
@@ -735,7 +776,8 @@ function Run-SmokeTests {
   $StdoutLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stdout.log"
   $StderrLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stderr.log"
   Remove-Item -Force -ErrorAction SilentlyContinue $StdoutLogPath, $StderrLogPath
-  $script:DevServerProcess = Start-Process -FilePath "npm" -ArgumentList @(
+  $NpmSpec = Get-NpmStartProcessSpec
+  $NpmArguments = @($NpmSpec.PrefixArgs) + @(
     "run",
     "dev",
     "--",
@@ -744,7 +786,8 @@ function Run-SmokeTests {
     "--port",
     [string]$SmokePort,
     "--strictPort"
-  ) `
+  )
+  $script:DevServerProcess = Start-Process -FilePath $NpmSpec.FilePath -ArgumentList $NpmArguments `
     -WorkingDirectory $RepoRoot `
     -NoNewWindow `
     -RedirectStandardOutput $StdoutLogPath `

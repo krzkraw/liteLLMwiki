@@ -170,4 +170,16 @@ describe("interactive installer scripts", () => {
       "-RedirectStandardOutput $LogPath -RedirectStandardError $LogPath",
     );
   });
+
+  it("uses a Windows executable npm shim for PowerShell Start-Process", () => {
+    const contents = readRootScript("install.ps1");
+
+    expect(contents).toContain("Get-NpmStartProcessSpec");
+    expect(contents).toContain("npm.cmd");
+    expect(contents).toContain("npm.exe");
+    expect(contents).toContain("$NpmSpec = Get-NpmStartProcessSpec");
+    expect(contents).toContain("Start-Process -FilePath $NpmSpec.FilePath");
+    expect(contents).toContain("-ArgumentList $NpmArguments");
+    expect(contents).not.toContain('Start-Process -FilePath "npm"');
+  });
 });

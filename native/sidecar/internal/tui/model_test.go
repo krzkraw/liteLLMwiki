@@ -758,6 +758,38 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 	}
 }
 
+func TestSettingsViewShowsSharedActionMethodMap(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	updated := next.(Model)
+	view := updated.View()
+
+	for _, expected := range []string{
+		"Shared action map",
+		"TUI key -> shared method -> WebSocket/API",
+		"s Start release -> RuntimeController.Start(release) -> runtime.start",
+		"d Start debug -> RuntimeController.Start(debug) -> runtime.start",
+		"x Stop runtime -> RuntimeController.Stop() -> runtime.stop",
+		"r Restart release -> RuntimeController.Restart(release) -> runtime.restart",
+		"g Restart debug -> RuntimeController.Restart(debug) -> runtime.restart",
+		"Runner s/x/r -> RunnerController.StartRunner/StopRunner/RestartRunner",
+		"POST /sidecar/v1/runners/{id}/start|stop|restart",
+		"Runner edits -> RunnerController.UpdateRunner -> PATCH /sidecar/v1/runners/{id}",
+		"Models d -> Catalog.Download -> POST /sidecar/v1/models/download",
+		"Models m/e/r -> RunnerController.CreateRunner -> POST /sidecar/v1/runners",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("settings action map missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestSettingsViewShowsRuntimeConfigEditor(t *testing.T) {
 	t.Parallel()
 

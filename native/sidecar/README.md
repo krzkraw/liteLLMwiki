@@ -37,9 +37,10 @@ Settings tab lists the matching WebSocket messages and sidecar API paths,
 exposes default runtime controls with `s` start release, `d` start debug, `x`
 stop, `r` restart release, and `g` restart debug, and includes a runtime config
 editor for the same `runtime.start` and `runtime.restart` config fields used by
-WebSocket clients. Its API parity panel includes the model catalog, runner
-management, native multimodal, and `/v1/*` upstream proxy paths supported by
-WebSocket `api.request`.
+WebSocket clients. Its shared action map shows each TUI key beside the
+controller method and matching WebSocket/API route it uses. Its API parity
+panel includes the model catalog, runner management, native multimodal, and
+`/v1/*` upstream proxy paths supported by WebSocket `api.request`.
 Settings keys edit `e` runtime executable, `h` runtime host, `p` runtime port,
 `m` model file, `i` model ID, `u` upstream, and `f` Hugging Face token, plus
 `l` launch runtime, `a` import model, and `v` runtime verbose toggles. The

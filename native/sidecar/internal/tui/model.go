@@ -1009,6 +1009,7 @@ func (m Model) settingsView() string {
 		}, "45"),
 		renderPanel("Runtime config editor", m.runtimeConfigLines(), "82"),
 		m.runtimeEditorView(),
+		renderPanel("Shared action map", settingsActionMapLines(), "214"),
 		renderPanel("WebSocket API parity", []string{
 			"status.get",
 			"runtime.start",
@@ -1030,6 +1031,22 @@ func (m Model) settingsView() string {
 			"TUI controls call the same methods underneath: RuntimeController and RunnerController.",
 		}, "205"),
 	)
+}
+
+func settingsActionMapLines() []string {
+	return []string{
+		"TUI key -> shared method -> WebSocket/API",
+		"s Start release -> RuntimeController.Start(release) -> runtime.start",
+		"d Start debug -> RuntimeController.Start(debug) -> runtime.start",
+		"x Stop runtime -> RuntimeController.Stop() -> runtime.stop",
+		"r Restart release -> RuntimeController.Restart(release) -> runtime.restart",
+		"g Restart debug -> RuntimeController.Restart(debug) -> runtime.restart",
+		"Runner s/x/r -> RunnerController.StartRunner/StopRunner/RestartRunner",
+		"POST /sidecar/v1/runners/{id}/start|stop|restart",
+		"Runner edits -> RunnerController.UpdateRunner -> PATCH /sidecar/v1/runners/{id}",
+		"Models d -> Catalog.Download -> POST /sidecar/v1/models/download",
+		"Models m/e/r -> RunnerController.CreateRunner -> POST /sidecar/v1/runners",
+	}
 }
 
 func (m Model) runtimeConfigLines() []string {

@@ -673,6 +673,8 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 		"runtime.start",
 		"runtime.stop",
 		"runtime.restart",
+		"api.request POST /sidecar/v1/multimodal",
+		"api.request * /v1/* upstream proxy",
 		"api.request GET /sidecar/v1/runners",
 		"api.request PATCH /sidecar/v1/runners/{id}",
 		"api.request POST /sidecar/v1/runners/{id}/start",

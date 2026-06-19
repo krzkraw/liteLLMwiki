@@ -33,7 +33,7 @@ export function createChromiumGpuArgs(platform = process.platform) {
 
 export function createSmokeChromiumLaunchOptions(browserType, launchOptions = {}) {
   if (launchOptions.channel || launchOptions.executablePath) {
-    return { ...launchOptions };
+    return { timeout: 30_000, ...launchOptions };
   }
 
   const executablePath = browserType.executablePath();
@@ -46,29 +46,94 @@ export function createSmokeChromiumLaunchOptions(browserType, launchOptions = {}
     );
   }
 
-  return { ...launchOptions, executablePath };
+  return { timeout: 30_000, ...launchOptions, executablePath };
 }
 
-export async function launchSmokeChromium(browserType, launchOptions = {}) {
-  try {
-    return await browserType.launch(
-      createSmokeChromiumLaunchOptions(browserType, launchOptions),
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (
-      message.includes("Executable doesn't exist") ||
-      message.includes("chromium_headless_shell")
-    ) {
-      throw new Error(
-        [
-          "Playwright Chromium is not ready for smoke tests.",
-          "Run: bunx playwright install chromium",
-          message,
-        ].join("\n"),
-      );
-    }
+function isChromiumInstallError(error) {
+  const message = error instanceof Error ? error.message : String(error);
 
-    throw error;
+  return (
+    message.includes("Executable doesn't exist") ||
+    message.includes("chromium_headless_shell")
+  );
+}
+
+function createSmokeChromiumLaunchPlan(browserType, launchOptions = {}, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const firstOptions = createSmokeChromiumLaunchOptions(browserType, launchOptions);
+  const plan = [{ label: "Playwright Chromium", options: firstOptions }];
+
+  if (
+    platform === "win32" &&
+    !launchOptions.channel &&
+    !launchOptions.executablePath
+  ) {
+    plan.push(
+      {
+        label: "Google Chrome channel",
+        options: { timeout: 30_000, ...launchOptions, channel: "chrome" },
+      },
+      {
+        label: "Microsoft Edge channel",
+        options: { timeout: 30_000, ...launchOptions, channel: "msedge" },
+      },
+    );
   }
+
+  return plan;
+}
+
+function createLaunchFailureError(attempts) {
+  return new Error(
+    [
+      "Smoke Chromium could not be launched.",
+      "Tried:",
+      ...attempts.map(
+        ({ label, error }) =>
+          `- ${label}: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+      "Run: bunx playwright install chromium",
+      "If bundled Chromium hangs on Windows, install Chrome or Edge and rerun.",
+    ].join("\n"),
+  );
+}
+
+export async function launchSmokeChromium(
+  browserType,
+  launchOptions = {},
+  options = {},
+) {
+  const failures = [];
+
+  for (const attempt of createSmokeChromiumLaunchPlan(
+    browserType,
+    launchOptions,
+    options,
+  )) {
+    try {
+      return await browserType.launch(attempt.options);
+    } catch (error) {
+      if (isChromiumInstallError(error)) {
+        throw new Error(
+          [
+            "Playwright Chromium is not ready for smoke tests.",
+            "Run: bunx playwright install chromium",
+            error instanceof Error ? error.message : String(error),
+          ].join("\n"),
+        );
+      }
+
+      failures.push({ ...attempt, error });
+    }
+  }
+
+  if (failures.length > 1) {
+    throw createLaunchFailureError(failures);
+  }
+
+  const [failure] = failures;
+  if (failure) {
+    throw failure.error;
+  }
+  throw createLaunchFailureError(failures);
 }

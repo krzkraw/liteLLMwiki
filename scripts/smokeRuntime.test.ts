@@ -66,7 +66,49 @@ describe("smoke runtime helpers", () => {
         {
           executablePath,
           headless: true,
+          timeout: 30_000,
           args: ["--smoke-flag"],
+        },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to installed Windows browser channels when bundled Chromium hangs", async () => {
+    const { launchSmokeChromium } = await import("./smokeRuntime.mjs");
+    const root = await mkdtemp(join(tmpdir(), "litert-chromium-test-"));
+    const executablePath = join(root, "chrome.exe");
+    const launches: unknown[] = [];
+
+    try {
+      await writeFile(executablePath, "");
+      const browser = await launchSmokeChromium(
+        {
+          executablePath: () => executablePath,
+          launch: async (options: Record<string, unknown>) => {
+            launches.push(options);
+            if (options.executablePath) {
+              throw new Error("browserType.launch: Timeout 30000ms exceeded.");
+            }
+            return { close: async () => undefined };
+          },
+        },
+        { headless: true },
+        { platform: "win32" },
+      );
+
+      await browser.close();
+      expect(launches).toEqual([
+        {
+          executablePath,
+          headless: true,
+          timeout: 30_000,
+        },
+        {
+          channel: "chrome",
+          headless: true,
+          timeout: 30_000,
         },
       ]);
     } finally {

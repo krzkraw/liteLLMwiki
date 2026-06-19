@@ -457,6 +457,8 @@ func (m Model) View() string {
 	builder.WriteString("\n\n")
 	builder.WriteString(m.tabBar())
 	builder.WriteString("\n\n")
+	builder.WriteString(m.missionControlView())
+	builder.WriteString("\n\n")
 	if strings.TrimSpace(m.notice) != "" {
 		builder.WriteString(noticeStyle.Render(m.notice))
 		builder.WriteString("\n\n")
@@ -685,6 +687,88 @@ func (m Model) tabBar() string {
 		parts = append(parts, tabStyle.Render(label))
 	}
 	return strings.Join(parts, " ")
+}
+
+func (m Model) missionControlView() string {
+	return renderPanel("Mission control / Live state", m.missionControlLines(), "45")
+}
+
+func (m Model) missionControlLines() []string {
+	runningRunners := m.runningRunnerCount()
+	totalRunners := len(m.snapshot.Runners)
+	requiredModels, presentModels := m.requiredModelCounts()
+
+	return []string{
+		"Active      " + m.activeMissionLine(),
+		formatSignalLine(
+			"Runtime",
+			runtimeSignalGlyph(m.runtime.State),
+			fallback(m.runtime.State, "unknown"),
+			runtimeSignalMeter(m.runtime.State),
+		),
+		formatSignalLine(
+			"Runners",
+			runnerSignalGlyph(runningRunners, totalRunners),
+			fmt.Sprintf("%d/%d active", runningRunners, totalRunners),
+			statusMeter(runningRunners, totalRunners),
+		),
+		formatSignalLine(
+			"Routes",
+			routeSignalGlyph(len(m.snapshot.Routes)),
+			fmt.Sprintf("%d wired", len(m.snapshot.Routes)),
+			m.compactRouteSummary(),
+		),
+		formatSignalLine(
+			"Models",
+			modelSignalGlyph(presentModels, requiredModels),
+			fmt.Sprintf("%d/%d present", presentModels, requiredModels),
+			modelSignalMeter(presentModels, requiredModels),
+		),
+		"API        WebSocket api.request + shared controllers",
+	}
+}
+
+func (m Model) activeMissionLine() string {
+	switch m.activeTabID() {
+	case "dashboard":
+		return "◆ Dashboard / status.get + /sidecar/v1/status"
+	case "models":
+		return "● Models / Catalog.Download + RunnerController.CreateRunner"
+	case "logs":
+		return "● Logs / LogBroadcaster.Subscribe"
+	case "settings":
+		return "● Settings / RuntimeController + RunnerController"
+	default:
+		runner, ok := m.activeRunner()
+		if !ok {
+			return "! Runner / no active runner"
+		}
+		return fmt.Sprintf(
+			"%s Runner %s / %s -> %s",
+			runnerStateGlyph(runner.State),
+			runner.ID,
+			runnerRoleRoute(runner.Role),
+			fallback(runner.Upstream, "unavailable"),
+		)
+	}
+}
+
+func (m Model) compactRouteSummary() string {
+	if len(m.snapshot.Routes) == 0 {
+		return "Routes: none"
+	}
+
+	keys := make([]string, 0, len(m.snapshot.Routes))
+	for key := range m.snapshot.Routes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+" -> "+m.snapshot.Routes[key])
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (m Model) commandRailView() string {

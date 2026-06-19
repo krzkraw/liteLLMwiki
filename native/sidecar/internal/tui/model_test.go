@@ -73,6 +73,54 @@ func TestModelRendersRichVisualShell(t *testing.T) {
 	}
 }
 
+func TestModelRendersPersistentMissionControlStrip(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "runtime ready")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+		Catalog:           testCatalog(t),
+	})
+	model.width = 180
+	model.height = 48
+
+	dashboardView := model.View()
+	for _, expected := range []string{
+		"Mission control / Live state",
+		"Active      ◆ Dashboard / status.get + /sidecar/v1/status",
+		"Runtime     ● running     [##########] serving",
+		"Runners     ● 1/2 active  [#####-----] 1/2 running",
+		"Routes      ● 2 wired     embedding -> embed-qwen, main -> main-litert",
+		"Models      ● 4/4 present [##########] required ready",
+		"API        WebSocket api.request + shared controllers",
+	} {
+		if !strings.Contains(dashboardView, expected) {
+			t.Fatalf("dashboard mission control missing %q:\n%s", expected, dashboardView)
+		}
+	}
+
+	model.setActiveTab("runner:main-litert")
+	runnerView := model.View()
+	for _, expected := range []string{
+		"Mission control / Live state",
+		"Active      ● Runner main-litert / /v1/chat/completions -> http://127.0.0.1:9381",
+		"API        WebSocket api.request + shared controllers",
+	} {
+		if !strings.Contains(runnerView, expected) {
+			t.Fatalf("runner mission control missing %q:\n%s", expected, runnerView)
+		}
+	}
+
+	model.setActiveTab("settings")
+	settingsView := model.View()
+	if !strings.Contains(settingsView, "Active      ● Settings / RuntimeController + RunnerController") {
+		t.Fatalf("settings mission control missing active settings context:\n%s", settingsView)
+	}
+}
+
 func TestModelRendersStatusRichTabBar(t *testing.T) {
 	t.Parallel()
 

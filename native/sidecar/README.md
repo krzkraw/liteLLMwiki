@@ -24,8 +24,11 @@ and WebSocket `api.request` bridge. It opens with a colorized status header,
 rounded panels, runtime/runner/route/log counters, and a status-rich tab bar.
 The tab bar keeps number-key navigation stable while showing dashboard runner
 counts, per-runner state glyphs, model readiness, log count, and Settings API
-readiness. On wide terminals the dashboard pairs panels into two-column rows
-for faster scanning.
+readiness. Every page also includes a mission-control strip that keeps the
+active view, runtime state, runner readiness, route authority, model readiness,
+and shared WebSocket/controller API path visible before page-specific panels.
+On wide terminals the dashboard pairs panels into two-column rows for faster
+scanning.
 Every tab ends with a context command rail that keeps global navigation,
 tab-specific actions, and the matching controller or WebSocket/API path visible
 without switching pages.

@@ -1062,19 +1062,44 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		details = append(details, formatKV("Detail", runner.Detail))
 	}
 
+	health := renderPanel("Runner "+runner.ID+" / Runner health", m.runnerHealthLines(runner), "82")
+	signalBoard := renderPanel("Runner signal board / Readiness", m.runnerSignalLines(runner), "82")
+	endpointMap := renderPanel("Endpoint map", m.runnerEndpointLines(runner), "45")
+	operationFlow := renderPanel("Operation flow", runnerOperationLines(runner), "214")
+	controlSurface := renderPanel("Control surface", m.runnerControlLines(runner), "39")
+	runtimeCommand := renderPanel("Runtime command", []string{commandLine(runner.Command)}, "214")
+	capabilities := renderPanel("Capabilities matrix", runnerCapabilityLines(runner), "205")
+	editor := m.runnerEditorView(runner)
+	settingsMatrix := renderPanel("Settings matrix", runnerSettingsMatrixLines(runner), "39")
+	settingsPanel := renderPanel("Settings", settings, "45")
+	detailsPanel := renderPanel("Details", details, "214")
+	logsPanel := renderPanel("Recent runner logs", m.runnerLogLines(runner.ID, 6), "244")
+
+	if m.width >= 150 {
+		return joinPanels(
+			joinPanelRow(health, signalBoard),
+			joinPanelRow(endpointMap, operationFlow),
+			joinPanelRow(controlSurface, runtimeCommand),
+			capabilities,
+			editor,
+			joinPanelRow(settingsMatrix, settingsPanel),
+			joinPanelRow(detailsPanel, logsPanel),
+		)
+	}
+
 	return joinPanels(
-		renderPanel("Runner "+runner.ID+" / Runner health", m.runnerHealthLines(runner), "82"),
-		renderPanel("Runner signal board / Readiness", m.runnerSignalLines(runner), "82"),
-		renderPanel("Endpoint map", m.runnerEndpointLines(runner), "45"),
-		renderPanel("Operation flow", runnerOperationLines(runner), "214"),
-		renderPanel("Control surface", m.runnerControlLines(runner), "39"),
-		renderPanel("Runtime command", []string{commandLine(runner.Command)}, "214"),
-		renderPanel("Capabilities matrix", runnerCapabilityLines(runner), "205"),
-		m.runnerEditorView(runner),
-		renderPanel("Settings matrix", runnerSettingsMatrixLines(runner), "39"),
-		renderPanel("Settings", settings, "45"),
-		renderPanel("Details", details, "214"),
-		renderPanel("Recent runner logs", m.runnerLogLines(runner.ID, 6), "244"),
+		health,
+		signalBoard,
+		endpointMap,
+		operationFlow,
+		controlSurface,
+		runtimeCommand,
+		capabilities,
+		editor,
+		settingsMatrix,
+		settingsPanel,
+		detailsPanel,
+		logsPanel,
 	)
 }
 

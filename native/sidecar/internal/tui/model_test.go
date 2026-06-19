@@ -512,6 +512,37 @@ func TestRunnerTabRendersSignalBoardWithRunnerReadiness(t *testing.T) {
 	}
 }
 
+func TestRunnerTabUsesWideTwoColumnLayout(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "loaded model")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+	})
+	model.width = 180
+	model.height = 48
+	model.setActiveTab("runner:main-litert")
+	view := model.View()
+
+	for _, tc := range []struct {
+		left  string
+		right string
+	}{
+		{left: "Runner main-litert / Runner health", right: "Runner signal board / Readiness"},
+		{left: "Endpoint map", right: "Operation flow"},
+		{left: "Control surface", right: "Runtime command"},
+		{left: "Settings matrix", right: "Settings"},
+		{left: "Details", right: "Recent runner logs"},
+	} {
+		if !viewLineContainsAll(view, tc.left, tc.right) {
+			t.Fatalf("wide runner tab did not place %q beside %q:\n%s", tc.left, tc.right, view)
+		}
+	}
+}
+
 func TestRunnerTabShowsOperationFlowAndSharedMethodParity(t *testing.T) {
 	t.Parallel()
 

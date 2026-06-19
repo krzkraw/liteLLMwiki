@@ -1,3 +1,5 @@
+import { webSocketMessageToText } from "./webSocketMessage.mjs";
+
 const sidecarStatus = {
   state: "available",
   detail: "Mock sidecar ready.",
@@ -93,8 +95,8 @@ function sendApiResponse(socket, id, status, headers, body) {
   sendWebSocketJson(socket, { type: "api.response.end", id });
 }
 
-function handleWebSocketMessage(socket, message) {
-  const parsed = JSON.parse(String(message));
+async function handleWebSocketMessage(socket, message) {
+  const parsed = JSON.parse(await webSocketMessageToText(message));
 
   if (parsed.type === "status.get") {
     sendWebSocketJson(socket, {
@@ -211,7 +213,15 @@ const server = Bun.serve({
   },
   websocket: {
     message(socket, message) {
-      handleWebSocketMessage(socket, message);
+      handleWebSocketMessage(socket, message).catch((error) => {
+        sendWebSocketJson(socket, {
+          type: "error",
+          message:
+            error instanceof Error
+              ? `Mock WebSocket message handling failed: ${error.message}`
+              : "Mock WebSocket message handling failed.",
+        });
+      });
     },
   },
 });

@@ -3,6 +3,7 @@ import { once } from "events";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "bun:test";
+import { webSocketMessageToText } from "./webSocketMessage.mjs";
 
 interface TestWebSocket {
   close(): void;
@@ -45,21 +46,6 @@ function waitForServerReady(child: ChildProcessWithoutNullStreams) {
       reject(new Error(`Mock server exited early with code ${code}. Output: ${output}`));
     });
   });
-}
-
-function websocketDataToText(data: unknown): string {
-  if (typeof data === "string") {
-    return data;
-  }
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("utf8");
-  }
-  if (ArrayBuffer.isView(data)) {
-    return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString(
-      "utf8",
-    );
-  }
-  return String(data);
 }
 
 function openTestWebSocket(url: string) {
@@ -130,9 +116,9 @@ function openTestWebSocket(url: string) {
       clearTimeout(openTimeout);
       resolve(testWebSocket);
     };
-    socket.onmessage = (event) => {
+    socket.onmessage = async (event) => {
       try {
-        deliverMessage(JSON.parse(websocketDataToText(event.data)));
+        deliverMessage(JSON.parse(await webSocketMessageToText(event.data)));
       } catch (error) {
         rejectRead(error instanceof Error ? error : new Error(String(error)));
       }
@@ -175,7 +161,8 @@ describe("mock OpenAI-compatible server", () => {
       );
       socket.writeText(JSON.stringify({ type: "status.get" }));
 
-      await expect(socket.readJson()).resolves.toMatchObject({
+      const message = await socket.readJson();
+      expect(message).toMatchObject({
         type: "status",
         status: {
           state: "available",

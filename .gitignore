@@ -6,6 +6,9 @@ dist/
 coverage/
 .vite/
 public/vendor/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
 
 # Local model binaries are hosted separately, never in this repo.
 models/*

@@ -44,8 +44,13 @@ describe("Bun and Rspack toolchain contract", () => {
   });
 
   it("uses a Bun lockfile instead of the old package-manager lockfile", () => {
+    const gitignore = readRootFile(".gitignore");
+
     expect(existsSync(join(repoRoot, "bun.lock"))).toBe(true);
     expect(existsSync(join(repoRoot, oldLockfile))).toBe(false);
+    expect(gitignore).toContain("package-lock.json");
+    expect(gitignore).toContain("pnpm-lock.yaml");
+    expect(gitignore).toContain("yarn.lock");
   });
 
   it("documents Bun as the only JavaScript command runner", () => {

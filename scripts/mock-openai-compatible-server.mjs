@@ -21,6 +21,35 @@ const sidecarStatus = {
   },
 };
 
+const sidecarModels = {
+  models: [
+    {
+      id: "gemma4-gguf",
+      repo: "unsloth/gemma-4-E2B-it-qat-GGUF",
+      filename: "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+      targetPath: "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+      runtime: "llamacpp",
+      role: "main",
+      required: true,
+      state: "present",
+      bytesDownloaded: 1024,
+      sizeBytes: 1024,
+    },
+    {
+      id: "qwen3-embedding-gguf",
+      repo: "Qwen/Qwen3-Embedding-0.6B-GGUF",
+      filename: "Qwen3-Embedding-0.6B-Q8_0.gguf",
+      targetPath: "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+      runtime: "llamacpp",
+      role: "embedding",
+      required: true,
+      state: "present",
+      bytesDownloaded: 2048,
+      sizeBytes: 2048,
+    },
+  ],
+};
+
 function sendCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
@@ -185,6 +214,17 @@ function handleWebSocketMessage(socket, message) {
       return;
     }
 
+    if (parsed.method === "GET" && parsed.path === "/sidecar/v1/models") {
+      sendApiResponse(
+        socket,
+        id,
+        200,
+        { "content-type": "application/json" },
+        JSON.stringify(sidecarModels),
+      );
+      return;
+    }
+
     sendApiResponse(
       socket,
       id,
@@ -206,6 +246,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && req.url === "/sidecar/v1/status") {
     sendJson(res, sidecarStatus);
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/sidecar/v1/models") {
+    sendJson(res, sidecarModels);
     return;
   }
 

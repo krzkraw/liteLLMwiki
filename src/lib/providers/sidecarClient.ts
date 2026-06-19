@@ -15,6 +15,26 @@ export interface SidecarStatus {
   detail?: string;
 }
 
+export interface SidecarModelEntry {
+  id: string;
+  repo: string;
+  filename: string;
+  targetPath: string;
+  runtime: string;
+  role: string;
+  required: boolean;
+  state: string;
+  bytesDownloaded?: number;
+  sizeBytes?: number;
+  lastError?: string;
+}
+
+export interface SidecarModelCatalogState {
+  state: "idle" | "checking" | "ready" | "blocked";
+  models: SidecarModelEntry[];
+  detail: string;
+}
+
 export interface SidecarCapabilities {
   multimodal: MultimodalCapability;
 }

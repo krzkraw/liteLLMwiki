@@ -77,6 +77,8 @@ import {
 import {
   getDefaultSidecarCapabilities,
   type MultimodalCapability,
+  type SidecarModelCatalogState,
+  type SidecarModelEntry,
   type SidecarStatus,
 } from "./lib/providers/sidecarClient";
 import { normalizeExecutableEndpoint } from "./lib/providers/endpoint";
@@ -107,6 +109,11 @@ const executableEndpointDefault = "http://127.0.0.1:9379/v1";
 const executableModelId = "gemma4-e2b";
 const initialChatSessionId = "chat-1";
 const initialModelSourceKey = createModelSourceKey(defaultModelPath, null);
+const initialSidecarModelCatalog: SidecarModelCatalogState = {
+  state: "idle",
+  models: [],
+  detail: "Connect sidecar to inspect model catalog.",
+};
 const assistantWelcome: ChatMessage = {
   id: "assistant-welcome",
   role: "assistant",
@@ -566,6 +573,55 @@ export function createSidecarStatusPanel(status: SidecarStatus): StatusPanel {
   };
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function stringField(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function optionalNumberField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeSidecarModelEntry(value: unknown): SidecarModelEntry | null {
+  if (!isObjectRecord(value)) {
+    return null;
+  }
+
+  const id = stringField(value.id);
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    repo: stringField(value.repo),
+    filename: stringField(value.filename),
+    targetPath: stringField(value.targetPath),
+    runtime: stringField(value.runtime, "unknown"),
+    role: stringField(value.role, "unknown"),
+    required: Boolean(value.required),
+    state: stringField(value.state, "unknown"),
+    bytesDownloaded: optionalNumberField(value.bytesDownloaded),
+    sizeBytes: optionalNumberField(value.sizeBytes),
+    lastError: stringField(value.lastError),
+  };
+}
+
+export function normalizeSidecarModelCatalogResponse(
+  body: unknown,
+): SidecarModelEntry[] {
+  if (!isObjectRecord(body) || !Array.isArray(body.models)) {
+    return [];
+  }
+
+  return body.models
+    .map((entry) => normalizeSidecarModelEntry(entry))
+    .filter((entry): entry is SidecarModelEntry => entry !== null);
+}
+
 export function resolveExecutableBackend(
   selectedBackend: NativeBackend,
   statuses: BackendStatus[],
@@ -682,6 +738,7 @@ export default function App() {
     }),
   );
   const executableLoadRequestIdRef = useRef(0);
+  const sidecarCatalogRequestIdRef = useRef(0);
   const [providerKind, setProviderKind] = useState<AppProviderKind>("web");
   const [webGpu, setWebGpu] = useState<WebGpuStatus>({
     state: "checking",
@@ -727,6 +784,8 @@ export default function App() {
     detail: `Endpoint ${executableEndpointDefault} is configured.`,
   });
   const [sidecarControlConnected, setSidecarControlConnected] = useState(false);
+  const [sidecarModelCatalog, setSidecarModelCatalog] =
+    useState<SidecarModelCatalogState>(initialSidecarModelCatalog);
   const [sidecarLogs, setSidecarLogs] = useState<SidecarLogEntry[]>([]);
   const [pendingAttachments, setPendingAttachments] = useState<
     ReturnType<typeof createChatAttachments>
@@ -925,6 +984,15 @@ export default function App() {
     setSidecarControlConnected(false);
   }
 
+  function resetSidecarModelCatalog(detail = initialSidecarModelCatalog.detail) {
+    sidecarCatalogRequestIdRef.current += 1;
+    setSidecarModelCatalog({
+      state: "idle",
+      models: [],
+      detail,
+    });
+  }
+
   function invalidateModelSource(nextModelPath: string, nextLocalModelFile: File | null) {
     modelSourceKeyRef.current = createModelSourceKey(nextModelPath, nextLocalModelFile);
     modelProbeRequestIdRef.current += 1;
@@ -967,6 +1035,7 @@ export default function App() {
     if (nextProviderKind !== "executable") {
       setPendingAttachments([]);
       closeSidecarControl();
+      resetSidecarModelCatalog();
     }
   }
 
@@ -983,6 +1052,9 @@ export default function App() {
       capabilities: getDefaultSidecarCapabilities(),
       detail: `Endpoint ${endpoint || executableEndpointDefault} is configured.`,
     });
+    resetSidecarModelCatalog(
+      `Endpoint ${endpoint || executableEndpointDefault} is configured.`,
+    );
     setPendingAttachments([]);
     closeSidecarControl();
     disposeExecutableProvider();
@@ -1106,6 +1178,55 @@ export default function App() {
     invalidateLoadedProvidersForChatOptions();
   }
 
+  async function refreshSidecarModelCatalog(client: SidecarControlClient) {
+    const requestId = sidecarCatalogRequestIdRef.current + 1;
+    sidecarCatalogRequestIdRef.current = requestId;
+    setSidecarModelCatalog((current) => ({
+      state: "checking",
+      models: current.models,
+      detail: "Reading sidecar model catalog.",
+    }));
+
+    try {
+      const response = await client.request({
+        method: "GET",
+        path: "/sidecar/v1/models",
+      });
+
+      if (response.status < 200 || response.status >= 300) {
+        const message = (await response.text()).trim();
+        throw new Error(
+          message || `Model catalog request failed with ${response.status}.`,
+        );
+      }
+
+      const models = normalizeSidecarModelCatalogResponse(await response.json());
+
+      if (requestId !== sidecarCatalogRequestIdRef.current) {
+        return;
+      }
+
+      setSidecarModelCatalog({
+        state: "ready",
+        models,
+        detail:
+          models.length === 1
+            ? "1 model detected."
+            : `${models.length} models detected.`,
+      });
+    } catch (error) {
+      if (requestId !== sidecarCatalogRequestIdRef.current) {
+        return;
+      }
+
+      setSidecarModelCatalog({
+        state: "blocked",
+        models: [],
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   function openSidecarControl(
     endpoint: string,
     options: {
@@ -1121,6 +1242,15 @@ export default function App() {
       endpoint,
       onOpen: () => {
         setSidecarControlConnected(true);
+        setSidecarModelCatalog((current) =>
+          current.state === "ready"
+            ? current
+            : {
+                state: "checking",
+                models: current.models,
+                detail: "Opening sidecar model catalog.",
+              },
+        );
       },
       onClose: () => {
         setSidecarControlConnected(false);
@@ -1135,6 +1265,9 @@ export default function App() {
       onEvent: (event) => {
         if (event.type === "status") {
           applySidecarStatus(event.status);
+          if (sidecarControlClientRef.current) {
+            void refreshSidecarModelCatalog(sidecarControlClientRef.current);
+          }
           options.onStatus?.(event.status);
           return;
         }
@@ -1588,6 +1721,10 @@ export default function App() {
         return;
       }
 
+      if (sidecarControlClientRef.current) {
+        await refreshSidecarModelCatalog(sidecarControlClientRef.current);
+      }
+
       disposeExecutableProvider();
       const provider = createExecutableProvider({
         transport: sidecarControlClientRef.current ?? undefined,
@@ -1627,6 +1764,11 @@ export default function App() {
           backends: getDefaultBackendStatuses(),
           capabilities: getDefaultSidecarCapabilities(),
           detail: error instanceof Error ? error.message : String(error),
+        });
+        setSidecarModelCatalog({
+          state: "blocked",
+          models: [],
+          detail: "Model catalog is not reachable.",
         });
         setExecutableLoaded(false);
         setPendingAttachments([]);
@@ -1741,6 +1883,7 @@ export default function App() {
           executableStatus={executableStatus}
           runtimeStatus={sidecarStatus.runtime ?? null}
           sidecarControlConnected={sidecarControlConnected}
+          sidecarModelCatalog={sidecarModelCatalog}
           sidecarLogs={sidecarLogs}
           webProviderOptions={webProviderOptions}
           executableProviderOptions={executableProviderOptions}

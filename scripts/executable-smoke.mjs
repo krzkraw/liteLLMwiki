@@ -88,6 +88,8 @@ try {
   await page.getByTestId("executable-endpoint-input").fill(endpoint);
   await page.getByTestId("connect-sidecar-button").click();
   await page.getByText("Sidecar connected").waitFor({ timeout: 5000 });
+  await page.getByText("gemma4-gguf").waitFor({ timeout: 5000 });
+  await page.getByText("qwen3-embedding-gguf").waitFor({ timeout: 5000 });
 
   const connectDisabled = await page.getByTestId("connect-sidecar-button").isDisabled();
   const setupText = await page.locator(".setup-panel").textContent();
@@ -133,11 +135,22 @@ try {
     setupText.includes("CUDA probe-only");
   const unexpectedDisabledBackendLabels =
     setupText?.includes("GPU unavailable") || setupText?.includes("NPU unknown");
+  const expectedSidecarDashboard =
+    setupText?.includes("/v1/chat/completions") &&
+    setupText.includes("/v1/embeddings") &&
+    setupText.includes("/v1/rerank") &&
+    setupText.includes("/sidecar/v1/models") &&
+    setupText.includes("/sidecar/v1/ws") &&
+    setupText.includes("gemma4-gguf") &&
+    setupText.includes("qwen3-embedding-gguf") &&
+    setupText.includes("Runtime host") &&
+    setupText.includes("Model file");
 
   if (
     !setupText?.includes("Sidecar connected") ||
     !expectedBackendLabels ||
     unexpectedDisabledBackendLabels ||
+    !expectedSidecarDashboard ||
     sidecarStatus.capabilities?.multimodal?.endpoint !== "/sidecar/v1/multimodal" ||
     sidecarStatus.capabilities?.multimodal?.state !== "available" ||
     !connectDisabled ||

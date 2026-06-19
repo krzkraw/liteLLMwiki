@@ -48,6 +48,11 @@ const defaultProps: ProviderSetupProps = {
     label: "Sidecar not connected",
     detail: "Endpoint configured.",
   },
+  sidecarModelCatalog: {
+    state: "idle",
+    models: [],
+    detail: "Connect sidecar to inspect model catalog.",
+  },
   runtimeStatus: null,
   suggestedModelUrl: "https://example.com",
   onProviderKindChange: () => undefined,
@@ -195,6 +200,86 @@ describe("ProviderSetup", () => {
     expect(getByTestId("runtime-log-output").textContent).toContain(
       "runtime stdout runtime ready",
     );
+  });
+
+  it("renders executable models, endpoints, and compact config", async () => {
+    await renderProviderSetup({
+      sidecarControlConnected: true,
+      modelLoaded: true,
+      sidecarModelCatalog: {
+        state: "ready",
+        detail: "4 models detected.",
+        models: [
+          {
+            id: "gemma4-gguf",
+            repo: "unsloth/gemma-4-E2B-it-qat-GGUF",
+            filename: "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+            targetPath: "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+            runtime: "llamacpp",
+            role: "main",
+            required: true,
+            state: "present",
+            bytesDownloaded: 1024,
+            sizeBytes: 1024,
+          },
+          {
+            id: "qwen3-embedding-gguf",
+            repo: "Qwen/Qwen3-Embedding-0.6B-GGUF",
+            filename: "Qwen3-Embedding-0.6B-Q8_0.gguf",
+            targetPath: "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+            runtime: "llamacpp",
+            role: "embedding",
+            required: true,
+            state: "present",
+            bytesDownloaded: 2048,
+            sizeBytes: 2048,
+          },
+        ],
+      },
+      runtimeStatus: {
+        state: "running",
+        executable: "/opt/homebrew/bin/llama-server",
+        version: "9700",
+        modelId: "gemma4-e2b",
+        modelFile: "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+        upstream: "http://127.0.0.1:9381",
+        mode: "release",
+      },
+      executableProviderOptions: {
+        endpoint: "http://127.0.0.1:9379/v1",
+        modelId: "gemma4-e2b",
+        backend: "cpu",
+        runtimeHost: "127.0.0.1",
+        runtimePort: 9381,
+        modelFile: "models/gemma-4-E2B-it.litertlm",
+        maxTokens: 512,
+      },
+    });
+
+    const endpoints = getByTestId("sidecar-endpoints-panel");
+    const models = getByTestId("sidecar-models-panel");
+    const config = getByTestId("sidecar-config-panel");
+
+    expect(endpoints.tagName).toBe("DETAILS");
+    expect(endpoints.textContent).toContain("/v1/chat/completions");
+    expect(endpoints.textContent).toContain("/v1/embeddings");
+    expect(endpoints.textContent).toContain("/sidecar/v1/models");
+    expect(endpoints.textContent).toContain("/sidecar/v1/ws");
+
+    expect(models.tagName).toBe("DETAILS");
+    expect(models.textContent).toContain("gemma4-gguf");
+    expect(models.textContent).toContain("llamacpp");
+    expect(models.textContent).toContain("main");
+    expect(models.textContent).toContain("present");
+    expect(models.textContent).toContain("Qwen3-Embedding-0.6B-Q8_0.gguf");
+
+    expect(config.tagName).toBe("DETAILS");
+    expect(config.textContent).toContain("Endpoint");
+    expect(config.textContent).toContain("http://127.0.0.1:9379/v1");
+    expect(config.textContent).toContain("Runtime host");
+    expect(config.textContent).toContain("127.0.0.1");
+    expect(config.textContent).toContain("Model file");
+    expect(config.textContent).toContain("models/gemma-4-E2B-it.litertlm");
   });
 
   it("renders collapsible advanced options for the selected provider", async () => {

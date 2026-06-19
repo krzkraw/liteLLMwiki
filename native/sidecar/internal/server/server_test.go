@@ -347,7 +347,7 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 			"role": "embedding",
 			"backend": "cpu",
 			"executable": "/opt/llama-server",
-			"modelPath": "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf",
+			"modelPath": "models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf",
 			"modelId": "qwen3-embedding",
 			"host": "127.0.0.1",
 			"port": 9492,
@@ -490,7 +490,7 @@ func TestWebSocketAPIRequestControlsRunner(t *testing.T) {
 		"runtime": "llamacpp",
 		"role": "reranking",
 		"backend": "cpu",
-		"modelPath": "models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf",
+		"modelPath": "models/llamacpp/reranking/Qwen3-Reranker-0.6B-Q4_K_M.gguf",
 		"modelId": "qwen3-reranker-q4km",
 		"host": "127.0.0.1",
 		"port": 9493,
@@ -681,7 +681,7 @@ func TestWebSocketRuntimeControlForwardsConfig(t *testing.T) {
 			"runtimeExe":       "/opt/litert-lm",
 			"runtimeHost":      "127.0.0.1",
 			"runtimePort":      9481,
-			"modelFile":        "models/litert/gemma-4-E2B-it.litertlm",
+			"modelFile":        "models/litert/main/gemma-4-E2B-it.litertlm",
 			"modelId":          "gemma4-e2b",
 			"huggingfaceToken": "hf_secret",
 			"importModel":      false,
@@ -703,7 +703,7 @@ func TestWebSocketRuntimeControlForwardsConfig(t *testing.T) {
 	if got.RuntimeHost != "127.0.0.1" || got.RuntimePort != 9481 {
 		t.Fatalf("runtime address = %s:%d", got.RuntimeHost, got.RuntimePort)
 	}
-	if got.ModelFile != "models/litert/gemma-4-E2B-it.litertlm" {
+	if got.ModelFile != "models/litert/main/gemma-4-E2B-it.litertlm" {
 		t.Fatalf("model file = %q", got.ModelFile)
 	}
 	if got.ModelID != "gemma4-e2b" {

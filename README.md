@@ -127,13 +127,13 @@ The browser provider expects the web model under the repository-local model
 directory:
 
 ```text
-models/litert/gemma-4-E2B-it-web.litertlm
+models/litert/browser/gemma-4-E2B-it-web.litertlm
 ```
 
 The default URL inside the app is:
 
 ```text
-/models/litert/gemma-4-E2B-it-web.litertlm
+/models/litert/browser/gemma-4-E2B-it-web.litertlm
 ```
 
 The Rspack dev and preview servers serve `/models/*` from `models/`, so the large
@@ -164,15 +164,15 @@ and llama.cpp reranking artifacts. Place selected external files at the paths
 expected by the sidecar, for example:
 
 ```text
-models/litert/gemma-4-E2B-it.litertlm
-models/litert/gemma-4-E2B-it-web.litertlm
-models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite
-models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
-models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf
-models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf
-models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf
-models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf
-models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf
+models/litert/main/gemma-4-E2B-it.litertlm
+models/litert/browser/gemma-4-E2B-it-web.litertlm
+models/litert/embedding/embeddinggemma-300M_seq2048_mixed-precision.tflite
+models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
+models/llamacpp/main/Qwen3.5-2B-IQ4_NL.gguf
+models/llamacpp/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf
+models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf
+models/llamacpp/embedding/Qwen3-Embedding-0.6B-iq4_nl.gguf
+models/llamacpp/reranking/Qwen3-Reranker-0.6B-Q4_K_M.gguf
 ```
 
 Model binaries, partial downloads, and split model chunks are ignored by Git.
@@ -206,7 +206,7 @@ The sidecar opens an interactive terminal dashboard by default. Use
 ```
 
 The sidecar searches for `litert-lm`, imports
-`models/litert/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
+`models/litert/main/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
 `litert-lm serve --host 127.0.0.1 --port 9381`.
 The TUI Launch Wizard creates additional runners from downloaded catalog models.
 It first toggles `litert` versus `llamacpp`; when `llamacpp` is selected it
@@ -294,7 +294,7 @@ bun run smoke:executable
 ```
 
 `smoke` covers the UI without requiring the large web model. `smoke:model`
-requires `models/litert/gemma-4-E2B-it-web.litertlm` and checks that `/models/*` serves
+requires `models/litert/browser/gemma-4-E2B-it-web.litertlm` and checks that `/models/*` serves
 the real binary with `application/octet-stream`.
 
 To verify the production preview server catches the same route:

@@ -20,7 +20,7 @@ import (
 const (
 	DefaultExecutableName = "litert-lm"
 	DefaultModelFileName  = "gemma-4-E2B-it.litertlm"
-	DefaultModelDirectory = "litert"
+	DefaultModelDirectory = "litert/main"
 	DefaultModelID        = "gemma4-e2b"
 	DefaultRuntimeHost    = "127.0.0.1"
 	DefaultRuntimePort    = 9381

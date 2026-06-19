@@ -55,7 +55,7 @@ try {
   );
   const modelHeadResponse = requireModel
     ? await page.request.fetch(
-        new URL("/models/litert/gemma-4-E2B-it-web.litertlm", targetUrl).toString(),
+        new URL("/models/litert/browser/gemma-4-E2B-it-web.litertlm", targetUrl).toString(),
         { method: "HEAD" },
       )
     : null;

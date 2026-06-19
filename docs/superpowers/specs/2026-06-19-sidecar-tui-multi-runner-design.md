@@ -150,12 +150,17 @@ global routing. The supervisor decides which runner receives each role route.
 
 ### Model Catalog And Downloader
 
-Stores catalog entries for the four required artifacts:
+Stores catalog entries for the required artifacts:
 
-- `models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf`
-- `models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf`
-- `models/litert/gemma-4-E2B-it.litertlm`
-- `models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite`
+- `models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf`
+- `models/llamacpp/main/Qwen3.5-2B-IQ4_NL.gguf`
+- `models/llamacpp/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf`
+- `models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf`
+- `models/llamacpp/embedding/Qwen3-Embedding-0.6B-iq4_nl.gguf`
+- `models/llamacpp/reranking/Qwen3-Reranker-0.6B-Q4_K_M.gguf`
+- `models/litert/main/gemma-4-E2B-it.litertlm`
+- `models/litert/browser/gemma-4-E2B-it-web.litertlm`
+- `models/litert/embedding/embeddinggemma-300M_seq2048_mixed-precision.tflite`
 
 Downloads use environment-only auth, resumable partial files, atomic rename,
 progress state, and redaction.

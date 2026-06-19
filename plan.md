@@ -49,8 +49,8 @@ under `models/` or a sidecar-managed ignored model cache:
 
 - `unsloth/gemma-4-E2B-it-qat-GGUF`
   - `gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf`
-- `Qwen/Qwen3-Embedding-0.6B-GGUF`
-  - `Qwen3-Embedding-0.6B-Q8_0.gguf`
+- `Mungert/Qwen3-Embedding-0.6B-GGUF`
+  - `Qwen3-Embedding-0.6B-q8_0.gguf`
 - `litert-community/gemma-4-E2B-it-litert-lm`
   - `gemma-4-E2B-it.litertlm`
 - `litert-community/embeddinggemma-300m`
@@ -96,22 +96,22 @@ download_hf() {
 download_hf \
   "unsloth/gemma-4-E2B-it-qat-GGUF" \
   "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" \
-  "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
+  "models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
 
 download_hf \
-  "Qwen/Qwen3-Embedding-0.6B-GGUF" \
-  "Qwen3-Embedding-0.6B-Q8_0.gguf" \
-  "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf"
+  "Mungert/Qwen3-Embedding-0.6B-GGUF" \
+  "Qwen3-Embedding-0.6B-q8_0.gguf" \
+  "models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf"
 
 download_hf \
   "litert-community/gemma-4-E2B-it-litert-lm" \
   "gemma-4-E2B-it.litertlm" \
-  "models/litert/gemma-4-E2B-it.litertlm"
+  "models/litert/main/gemma-4-E2B-it.litertlm"
 
 download_hf \
   "litert-community/embeddinggemma-300m" \
   "embeddinggemma-300M_seq2048_mixed-precision.tflite" \
-  "models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite"
+  "models/litert/embedding/embeddinggemma-300M_seq2048_mixed-precision.tflite"
 ```
 
 Do not commit `models/`, `.part` files, downloaded runtimes, logs, or token
@@ -180,7 +180,7 @@ runner logs.
   - Start a real llama.cpp main runner against
     `gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf`.
   - Start a real llama.cpp embedding runner against
-    `Qwen3-Embedding-0.6B-Q8_0.gguf` and call `/v1/embeddings`.
+    `Qwen3-Embedding-0.6B-q8_0.gguf` and call `/v1/embeddings`.
   - Attempt the requested reranking setup and document whether the embedding
     artifact can serve `/v1/rerank`; use a proper reranker fallback only after
     the requested artifact fails validation.
@@ -211,7 +211,7 @@ Critical requirements:
   llama.cpp main runner path.
 - Download the exact requested models into ignored local model storage:
   - unsloth/gemma-4-E2B-it-qat-GGUF: gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
-  - Qwen/Qwen3-Embedding-0.6B-GGUF: Qwen3-Embedding-0.6B-Q8_0.gguf
+  - Mungert/Qwen3-Embedding-0.6B-GGUF: Qwen3-Embedding-0.6B-q8_0.gguf
   - litert-community/gemma-4-E2B-it-litert-lm: gemma-4-E2B-it.litertlm
   - litert-community/embeddinggemma-300m:
     embeddinggemma-300M_seq2048_mixed-precision.tflite

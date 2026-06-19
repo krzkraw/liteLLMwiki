@@ -117,23 +117,23 @@ describe("interactive installer scripts", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);
 
-      expect(contents).toContain("models/litert/gemma-4-E2B-it-web.litertlm");
-      expect(contents).toContain("models/litert/gemma-4-E2B-it.litertlm");
+      expect(contents).toContain("models/litert/browser/gemma-4-E2B-it-web.litertlm");
+      expect(contents).toContain("models/litert/main/gemma-4-E2B-it.litertlm");
       expect(contents).toContain(
-        "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+        "models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
       );
       expect(contents).toContain(
-        "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf",
+        "models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf",
       );
       expect(contents).toContain(
-        "models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf",
+        "models/llamacpp/embedding/Qwen3-Embedding-0.6B-iq4_nl.gguf",
       );
       expect(contents).toContain(
-        "models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf",
+        "models/llamacpp/reranking/Qwen3-Reranker-0.6B-Q4_K_M.gguf",
       );
-      expect(contents).toContain("models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf");
+      expect(contents).toContain("models/llamacpp/main/Qwen3.5-2B-IQ4_NL.gguf");
       expect(contents).toContain(
-        "models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf",
+        "models/llamacpp/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf",
       );
       expect(contents).toContain("Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp");
       expect(contents).toContain("Mungert/Qwen3-Embedding-0.6B-GGUF");

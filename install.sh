@@ -846,15 +846,15 @@ Command: curl -L --fail -o '$relative_path' '$download_url'"
 
 model_download_specs() {
   cat <<'MODELS'
-gemma4-litert|1|Gemma 4 E2B native LiteRT model|models/litert/gemma-4-E2B-it.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm|true
-gemma4-web-litert|1|Gemma 4 E2B web model|models/litert/gemma-4-E2B-it-web.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm|true
-embeddinggemma-litert|1|EmbeddingGemma LiteRT embedding model|models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite|https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite|true
-gemma4-gguf|0|Gemma 4 E2B llama.cpp GGUF model|models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|false
-qwen35-2b-gguf|0|Qwen3.5 2B llama.cpp GGUF model|models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf|https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf|false
-qwen35-08b-gguf|0|Qwen3.5 0.8B llama.cpp GGUF model|models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf|https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf|false
-qwen3-embedding-q8-mungert|0|Qwen3 embedding Q8 llama.cpp GGUF model|models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf|https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q8_0.gguf|false
-qwen3-embedding-iq4-mungert|0|Qwen3 embedding IQ4 llama.cpp GGUF model|models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf|https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-iq4_nl.gguf|false
-qwen3-reranker-q4km|1|Qwen3 reranker Q4_K_M llama.cpp GGUF model|models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf|https://huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp/resolve/main/Qwen3-Reranker-0.6B-Q4_K_M.gguf|false
+gemma4-litert|1|Gemma 4 E2B native LiteRT model|models/litert/main/gemma-4-E2B-it.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm|true
+gemma4-web-litert|1|Gemma 4 E2B web model|models/litert/browser/gemma-4-E2B-it-web.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm|true
+embeddinggemma-litert|1|EmbeddingGemma LiteRT embedding model|models/litert/embedding/embeddinggemma-300M_seq2048_mixed-precision.tflite|https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite|true
+gemma4-gguf|0|Gemma 4 E2B llama.cpp GGUF model|models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|false
+qwen35-2b-gguf|0|Qwen3.5 2B llama.cpp GGUF model|models/llamacpp/main/Qwen3.5-2B-IQ4_NL.gguf|https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf|false
+qwen35-08b-gguf|0|Qwen3.5 0.8B llama.cpp GGUF model|models/llamacpp/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf|https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf|false
+qwen3-embedding-q8-mungert|0|Qwen3 embedding Q8 llama.cpp GGUF model|models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf|https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q8_0.gguf|false
+qwen3-embedding-iq4-mungert|0|Qwen3 embedding IQ4 llama.cpp GGUF model|models/llamacpp/embedding/Qwen3-Embedding-0.6B-iq4_nl.gguf|https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-iq4_nl.gguf|false
+qwen3-reranker-q4km|1|Qwen3 reranker Q4_K_M llama.cpp GGUF model|models/llamacpp/reranking/Qwen3-Reranker-0.6B-Q4_K_M.gguf|https://huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp/resolve/main/Qwen3-Reranker-0.6B-Q4_K_M.gguf|false
 MODELS
 }
 
@@ -1067,10 +1067,10 @@ run_smoke_tests() {
   run_logged "smoke UI" env SMOKE_URL="$smoke_url" bun run smoke
   run_logged "smoke executable sidecar" env SMOKE_URL="$smoke_url" bun run smoke:executable
 
-  if [[ -s "$repo_root/models/litert/gemma-4-E2B-it-web.litertlm" ]]; then
+  if [[ -s "$repo_root/models/litert/browser/gemma-4-E2B-it-web.litertlm" ]]; then
     run_logged "smoke web model" env SMOKE_URL="$smoke_url" bun run smoke:model
   else
-    add_summary "SKIP: smoke web model, models/litert/gemma-4-E2B-it-web.litertlm missing"
+    add_summary "SKIP: smoke web model, models/litert/browser/gemma-4-E2B-it-web.litertlm missing"
   fi
 
   cleanup_dev_server

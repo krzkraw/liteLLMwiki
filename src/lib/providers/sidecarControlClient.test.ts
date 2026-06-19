@@ -94,7 +94,7 @@ describe("createSidecarControlClient", () => {
       runtimeExe: "/opt/litert-lm",
       runtimeHost: "127.0.0.1",
       runtimePort: 9481,
-      modelFile: "models/litert/gemma-4-E2B-it.litertlm",
+      modelFile: "models/litert/main/gemma-4-E2B-it.litertlm",
       modelId: "gemma4-e2b",
       huggingfaceToken: "hf_secret",
       importModel: false,

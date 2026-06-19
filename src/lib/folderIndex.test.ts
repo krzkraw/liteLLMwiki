@@ -8,7 +8,7 @@ describe("folderIndex", () => {
       "ignored-directory",
     );
     expect(shouldIgnorePath("dist/app.js")).toBe("ignored-directory");
-    expect(shouldIgnorePath("models/litert/gemma-4-E2B-it-web.litertlm")).toBe(
+    expect(shouldIgnorePath("models/litert/browser/gemma-4-E2B-it-web.litertlm")).toBe(
       "model-file",
     );
     expect(shouldIgnorePath("image.png")).toBe("binary-or-media");

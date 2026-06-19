@@ -677,15 +677,15 @@ function New-ModelDownloadDefinition {
 
 function Get-ModelDownloadDefinitions {
   return @(
-    New-ModelDownloadDefinition "gemma4-litert" $true "Gemma 4 E2B native LiteRT model" "models/litert/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true
-    New-ModelDownloadDefinition "gemma4-web-litert" $true "Gemma 4 E2B web model" "models/litert/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
-    New-ModelDownloadDefinition "embeddinggemma-litert" $true "EmbeddingGemma LiteRT embedding model" "models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite" "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" $true
-    New-ModelDownloadDefinition "gemma4-gguf" $false "Gemma 4 E2B llama.cpp GGUF model" "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" $false
-    New-ModelDownloadDefinition "qwen35-2b-gguf" $false "Qwen3.5 2B llama.cpp GGUF model" "models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf" "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf" $false
-    New-ModelDownloadDefinition "qwen35-08b-gguf" $false "Qwen3.5 0.8B llama.cpp GGUF model" "models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf" "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf" $false
-    New-ModelDownloadDefinition "qwen3-embedding-q8-mungert" $false "Qwen3 embedding Q8 llama.cpp GGUF model" "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf" "https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q8_0.gguf" $false
-    New-ModelDownloadDefinition "qwen3-embedding-iq4-mungert" $false "Qwen3 embedding IQ4 llama.cpp GGUF model" "models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf" "https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-iq4_nl.gguf" $false
-    New-ModelDownloadDefinition "qwen3-reranker-q4km" $true "Qwen3 reranker Q4_K_M llama.cpp GGUF model" "models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf" "https://huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp/resolve/main/Qwen3-Reranker-0.6B-Q4_K_M.gguf" $false
+    New-ModelDownloadDefinition "gemma4-litert" $true "Gemma 4 E2B native LiteRT model" "models/litert/main/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true
+    New-ModelDownloadDefinition "gemma4-web-litert" $true "Gemma 4 E2B web model" "models/litert/browser/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
+    New-ModelDownloadDefinition "embeddinggemma-litert" $true "EmbeddingGemma LiteRT embedding model" "models/litert/embedding/embeddinggemma-300M_seq2048_mixed-precision.tflite" "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" $true
+    New-ModelDownloadDefinition "gemma4-gguf" $false "Gemma 4 E2B llama.cpp GGUF model" "models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" $false
+    New-ModelDownloadDefinition "qwen35-2b-gguf" $false "Qwen3.5 2B llama.cpp GGUF model" "models/llamacpp/main/Qwen3.5-2B-IQ4_NL.gguf" "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf" $false
+    New-ModelDownloadDefinition "qwen35-08b-gguf" $false "Qwen3.5 0.8B llama.cpp GGUF model" "models/llamacpp/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf" "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf" $false
+    New-ModelDownloadDefinition "qwen3-embedding-q8-mungert" $false "Qwen3 embedding Q8 llama.cpp GGUF model" "models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf" "https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q8_0.gguf" $false
+    New-ModelDownloadDefinition "qwen3-embedding-iq4-mungert" $false "Qwen3 embedding IQ4 llama.cpp GGUF model" "models/llamacpp/embedding/Qwen3-Embedding-0.6B-iq4_nl.gguf" "https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-iq4_nl.gguf" $false
+    New-ModelDownloadDefinition "qwen3-reranker-q4km" $true "Qwen3 reranker Q4_K_M llama.cpp GGUF model" "models/llamacpp/reranking/Qwen3-Reranker-0.6B-Q4_K_M.gguf" "https://huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp/resolve/main/Qwen3-Reranker-0.6B-Q4_K_M.gguf" $false
   )
 }
 
@@ -1001,14 +1001,14 @@ function Run-SmokeTests {
       & bun run smoke:executable
     }
 
-    $WebModel = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it-web.litertlm"
+    $WebModel = Join-Path $RepoRoot "models\litert\browser\gemma-4-E2B-it-web.litertlm"
     if ((Test-Path $WebModel) -and ((Get-Item $WebModel).Length -gt 0)) {
       Invoke-RunLogged "smoke web model" {
         $env:SMOKE_URL = $SmokeUrl
         & bun run smoke:model
       }
     } else {
-      Add-Summary "SKIP: smoke web model, models/litert/gemma-4-E2B-it-web.litertlm missing"
+      Add-Summary "SKIP: smoke web model, models/litert/browser/gemma-4-E2B-it-web.litertlm missing"
     }
   } finally {
     Stop-DevServer

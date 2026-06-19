@@ -98,14 +98,14 @@ beside source activity so noisy runtime output stays scannable.
 By default it:
 
 - searches for `litert-lm` on `PATH` or beside the sidecar binary;
-- searches for `models/litert/gemma-4-E2B-it.litertlm`;
+- searches for `models/litert/main/gemma-4-E2B-it.litertlm`;
 - imports the model as `gemma4-e2b` when it is missing from the LiteRT-LM
   registry;
 - starts `litert-lm serve --host 127.0.0.1 --port 9381`.
 
 In a fresh clone, provide selected models from the external model hosts before
 starting the sidecar. The default LiteRT main path is
-`models/litert/gemma-4-E2B-it.litertlm`; llama.cpp main, embedding, and
+`models/litert/main/gemma-4-E2B-it.litertlm`; llama.cpp main, embedding, and
 reranking models live under `models/llamacpp/`. Model binaries are ignored by
 Git.
 The sidecar also exposes a model catalog at `/sidecar/v1/models` and supports
@@ -236,7 +236,7 @@ With no output argument, they place binaries under
 `../../native/sidecar-artifacts/` so the native runner lives beside the web UI
 that controls it without colliding with this source tree. They do not copy the
 large `.litertlm` model file. Put the external native model under
-`models/litert/gemma-4-E2B-it.litertlm`, or run with `-model-file`.
+`models/litert/main/gemma-4-E2B-it.litertlm`, or run with `-model-file`.
 
 `go test ./...` runs a host-side release artifact test for the shell build
 script. It cross-compiles the four targets into a temporary directory, checks

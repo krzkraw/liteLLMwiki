@@ -8,10 +8,10 @@ describe("model file script paths", () => {
     );
 
     expect(defaultWebModelRelativePath).toBe(
-      "models/litert/gemma-4-E2B-it-web.litertlm",
+      "models/litert/browser/gemma-4-E2B-it-web.litertlm",
     );
     expect(resolveWebModelPath("/repo")).toBe(
-      resolve("/repo", "models/litert/gemma-4-E2B-it-web.litertlm"),
+      resolve("/repo", "models/litert/browser/gemma-4-E2B-it-web.litertlm"),
     );
   });
 

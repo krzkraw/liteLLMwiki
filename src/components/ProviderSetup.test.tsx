@@ -21,7 +21,7 @@ function getByTestId<T extends Element = Element>(testId: string): T {
 
 const defaultProps: ProviderSetupProps = {
   providerKind: "executable",
-  modelPath: "/models/litert/gemma-4-E2B-it-web.litertlm",
+  modelPath: "/models/litert/browser/gemma-4-E2B-it-web.litertlm",
   localModelFileName: null,
   webGpu: {
     state: "blocked",
@@ -214,7 +214,7 @@ describe("ProviderSetup", () => {
             id: "gemma4-gguf",
             repo: "unsloth/gemma-4-E2B-it-qat-GGUF",
             filename: "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
-            targetPath: "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+            targetPath: "models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
             runtime: "llamacpp",
             role: "main",
             required: true,
@@ -226,7 +226,7 @@ describe("ProviderSetup", () => {
             id: "qwen3-embedding-q8-mungert",
             repo: "Mungert/Qwen3-Embedding-0.6B-GGUF",
             filename: "Qwen3-Embedding-0.6B-q8_0.gguf",
-            targetPath: "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf",
+            targetPath: "models/llamacpp/embedding/Qwen3-Embedding-0.6B-q8_0.gguf",
             runtime: "llamacpp",
             role: "embedding",
             required: true,
@@ -241,7 +241,7 @@ describe("ProviderSetup", () => {
         executable: "/opt/homebrew/bin/llama-server",
         version: "9700",
         modelId: "gemma4-e2b",
-        modelFile: "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+        modelFile: "models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
         upstream: "http://127.0.0.1:9381",
         mode: "release",
       },
@@ -251,7 +251,7 @@ describe("ProviderSetup", () => {
         backend: "cpu",
         runtimeHost: "127.0.0.1",
         runtimePort: 9381,
-        modelFile: "models/litert/gemma-4-E2B-it.litertlm",
+        modelFile: "models/litert/main/gemma-4-E2B-it.litertlm",
         maxTokens: 512,
       },
     });
@@ -279,7 +279,7 @@ describe("ProviderSetup", () => {
     expect(config.textContent).toContain("Runtime host");
     expect(config.textContent).toContain("127.0.0.1");
     expect(config.textContent).toContain("Model file");
-    expect(config.textContent).toContain("models/litert/gemma-4-E2B-it.litertlm");
+    expect(config.textContent).toContain("models/litert/main/gemma-4-E2B-it.litertlm");
   });
 
   it("renders collapsible advanced options for the selected provider", async () => {

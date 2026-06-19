@@ -49,11 +49,11 @@ describe("createModelFileMiddleware", () => {
 
   it("serves direct HEAD requests for model files", async () => {
     const baseUrl = await startModelServer({
-      "litert/gemma-4-E2B-it-web.litertlm": "model bytes",
+      "litert/browser/gemma-4-E2B-it-web.litertlm": "model bytes",
     });
 
     const response = await fetch(
-      `${baseUrl}/models/litert/gemma-4-E2B-it-web.litertlm`,
+      `${baseUrl}/models/litert/browser/gemma-4-E2B-it-web.litertlm`,
       {
         method: "HEAD",
       },
@@ -67,11 +67,11 @@ describe("createModelFileMiddleware", () => {
 
   it("serves byte ranges for large model fetches", async () => {
     const baseUrl = await startModelServer({
-      "litert/gemma-4-E2B-it-web.litertlm": "0123456789",
+      "litert/browser/gemma-4-E2B-it-web.litertlm": "0123456789",
     });
 
     const response = await fetch(
-      `${baseUrl}/models/litert/gemma-4-E2B-it-web.litertlm`,
+      `${baseUrl}/models/litert/browser/gemma-4-E2B-it-web.litertlm`,
       {
         headers: { range: "bytes=2-5" },
       },
@@ -84,11 +84,11 @@ describe("createModelFileMiddleware", () => {
 
   it("rejects unsatisfiable byte ranges without streaming the full file", async () => {
     const baseUrl = await startModelServer({
-      "litert/gemma-4-E2B-it-web.litertlm": "0123456789",
+      "litert/browser/gemma-4-E2B-it-web.litertlm": "0123456789",
     });
 
     const response = await fetch(
-      `${baseUrl}/models/litert/gemma-4-E2B-it-web.litertlm`,
+      `${baseUrl}/models/litert/browser/gemma-4-E2B-it-web.litertlm`,
       {
         headers: { range: "bytes=20-25" },
       },
@@ -101,7 +101,7 @@ describe("createModelFileMiddleware", () => {
 
   it("does not serve traversal or malformed paths", async () => {
     const baseUrl = await startModelServer({
-      "litert/gemma-4-E2B-it-web.litertlm": "model bytes",
+      "litert/browser/gemma-4-E2B-it-web.litertlm": "model bytes",
     });
 
     const traversal = await fetch(`${baseUrl}/models/../package.json`);

@@ -64,10 +64,13 @@ window and starts the interactive sidecar TUI from
 after the script name and reads common overrides such as `SIDECAR_BIN`,
 `LITERT_LM_BIN`, `MODEL_FILE`, and `MODEL_ID`.
 `launch-all` opens two separate terminal windows: one for the web UI and one
-for the sidecar TUI. It forces the sidecar launcher onto the TUI path even if a
-headless environment variable was left behind by smoke testing. For explicit
-non-interactive sidecar launches, pass `--headless` to `launch-sidecar.sh` or
-`-Headless` to `launch-sidecar.ps1`.
+for the sidecar TUI. It starts the web UI first, then opens the sidecar TUI so
+the dashboard is the foreground terminal. It forces the sidecar launcher onto
+the TUI path even if a headless environment variable was left behind by smoke
+testing. On Windows the PowerShell scripts prefer Windows Terminal
+`new-window` when available and fall back to starting a new PowerShell console.
+For explicit non-interactive sidecar launches, pass `--headless` to
+`launch-sidecar.sh` or `-Headless` to `launch-sidecar.ps1`.
 
 For a guided first-time setup, run the interactive installer:
 

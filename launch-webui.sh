@@ -54,7 +54,7 @@ OSA
   fi
 
   if command -v konsole >/dev/null 2>&1; then
-    konsole --new-tab -p "tabtitle=$title" -e bash -lc "$command; exec bash" >/dev/null 2>&1 &
+    konsole -p "tabtitle=$title" -e bash -lc "$command; exec bash" >/dev/null 2>&1 &
     return 0
   fi
 

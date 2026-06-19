@@ -41,6 +41,27 @@ function ConvertTo-AppleScriptString {
   return $Value.Replace('\', '\\').Replace('"', '\"')
 }
 
+function ConvertTo-WindowsCommandArgument {
+  param([AllowNull()][string]$Value)
+
+  if ($null -eq $Value) {
+    return '""'
+  }
+
+  return '"' + $Value.Replace('"', '\"') + '"'
+}
+
+function Join-WindowsCommandArguments {
+  param([string[]]$Arguments)
+
+  $QuotedArguments = @()
+  foreach ($Argument in $Arguments) {
+    $QuotedArguments += ConvertTo-WindowsCommandArgument $Argument
+  }
+
+  return ($QuotedArguments -join " ")
+}
+
 function Get-LiteRTPlatform {
   if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX)) {
     return "macos"
@@ -121,7 +142,7 @@ function Start-LiteRTTerminal {
       return
     }
     if (Get-Command konsole -ErrorAction SilentlyContinue) {
-      Start-Process -FilePath "konsole" -ArgumentList @("--new-tab", "-p", "tabtitle=$Title", "-e", "bash", "-lc", "$Command; exec bash") -WorkingDirectory $WorkingDirectory | Out-Null
+      Start-Process -FilePath "konsole" -ArgumentList @("-p", "tabtitle=$Title", "-e", "bash", "-lc", "$Command; exec bash") -WorkingDirectory $WorkingDirectory | Out-Null
       return
     }
     if (Get-Command xterm -ErrorAction SilentlyContinue) {
@@ -130,6 +151,19 @@ function Start-LiteRTTerminal {
     }
 
     throw "No supported terminal launcher found. Run this command manually: $Command"
+  }
+
+  if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
+    $WindowsTerminalArgs = @(
+      "new-window",
+      "--title",
+      $Title,
+      "-d",
+      $WorkingDirectory,
+      $PowerShellExe
+    ) + $ProcessArgs
+    Start-Process -FilePath "wt.exe" -ArgumentList (Join-WindowsCommandArguments $WindowsTerminalArgs) -WorkingDirectory $WorkingDirectory | Out-Null
+    return
   }
 
   Start-Process -FilePath $PowerShellExe -ArgumentList $ProcessArgs -WorkingDirectory $WorkingDirectory | Out-Null

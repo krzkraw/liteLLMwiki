@@ -148,6 +148,34 @@ describe("root launcher scripts", () => {
     expect(powershellLauncher).not.toContain("'-Inline'");
   });
 
+  it("launch-all opens the web UI first and the sidecar TUI last", () => {
+    const shellLauncher = readRootScript("launch-all.sh");
+    expect(shellLauncher.indexOf("launch-webui.sh")).toBeLessThan(
+      shellLauncher.indexOf("launch-sidecar.sh"),
+    );
+
+    const powershellLauncher = readRootScript("launch-all.ps1");
+    expect(powershellLauncher.indexOf("launch-webui.ps1")).toBeLessThan(
+      powershellLauncher.indexOf("launch-sidecar.ps1"),
+    );
+  });
+
+  it("prefers separate terminal windows over tab handoff", () => {
+    for (const scriptName of ["launch-webui.sh", "launch-sidecar.sh"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).not.toContain("--new-tab");
+    }
+
+    for (const scriptName of ["launch-webui.ps1", "launch-sidecar.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("wt.exe");
+      expect(contents).toContain("new-window");
+      expect(contents).not.toContain("--new-tab");
+    }
+  });
+
   it("documents that launch-all preserves the sidecar TUI instead of headless mode", () => {
     for (const scriptName of ["launch-all.sh", "launch-all.ps1"]) {
       const contents = readRootScript(scriptName);

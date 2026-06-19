@@ -286,6 +286,40 @@ func TestRunnerTabRendersRichOperationalPanels(t *testing.T) {
 	}
 }
 
+func TestRunnerTabShowsOperationFlowAndSharedMethodParity(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated := next.(Model)
+	view := updated.View()
+
+	for _, expected := range []string{
+		"Operation flow",
+		"● main-litert",
+		"Model file -> Runtime -> Upstream -> Route",
+		"Model file:    /models/litert/gemma-4-E2B-it.litertlm",
+		"Runtime:       litert / main / cpu",
+		"Upstream:      http://127.0.0.1:9381",
+		"API route:     /v1/chat/completions",
+		"Controller parity:",
+		"RunnerController.StartRunner / StopRunner / RestartRunner / UpdateRunner",
+		"WebSocket api.request parity:",
+		"POST /sidecar/v1/runners/main-litert/start",
+		"POST /sidecar/v1/runners/main-litert/stop",
+		"POST /sidecar/v1/runners/main-litert/restart",
+		"PATCH /sidecar/v1/runners/main-litert",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("runner operation flow missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestRunnerTabEditsPortThroughSharedRunnerController(t *testing.T) {
 	t.Parallel()
 

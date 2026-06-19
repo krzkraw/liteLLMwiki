@@ -818,6 +818,7 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 	return joinPanels(
 		renderPanel("Runner "+runner.ID+" / Runner health", m.runnerHealthLines(runner), "82"),
 		renderPanel("Endpoint map", m.runnerEndpointLines(runner), "45"),
+		renderPanel("Operation flow", runnerOperationLines(runner), "214"),
 		renderPanel("Control surface", m.runnerControlLines(runner), "39"),
 		renderPanel("Runtime command", []string{commandLine(runner.Command)}, "214"),
 		renderPanel("Capabilities matrix", runnerCapabilityLines(runner), "205"),
@@ -849,15 +850,47 @@ func (m Model) runnerEndpointLines(runner server.RunnerSnapshot) []string {
 	}
 	switch runner.Role {
 	case "main":
-		lines = append(lines, formatKV("Chat", "/v1/chat/completions"))
+		lines = append(lines, formatKV("Chat", runnerRoleRoute(runner.Role)))
 	case "embedding":
-		lines = append(lines, formatKV("Embeddings", "/v1/embeddings"))
+		lines = append(lines, formatKV("Embeddings", runnerRoleRoute(runner.Role)))
 	case "reranking":
-		lines = append(lines, formatKV("Rerank", "/v1/rerank"))
+		lines = append(lines, formatKV("Rerank", runnerRoleRoute(runner.Role)))
 	default:
-		lines = append(lines, formatKV("OpenAI", "/v1/*"))
+		lines = append(lines, formatKV("OpenAI", runnerRoleRoute(runner.Role)))
 	}
 	return lines
+}
+
+func runnerOperationLines(runner server.RunnerSnapshot) []string {
+	basePath := "/sidecar/v1/runners/" + runner.ID
+	runtimeRoleBackend := fmt.Sprintf(
+		"%s / %s / %s",
+		fallback(runner.Runtime, "runtime"),
+		fallback(runner.Role, "role"),
+		fallback(runner.Backend, "backend"),
+	)
+
+	return []string{
+		fmt.Sprintf(
+			"%s %s  %s",
+			runnerStateGlyph(runner.State),
+			runner.ID,
+			statusBadge(runner.State),
+		),
+		"Model file -> Runtime -> Upstream -> Route",
+		formatKV("Model file", fallback(runner.ModelPath, "not configured")),
+		formatKV("Runtime", runtimeRoleBackend),
+		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
+		formatKV("API route", runnerRoleRoute(runner.Role)),
+		"",
+		"Controller parity:",
+		"RunnerController.StartRunner / StopRunner / RestartRunner / UpdateRunner",
+		"WebSocket api.request parity:",
+		"POST " + basePath + "/start",
+		"POST " + basePath + "/stop",
+		"POST " + basePath + "/restart",
+		"PATCH " + basePath,
+	}
 }
 
 func (m Model) runnerControlLines(runner server.RunnerSnapshot) []string {
@@ -1696,6 +1729,19 @@ func runnerLaunchMode(runner server.RunnerSnapshot) string {
 		return "external upstream"
 	}
 	return "managed by sidecar"
+}
+
+func runnerRoleRoute(role string) string {
+	switch strings.ToLower(role) {
+	case "main":
+		return "/v1/chat/completions"
+	case "embedding":
+		return "/v1/embeddings"
+	case "reranking":
+		return "/v1/rerank"
+	default:
+		return "/v1/*"
+	}
 }
 
 func endpointPath(upstream string, path string) string {

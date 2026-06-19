@@ -21,8 +21,9 @@ smoke tests, CI, or any process without a TTY.
 
 The TUI uses the same runtime and runner controller methods as the HTTP routes
 and WebSocket `api.request` bridge. It opens with a colorized status header,
-rounded panels, runtime/runner/route/log counters, and tab navigation. Its
-dashboard lists runtime specs, a visual topology graph, route authority,
+rounded panels, runtime/runner/route/log counters, and tab navigation. On wide
+terminals the dashboard pairs panels into two-column rows for faster scanning.
+Its dashboard lists runtime specs, a visual topology graph, route authority,
 runnable backend cards, runtime topology, route maps, and recent activity.
 Each configured runner gets its own tab with health, endpoint, control surface,
 operation flow, runtime command, capability matrix, settings, process details,

@@ -657,20 +657,37 @@ func (m Model) tabBar() string {
 }
 
 func (m Model) dashboardView() string {
+	health := renderPanel("System health / Specs", m.systemHealthLines(), "82")
+	runtimeTopology := renderPanel("Runtime topology", m.runtimeTopologyLines(), "45")
+	topologyGraph := renderPanel("Topology graph / Visual route authority", m.topologyGraphLines(), "39")
+	backendMatrix := renderPanel("Backend matrix / Runnable backends", m.backendMatrixLines(), "214")
+	routeMap := renderPanel("Route map / Routes", m.routeMapLines(), "205")
+	recentActivity := renderPanel("Recent activity", m.recentActivityLines(6), "244")
+	hotkeys := renderPanel("Hotkeys", []string{
+		"Tab/Right: next tab",
+		"Shift+Tab/Left: previous tab",
+		"Number keys: jump tabs",
+		"Runner tabs: s Start, x Stop, r Restart",
+		"Esc/Ctrl+C: quit",
+	}, "205")
+
+	if m.width >= 150 {
+		return joinPanels(
+			joinPanelRow(health, topologyGraph),
+			joinPanelRow(runtimeTopology, backendMatrix),
+			joinPanelRow(routeMap, recentActivity),
+			hotkeys,
+		)
+	}
+
 	return joinPanels(
-		renderPanel("System health / Specs", m.systemHealthLines(), "82"),
-		renderPanel("Runtime topology", m.runtimeTopologyLines(), "45"),
-		renderPanel("Topology graph / Visual route authority", m.topologyGraphLines(), "39"),
-		renderPanel("Backend matrix / Runnable backends", m.backendMatrixLines(), "214"),
-		renderPanel("Route map / Routes", m.routeMapLines(), "205"),
-		renderPanel("Recent activity", m.recentActivityLines(6), "244"),
-		renderPanel("Hotkeys", []string{
-			"Tab/Right: next tab",
-			"Shift+Tab/Left: previous tab",
-			"Number keys: jump tabs",
-			"Runner tabs: s Start, x Stop, r Restart",
-			"Esc/Ctrl+C: quit",
-		}, "205"),
+		health,
+		runtimeTopology,
+		topologyGraph,
+		backendMatrix,
+		routeMap,
+		recentActivity,
+		hotkeys,
 	)
 }
 
@@ -1788,6 +1805,10 @@ func joinPanels(panels ...string) string {
 		visible = append(visible, panel)
 	}
 	return strings.Join(visible, "\n\n")
+}
+
+func joinPanelRow(left string, right string) string {
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
 }
 
 func formatKV(label string, value string) string {

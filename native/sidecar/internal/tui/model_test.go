@@ -71,6 +71,22 @@ func TestModelRendersRichVisualShell(t *testing.T) {
 	}
 }
 
+func viewLineContainsAll(view string, needles ...string) bool {
+	for _, line := range strings.Split(view, "\n") {
+		matched := true
+		for _, needle := range needles {
+			if !strings.Contains(line, needle) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDashboardRendersSpecsAndRunnableBackends(t *testing.T) {
 	t.Parallel()
 
@@ -200,6 +216,29 @@ func TestDashboardRendersTopologyGraphWithRouteAuthority(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("dashboard topology graph missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestDashboardUsesWideTwoColumnLayout(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	model.width = 180
+	model.height = 48
+	view := model.View()
+
+	if !viewLineContainsAll(view, "System health / Specs", "Topology graph / Visual route authority") {
+		t.Fatalf("wide dashboard did not place health and topology graph in one row:\n%s", view)
+	}
+	if !viewLineContainsAll(view, "Runtime topology", "Backend matrix / Runnable backends") {
+		t.Fatalf("wide dashboard did not place topology and backend matrix in one row:\n%s", view)
+	}
+	if !viewLineContainsAll(view, "Route map / Routes", "Recent activity") {
+		t.Fatalf("wide dashboard did not place routes and recent activity in one row:\n%s", view)
 	}
 }
 

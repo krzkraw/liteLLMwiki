@@ -41,6 +41,19 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("offers selectable llama.cpp runtime downloads with local runtime folders", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("native/llama-runtimes");
+      expect(contents).toContain("llama-win-cpu-x64");
+      expect(contents).toContain("llama-win-cuda-13.3-x64");
+      expect(contents).toContain("cudart-llama-bin-win-cuda-13.3-x64.zip");
+      expect(contents).toContain("llama-b9724-bin-macos-arm64.tar.gz");
+      expect(contents).toContain("sha256:");
+    }
+  });
+
   it("checks known model paths and provides Hugging Face URLs", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

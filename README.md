@@ -96,6 +96,13 @@ the installer waits until you press Enter and re-checks the dependency or file.
 If an attempted install or download fails, it prints the command or URL again
 and waits for you to complete it. Hugging Face tokens are prompted only for
 downloads that may need one and are kept in the current process environment.
+The installer also offers selectable llama.cpp runtime downloads for the
+current platform. Runtime archives are verified by SHA256 and extracted under
+`native/llama-runtimes/` into folders such as `llama-win-cpu-x64`,
+`llama-win-cuda-13.3-x64`, or `llama-macos-arm64`; CUDA choices also extract
+the matching CUDA DLL archive into the same folder. The launch scripts add the
+selected runtime to `PATH` before starting the sidecar. Override discovery with
+`LLAMA_RUNTIME=<folder-name>` or `LLAMA_SERVER_BIN=/path/to/llama-server`.
 
 ## Web Model
 

@@ -12,6 +12,9 @@ $Summary = [System.Collections.Generic.List[string]]::new()
 $DevServerProcess = $null
 $ModelsNextcloudBase = $null
 $ModelsNextcloudToken = $null
+$LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
+$LlamaSelectedFile = Join-Path $LlamaRuntimeRoot ".selected"
+$LlamaReleaseBase = "https://github.com/ggml-org/llama.cpp/releases/download/b9724"
 
 Set-Location $RepoRoot
 
@@ -68,6 +71,232 @@ function Get-BasicAuthorizationHeader {
 
   $Bytes = [Text.Encoding]::ASCII.GetBytes("${Token}:")
   return "Basic $([Convert]::ToBase64String($Bytes))"
+}
+
+function New-LlamaRuntimeDefinition {
+  param(
+    [string]$Key,
+    [string]$Folder,
+    [string]$Label,
+    [string]$Url,
+    [string]$Sha256,
+    [string]$ExtraUrl = "",
+    [string]$ExtraSha256 = ""
+  )
+
+  [pscustomobject]@{
+    Key = $Key
+    Folder = $Folder
+    Label = $Label
+    Url = $Url
+    Sha256 = $Sha256
+    ExtraUrl = $ExtraUrl
+    ExtraSha256 = $ExtraSha256
+  }
+}
+
+function Get-LlamaRuntimeDefinitions {
+  $Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+  $IsWindowsOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows
+  )
+  $IsMacOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::OSX
+  )
+
+  $Definitions = @()
+
+  if ($IsMacOs -and ($Architecture.ToString() -eq "Arm64")) {
+    $Definitions += New-LlamaRuntimeDefinition "macos-arm64" "llama-macos-arm64" "macOS Apple Silicon" "$LlamaReleaseBase/llama-b9724-bin-macos-arm64.tar.gz" "sha256:b4582c69bc58e6b84d16105011d9431eeec9a0d1745d9ca8e48472a285db6b7f"
+  }
+  if ($IsMacOs -and ($Architecture.ToString() -eq "X64")) {
+    $Definitions += New-LlamaRuntimeDefinition "macos-x64" "llama-macos-x64" "macOS Intel" "$LlamaReleaseBase/llama-b9724-bin-macos-x64.tar.gz" "sha256:4fd4228bd23dbc6ae53805a89b1811861c1b9da5d2ff07bfd9a08fb5f0c87f6e"
+  }
+  if ($IsWindowsOs -and ($Architecture.ToString() -eq "X64")) {
+    $Definitions += New-LlamaRuntimeDefinition "win-cpu-x64" "llama-win-cpu-x64" "Windows x64 CPU" "$LlamaReleaseBase/llama-b9724-bin-win-cpu-x64.zip" "sha256:e06bafb4e1aaf3745be816d5d072cd965e52ef49ef8e9e93f031e196703780bf"
+    $Definitions += New-LlamaRuntimeDefinition "win-cuda13-x64" "llama-win-cuda-13.3-x64" "Windows x64 CUDA 13.3" "$LlamaReleaseBase/llama-b9724-bin-win-cuda-13.3-x64.zip" "sha256:c16700717a20daebc12a2de2bf1ac711ba43f9565dac9d6fbcdf04099dde975a" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-13.3-x64.zip" "sha256:1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e"
+    $Definitions += New-LlamaRuntimeDefinition "win-cuda12-x64" "llama-win-cuda-12.4-x64" "Windows x64 CUDA 12.4" "$LlamaReleaseBase/llama-b9724-bin-win-cuda-12.4-x64.zip" "sha256:913d47f80a3cad43fe95eda2ed0cf0dbd5fe01d758f66c097fa0a6138021729d" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-12.4-x64.zip" "sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+    $Definitions += New-LlamaRuntimeDefinition "win-vulkan-x64" "llama-win-vulkan-x64" "Windows x64 Vulkan" "$LlamaReleaseBase/llama-b9724-bin-win-vulkan-x64.zip" "sha256:3e245e75f38477f9c99858cf149a3831988701090d156512eb143f2312b76b44"
+    $Definitions += New-LlamaRuntimeDefinition "win-openvino-x64" "llama-win-openvino-2026.2-x64" "Windows x64 OpenVINO" "$LlamaReleaseBase/llama-b9724-bin-win-openvino-2026.2-x64.zip" "sha256:da36f6380bbeffddd4db58bfbc09077982c465d92123e943e6af679e8ed5d0ec"
+    $Definitions += New-LlamaRuntimeDefinition "win-sycl-x64" "llama-win-sycl-x64" "Windows x64 SYCL" "$LlamaReleaseBase/llama-b9724-bin-win-sycl-x64.zip" "sha256:f660e83887af4a1c62742010a8064ab26aa9befacecaa5c86c6061ae68a3c04f"
+    $Definitions += New-LlamaRuntimeDefinition "win-hip-x64" "llama-win-hip-radeon-x64" "Windows x64 HIP Radeon" "$LlamaReleaseBase/llama-b9724-bin-win-hip-radeon-x64.zip" "sha256:2b861729d7b1620a7ee09ebc8681f2534be9da307f93fd68afb6410f160a016b"
+  }
+  if ($IsWindowsOs -and ($Architecture.ToString() -eq "Arm64")) {
+    $Definitions += New-LlamaRuntimeDefinition "win-cpu-arm64" "llama-win-cpu-arm64" "Windows arm64 CPU" "$LlamaReleaseBase/llama-b9724-bin-win-cpu-arm64.zip" "sha256:092191286aa8c1d11e909308358e6ac9bd7b5dc83e01d71d96807f6b0cf948bf"
+    $Definitions += New-LlamaRuntimeDefinition "win-opencl-adreno-arm64" "llama-win-opencl-adreno-arm64" "Windows arm64 OpenCL Adreno" "$LlamaReleaseBase/llama-b9724-bin-win-opencl-adreno-arm64.zip" "sha256:3e465918a49382fd466003e2d1658b261e87c68b8aa77c087a441ef3b7dee62c"
+  }
+
+  return $Definitions
+}
+
+function Find-InstalledLlamaServer {
+  foreach ($Name in @("llama-server.exe", "llama-server")) {
+    $Command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($null -ne $Command) {
+      return $Command.Source
+    }
+  }
+
+  if (Test-Path $LlamaSelectedFile) {
+    $RuntimeName = (Get-Content $LlamaSelectedFile -Raw).Trim()
+    if ($RuntimeName) {
+      $RuntimeDir = Join-Path $LlamaRuntimeRoot $RuntimeName
+      if (Test-Path $RuntimeDir) {
+        $Match = Get-ChildItem -Path $RuntimeDir -Filter "llama-server*" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $Match) {
+          return $Match.FullName
+        }
+      }
+    }
+  }
+
+  if (Test-Path $LlamaRuntimeRoot) {
+    $Match = Get-ChildItem -Path $LlamaRuntimeRoot -Filter "llama-server*" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $Match) {
+      return $Match.FullName
+    }
+  }
+
+  return ""
+}
+
+function Assert-ArchiveSha256 {
+  param(
+    [string]$Path,
+    [string]$ExpectedSha256
+  )
+
+  $Expected = $ExpectedSha256.Replace("sha256:", "")
+  $Actual = (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
+  if ($Actual -ne $Expected) {
+    throw "SHA256 mismatch for $Path. Expected $Expected, got $Actual"
+  }
+}
+
+function Expand-LlamaArchive {
+  param(
+    [string]$Archive,
+    [string]$TargetDir
+  )
+
+  if ($Archive.EndsWith(".zip")) {
+    Expand-Archive -Path $Archive -DestinationPath $TargetDir -Force
+    return
+  }
+
+  if ($Archive.EndsWith(".tar.gz")) {
+    & tar -xzf $Archive -C $TargetDir
+    if ($LASTEXITCODE -ne 0) {
+      throw "tar failed for $Archive"
+    }
+    return
+  }
+
+  throw "Unsupported llama.cpp archive: $Archive"
+}
+
+function Install-LlamaAsset {
+  param(
+    [string]$Url,
+    [string]$Sha256,
+    [string]$TargetDir
+  )
+
+  $ArchiveName = Split-Path -Leaf $Url
+  $Archive = Join-Path ([System.IO.Path]::GetTempPath()) "$([Guid]::NewGuid().ToString('N'))-$ArchiveName"
+  Invoke-WebRequest -Uri $Url -OutFile $Archive
+  Assert-ArchiveSha256 -Path $Archive -ExpectedSha256 $Sha256
+  Expand-LlamaArchive -Archive $Archive -TargetDir $TargetDir
+  Remove-Item -Force $Archive
+}
+
+function Install-LlamaRuntime {
+  param([object]$Definition)
+
+  $TargetDir = Join-Path $LlamaRuntimeRoot $Definition.Folder
+  $TempDir = "$TargetDir.tmp"
+
+  Write-Host ""
+  Write-Host "llama.cpp runtime needs to be installed downloaded, here is the command or URL I would use:"
+  Write-Host "Runtime: $($Definition.Label)"
+  Write-Host "Folder: native/llama-runtimes/$($Definition.Folder)"
+  Write-Host "URL: $($Definition.Url)"
+  Write-Host "sha256: $($Definition.Sha256.Replace('sha256:', ''))"
+  if ($Definition.ExtraUrl) {
+    Write-Host "CUDA DLL URL: $($Definition.ExtraUrl)"
+    Write-Host "sha256: $($Definition.ExtraSha256.Replace('sha256:', ''))"
+  }
+
+  New-Item -ItemType Directory -Force -Path $LlamaRuntimeRoot | Out-Null
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TempDir
+  New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+  Install-LlamaAsset -Url $Definition.Url -Sha256 $Definition.Sha256 -TargetDir $TempDir
+  if ($Definition.ExtraUrl) {
+    Install-LlamaAsset -Url $Definition.ExtraUrl -Sha256 $Definition.ExtraSha256 -TargetDir $TempDir
+  }
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TargetDir
+  Move-Item -Force $TempDir $TargetDir
+  Set-Content -Path $LlamaSelectedFile -Value $Definition.Folder
+  Add-Summary "OK: llama.cpp runtime $($Definition.Folder)"
+}
+
+function Ensure-LlamaRuntime {
+  $Installed = Find-InstalledLlamaServer
+  if (-not [string]::IsNullOrWhiteSpace($Installed)) {
+    Add-Summary "OK: llama-server at $Installed"
+    return
+  }
+
+  $Definitions = @(Get-LlamaRuntimeDefinitions)
+  if ($Definitions.Count -eq 0) {
+    Invoke-ConfirmOrWait -Label "llama-server" -CommandText "https://github.com/ggml-org/llama.cpp/releases" -Check {
+      -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
+    } -Action {
+      Start-Process "https://github.com/ggml-org/llama.cpp/releases"
+      throw "Manual install required"
+    }
+    return
+  }
+
+  Write-Host ""
+  Write-Host "llama.cpp runtime needs to be installed downloaded. Choose one option, or all:"
+  foreach ($Definition in $Definitions) {
+    Write-Host "  $($Definition.Key): $($Definition.Label) -> native/llama-runtimes/$($Definition.Folder)"
+    Write-Host "      $($Definition.Url)"
+    if ($Definition.ExtraUrl) {
+      Write-Host "      CUDA DLLs: $($Definition.ExtraUrl)"
+    }
+  }
+  Write-Host "  all: install every option listed above"
+  Write-Host "  skip: I will install llama-server myself and press Enter"
+
+  while ($true) {
+    $DefaultChoice = $Definitions[0].Key
+    $Choice = Read-Host "llama.cpp runtime choice [all/$DefaultChoice/skip]"
+    if ([string]::IsNullOrWhiteSpace($Choice)) {
+      $Choice = $DefaultChoice
+    }
+    if ($Choice -eq "all") {
+      foreach ($Definition in $Definitions) {
+        Install-LlamaRuntime -Definition $Definition
+      }
+      return
+    }
+    if ($Choice -eq "skip") {
+      Invoke-WaitForUserAction -Label "llama-server" -Check {
+        -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
+      }
+      Add-Summary "OK: llama-server"
+      return
+    }
+
+    $Selected = $Definitions | Where-Object { $_.Key -eq $Choice } | Select-Object -First 1
+    if ($null -ne $Selected) {
+      Install-LlamaRuntime -Definition $Selected
+      return
+    }
+    Write-Host "Unknown llama.cpp runtime choice: $Choice"
+  }
 }
 
 function Get-PackageInstallCommand {
@@ -368,12 +597,7 @@ try {
   Ensure-Dependency "curl" "curl" $CurlCommand
   Ensure-Dependency "uv" "uv" $UvCommand
   Ensure-Dependency "litert-lm" "litert-lm" "uv tool install litert-lm"
-  Invoke-ConfirmOrWait -Label "llama-server" -CommandText "https://github.com/ggml-org/llama.cpp/releases" -Check {
-    Test-Command "llama-server"
-  } -Action {
-    Start-Process "https://github.com/ggml-org/llama.cpp/releases"
-    throw "Manual install required"
-  }
+  Ensure-LlamaRuntime
 
   Ensure-NpmDependencies
 

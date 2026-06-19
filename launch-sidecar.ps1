@@ -9,6 +9,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = $PSScriptRoot
+$LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
+$LlamaSelectedFile = Join-Path $LlamaRuntimeRoot ".selected"
 $SidecarArgs = @()
 
 function Get-EnvValue {
@@ -55,6 +57,52 @@ function Get-DefaultSidecarBin {
   return Join-Path $RepoRoot "native\sidecar-artifacts\litert-sidecar-windows-$ArchSuffix\litert-sidecar.exe"
 }
 
+function Find-LlamaServerBin {
+  if ($env:LLAMA_SERVER_BIN -and (Test-Path $env:LLAMA_SERVER_BIN)) {
+    return $env:LLAMA_SERVER_BIN
+  }
+
+  if ($env:LLAMA_RUNTIME) {
+    $RuntimeDir = Join-Path $LlamaRuntimeRoot $env:LLAMA_RUNTIME
+    if (Test-Path $RuntimeDir) {
+      $Match = Get-ChildItem -Path $RuntimeDir -Filter "llama-server.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($null -ne $Match) {
+        return $Match.FullName
+      }
+    }
+  }
+
+  if (Test-Path $LlamaSelectedFile) {
+    $RuntimeName = (Get-Content $LlamaSelectedFile -Raw).Trim()
+    if ($RuntimeName) {
+      $RuntimeDir = Join-Path $LlamaRuntimeRoot $RuntimeName
+      if (Test-Path $RuntimeDir) {
+        $Match = Get-ChildItem -Path $RuntimeDir -Filter "llama-server.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $Match) {
+          return $Match.FullName
+        }
+      }
+    }
+  }
+
+  if (Test-Path $LlamaRuntimeRoot) {
+    $Match = Get-ChildItem -Path $LlamaRuntimeRoot -Filter "llama-server.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $Match) {
+      return $Match.FullName
+    }
+  }
+
+  return ""
+}
+
+function Add-LlamaRuntimeToPath {
+  $LlamaServerBin = Find-LlamaServerBin
+  if (-not [string]::IsNullOrWhiteSpace($LlamaServerBin)) {
+    $Directory = Split-Path -Parent $LlamaServerBin
+    $env:PATH = "$Directory$([IO.Path]::PathSeparator)$env:PATH"
+  }
+}
+
 if ($SidecarBin -eq "") {
   $SidecarBin = if ($env:SIDECAR_BIN) { $env:SIDECAR_BIN } else { Get-DefaultSidecarBin }
 }
@@ -62,6 +110,8 @@ if ($SidecarBin -eq "") {
 if ($Headless -or ($env:SIDECAR_HEADLESS -match "^(1|true|yes)$")) {
   $SidecarArgs += "--headless"
 }
+
+Add-LlamaRuntimeToPath
 
 Add-ValueFlag "SIDECAR_ADDR" "-addr"
 Add-ValueFlag "SIDECAR_UPSTREAM" "-upstream"

@@ -71,6 +71,17 @@ describe("root launcher scripts", () => {
     }
   });
 
+  it("makes installed llama.cpp runtimes discoverable by the sidecar", () => {
+    for (const scriptName of ["launch-sidecar.sh", "launch-sidecar.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toMatch(/native[\\/]+llama-runtimes/);
+      expect(contents).toContain("LLAMA_RUNTIME");
+      expect(contents).toContain("LLAMA_SERVER_BIN");
+      expect(contents).toContain("llama-server");
+    }
+  });
+
   it("launches web UI and headless sidecar together with cleanup", () => {
     for (const scriptName of ["launch-all.sh", "launch-all.ps1"]) {
       const contents = readRootScript(scriptName);

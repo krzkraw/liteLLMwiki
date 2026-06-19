@@ -8,6 +8,9 @@ dev_server_pid=""
 models_nextcloud="${MODELS_NEXTCLOUD:-}"
 models_nextcloud_base=""
 models_nextcloud_token=""
+llama_runtime_root="$repo_root/native/llama-runtimes"
+llama_selected_file="$llama_runtime_root/.selected"
+llama_release_base="https://github.com/ggml-org/llama.cpp/releases/download/b9724"
 summary=()
 
 cd "$repo_root"
@@ -95,6 +98,241 @@ nextcloud_model_url() {
   local relative_path="$1"
 
   printf '%s/public.php/webdav/%s\n' "$models_nextcloud_base" "$relative_path"
+}
+
+llama_executable_name() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'llama-server.exe\n' ;;
+    *) printf 'llama-server\n' ;;
+  esac
+}
+
+llama_runtime_spec() {
+  local key="$1"
+
+  case "$key" in
+    macos-arm64)
+      printf 'llama-macos-arm64|macOS Apple Silicon|%s/llama-b9724-bin-macos-arm64.tar.gz|sha256:b4582c69bc58e6b84d16105011d9431eeec9a0d1745d9ca8e48472a285db6b7f||\n' "$llama_release_base"
+      ;;
+    macos-x64)
+      printf 'llama-macos-x64|macOS Intel|%s/llama-b9724-bin-macos-x64.tar.gz|sha256:4fd4228bd23dbc6ae53805a89b1811861c1b9da5d2ff07bfd9a08fb5f0c87f6e||\n' "$llama_release_base"
+      ;;
+    win-cpu-x64)
+      printf 'llama-win-cpu-x64|Windows x64 CPU|%s/llama-b9724-bin-win-cpu-x64.zip|sha256:e06bafb4e1aaf3745be816d5d072cd965e52ef49ef8e9e93f031e196703780bf||\n' "$llama_release_base"
+      ;;
+    win-cpu-arm64)
+      printf 'llama-win-cpu-arm64|Windows arm64 CPU|%s/llama-b9724-bin-win-cpu-arm64.zip|sha256:092191286aa8c1d11e909308358e6ac9bd7b5dc83e01d71d96807f6b0cf948bf||\n' "$llama_release_base"
+      ;;
+    win-cuda12-x64)
+      printf 'llama-win-cuda-12.4-x64|Windows x64 CUDA 12.4|%s/llama-b9724-bin-win-cuda-12.4-x64.zip|sha256:913d47f80a3cad43fe95eda2ed0cf0dbd5fe01d758f66c097fa0a6138021729d|%s/cudart-llama-bin-win-cuda-12.4-x64.zip|sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6\n' "$llama_release_base" "$llama_release_base"
+      ;;
+    win-cuda13-x64)
+      printf 'llama-win-cuda-13.3-x64|Windows x64 CUDA 13.3|%s/llama-b9724-bin-win-cuda-13.3-x64.zip|sha256:c16700717a20daebc12a2de2bf1ac711ba43f9565dac9d6fbcdf04099dde975a|%s/cudart-llama-bin-win-cuda-13.3-x64.zip|sha256:1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e\n' "$llama_release_base" "$llama_release_base"
+      ;;
+    win-vulkan-x64)
+      printf 'llama-win-vulkan-x64|Windows x64 Vulkan|%s/llama-b9724-bin-win-vulkan-x64.zip|sha256:3e245e75f38477f9c99858cf149a3831988701090d156512eb143f2312b76b44||\n' "$llama_release_base"
+      ;;
+    win-openvino-x64)
+      printf 'llama-win-openvino-2026.2-x64|Windows x64 OpenVINO|%s/llama-b9724-bin-win-openvino-2026.2-x64.zip|sha256:da36f6380bbeffddd4db58bfbc09077982c465d92123e943e6af679e8ed5d0ec||\n' "$llama_release_base"
+      ;;
+    win-sycl-x64)
+      printf 'llama-win-sycl-x64|Windows x64 SYCL|%s/llama-b9724-bin-win-sycl-x64.zip|sha256:f660e83887af4a1c62742010a8064ab26aa9befacecaa5c86c6061ae68a3c04f||\n' "$llama_release_base"
+      ;;
+    win-hip-x64)
+      printf 'llama-win-hip-radeon-x64|Windows x64 HIP Radeon|%s/llama-b9724-bin-win-hip-radeon-x64.zip|sha256:2b861729d7b1620a7ee09ebc8681f2534be9da307f93fd68afb6410f160a016b||\n' "$llama_release_base"
+      ;;
+    win-opencl-adreno-arm64)
+      printf 'llama-win-opencl-adreno-arm64|Windows arm64 OpenCL Adreno|%s/llama-b9724-bin-win-opencl-adreno-arm64.zip|sha256:3e465918a49382fd466003e2d1658b261e87c68b8aa77c087a441ef3b7dee62c||\n' "$llama_release_base"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+llama_available_options() {
+  local os_name
+  local arch_name
+
+  os_name="$(uname -s)"
+  arch_name="$(uname -m)"
+
+  case "$os_name:$arch_name" in
+    Darwin:arm64|Darwin:aarch64) printf 'macos-arm64\n' ;;
+    Darwin:x86_64|Darwin:amd64) printf 'macos-x64\n' ;;
+    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
+      printf 'win-cpu-x64\nwin-cuda13-x64\nwin-cuda12-x64\nwin-vulkan-x64\nwin-openvino-x64\nwin-sycl-x64\nwin-hip-x64\n'
+      ;;
+    MINGW*:aarch64|MSYS*:aarch64|CYGWIN*:aarch64|MINGW*:arm64|MSYS*:arm64|CYGWIN*:arm64)
+      printf 'win-cpu-arm64\nwin-opencl-adreno-arm64\n'
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+verify_sha256() {
+  local file="$1"
+  local expected="${2#sha256:}"
+  local actual
+
+  actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'SHA256 mismatch for %s\nexpected %s\nactual   %s\n' "$file" "$expected" "$actual" >&2
+    return 1
+  fi
+}
+
+extract_llama_archive() {
+  local archive="$1"
+  local target_dir="$2"
+  local archive_name="${3:-$archive}"
+
+  case "$archive_name" in
+    *.zip) unzip -q -o "$archive" -d "$target_dir" ;;
+    *.tar.gz) tar -xzf "$archive" -C "$target_dir" ;;
+    *) printf 'Unsupported llama.cpp archive: %s\n' "$archive" >&2; return 1 ;;
+  esac
+}
+
+install_llama_asset() {
+  local url="$1"
+  local sha256="$2"
+  local target_dir="$3"
+  local archive_name="${url##*/}"
+  local archive_path
+
+  archive_path="$(mktemp "${TMPDIR:-/tmp}/${archive_name}.XXXXXX")"
+  curl -L --fail --output "$archive_path" "$url"
+  verify_sha256 "$archive_path" "$sha256"
+  extract_llama_archive "$archive_path" "$target_dir" "$archive_name"
+  rm -f "$archive_path"
+}
+
+find_llama_server_in_dir() {
+  local dir="$1"
+  local executable_name
+
+  executable_name="$(llama_executable_name)"
+  find "$dir" -type f -name "$executable_name" -print -quit
+}
+
+installed_llama_server() {
+  local runtime_name
+  local selected_dir
+
+  if has_command llama-server; then
+    command -v llama-server
+    return 0
+  fi
+
+  if [[ -f "$llama_selected_file" ]]; then
+    runtime_name="$(tr -d '\r\n' < "$llama_selected_file")"
+    selected_dir="$llama_runtime_root/$runtime_name"
+    if [[ -d "$selected_dir" ]]; then
+      find_llama_server_in_dir "$selected_dir"
+      return 0
+    fi
+  fi
+
+  if [[ -d "$llama_runtime_root" ]]; then
+    find_llama_server_in_dir "$llama_runtime_root"
+  fi
+}
+
+install_llama_runtime() {
+  local key="$1"
+  local spec folder label url sha256 extra_url extra_sha256
+  local target_dir tmp_dir
+
+  spec="$(llama_runtime_spec "$key")"
+  IFS='|' read -r folder label url sha256 extra_url extra_sha256 <<< "$spec"
+  target_dir="$llama_runtime_root/$folder"
+  tmp_dir="${target_dir}.tmp"
+
+  printf '\nllama.cpp runtime needs to be installed downloaded, here is the command or URL I would use:\n'
+  printf 'Runtime: %s\nFolder: native/llama-runtimes/%s\nURL: %s\nsha256: %s\n' "$label" "$folder" "$url" "${sha256#sha256:}"
+  if [[ -n "$extra_url" ]]; then
+    printf 'CUDA DLL URL: %s\nsha256: %s\n' "$extra_url" "${extra_sha256#sha256:}"
+  fi
+
+  mkdir -p "$llama_runtime_root"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  install_llama_asset "$url" "$sha256" "$tmp_dir"
+  if [[ -n "$extra_url" ]]; then
+    install_llama_asset "$extra_url" "$extra_sha256" "$tmp_dir"
+  fi
+  find "$tmp_dir" -type f -name 'llama-server*' -exec chmod +x {} + 2>/dev/null || true
+  rm -rf "$target_dir"
+  mv "$tmp_dir" "$target_dir"
+  printf '%s\n' "$folder" > "$llama_selected_file"
+  add_summary "OK: llama.cpp runtime $folder"
+}
+
+ensure_llama_runtime() {
+  local installed
+  local options=()
+  local option
+  local spec folder label url sha256 extra_url extra_sha256
+  local choice
+
+  installed="$(installed_llama_server || true)"
+  if [[ -n "$installed" ]]; then
+    add_summary "OK: llama-server at $installed"
+    return 0
+  fi
+
+  while IFS= read -r option; do
+    options+=("$option")
+  done < <(llama_available_options || true)
+
+  if [[ "${#options[@]}" -eq 0 ]]; then
+    ensure_optional_tool "llama-server" "llama-server" \
+      "https://github.com/ggml-org/llama.cpp/releases" \
+      "manual_url_action 'https://github.com/ggml-org/llama.cpp/releases'; false"
+    return 0
+  fi
+
+  printf '\nllama.cpp runtime needs to be installed downloaded. Choose one option, or all:\n'
+  for option in "${options[@]}"; do
+    spec="$(llama_runtime_spec "$option")"
+    IFS='|' read -r folder label url sha256 extra_url extra_sha256 <<< "$spec"
+    printf '  %s: %s -> native/llama-runtimes/%s\n' "$option" "$label" "$folder"
+    printf '      %s\n' "$url"
+    if [[ -n "$extra_url" ]]; then
+      printf '      CUDA DLLs: %s\n' "$extra_url"
+    fi
+  done
+  printf '  all: install every option listed above\n'
+  printf '  skip: I will install llama-server myself and press Enter\n'
+
+  while true; do
+    printf 'llama.cpp runtime choice [all/%s/skip]: ' "${options[0]}"
+    read -r choice
+    choice="${choice:-${options[0]}}"
+    case "$choice" in
+      all)
+        for option in "${options[@]}"; do
+          install_llama_runtime "$option"
+        done
+        return 0
+        ;;
+      skip)
+        wait_for_user_action "llama-server" "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\""
+        add_summary "OK: llama-server"
+        return 0
+        ;;
+      *)
+        for option in "${options[@]}"; do
+          if [[ "$choice" == "$option" ]]; then
+            install_llama_runtime "$option"
+            return 0
+          fi
+        done
+        printf 'Unknown llama.cpp runtime choice: %s\n' "$choice"
+        ;;
+    esac
+  done
 }
 
 package_install_command() {
@@ -515,7 +753,7 @@ main() {
   ensure_dependency "curl" "curl" "${curl_cmd:-Install curl with your OS package manager.}"
   ensure_dependency "uv" "uv" "${uv_cmd:-curl -LsSf https://astral.sh/uv/install.sh | sh}"
   ensure_optional_tool "litert-lm" "litert-lm" "uv tool install litert-lm" "uv tool install litert-lm"
-  ensure_optional_tool "llama-server" "llama-server" "$llama_url" "manual_url_action '$llama_url'; false"
+  ensure_llama_runtime
 
   ensure_npm_dependencies
 

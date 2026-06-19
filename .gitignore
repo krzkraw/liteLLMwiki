@@ -17,6 +17,8 @@ models/*
 # Native sidecar release/debug artifacts
 native/sidecar-artifacts/*
 !native/sidecar-artifacts/README.md
+native/llama-runtimes/*
+!native/llama-runtimes/README.md
 native/sidecar/dist/
 native/sidecar/bin/
 native/sidecar/litert-sidecar

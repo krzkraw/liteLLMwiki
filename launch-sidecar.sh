@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+llama_runtime_root="$repo_root/native/llama-runtimes"
+llama_selected_file="$llama_runtime_root/.selected"
 
 sidecar_args=()
 
@@ -50,9 +52,74 @@ default_sidecar_bin() {
     "$repo_root" "$os_suffix" "$arch_suffix"
 }
 
+llama_executable_name() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'llama-server.exe\n' ;;
+    *) printf 'llama-server\n' ;;
+  esac
+}
+
+find_llama_server_bin() {
+  local executable_name
+  local runtime_name
+  local candidate
+
+  executable_name="$(llama_executable_name)"
+
+  if [[ -n "${LLAMA_SERVER_BIN:-}" && -f "${LLAMA_SERVER_BIN:-}" ]]; then
+    printf '%s\n' "$LLAMA_SERVER_BIN"
+    return 0
+  fi
+
+  if [[ -n "${LLAMA_RUNTIME:-}" ]]; then
+    candidate="$llama_runtime_root/$LLAMA_RUNTIME"
+    if [[ -d "$candidate" ]]; then
+      find "$candidate" -type f -name "$executable_name" -print -quit
+      return 0
+    fi
+  fi
+
+  if [[ -f "$llama_selected_file" ]]; then
+    runtime_name="$(tr -d '\r\n' < "$llama_selected_file")"
+    candidate="$llama_runtime_root/$runtime_name"
+    if [[ -d "$candidate" ]]; then
+      find "$candidate" -type f -name "$executable_name" -print -quit
+      return 0
+    fi
+  fi
+
+  if [[ -d "$llama_runtime_root" ]]; then
+    find "$llama_runtime_root" -type f -name "$executable_name" -print -quit
+  fi
+}
+
+prepend_llama_runtime_path() {
+  local llama_server_bin
+  local llama_server_dir
+
+  llama_server_bin="$(find_llama_server_bin || true)"
+  if [[ -n "$llama_server_bin" ]]; then
+    llama_server_dir="$(dirname "$llama_server_bin")"
+    export PATH="$llama_server_dir:$PATH"
+  fi
+}
+
+exec_sidecar() {
+  local executable="$1"
+  shift
+
+  if [[ "${#sidecar_args[@]}" -gt 0 ]]; then
+    exec "$executable" "${sidecar_args[@]}" "$@"
+  fi
+
+  exec "$executable" "$@"
+}
+
 case "${SIDECAR_HEADLESS:-}" in
   1|true|TRUE|yes|YES) sidecar_args+=("--headless") ;;
 esac
+
+prepend_llama_runtime_path
 
 add_value_flag "SIDECAR_ADDR" "-addr"
 add_value_flag "SIDECAR_UPSTREAM" "-upstream"
@@ -71,8 +138,12 @@ if [[ -z "$sidecar_bin" ]]; then
 fi
 
 if [[ -n "$sidecar_bin" && -x "$sidecar_bin" ]]; then
-  exec "$sidecar_bin" "${sidecar_args[@]}" "$@"
+  exec_sidecar "$sidecar_bin" "$@"
 fi
 
 cd "$repo_root/native/sidecar"
-exec go run ./cmd/litert-sidecar "${sidecar_args[@]}" "$@"
+if [[ "${#sidecar_args[@]}" -gt 0 ]]; then
+  exec go run ./cmd/litert-sidecar "${sidecar_args[@]}" "$@"
+fi
+
+exec go run ./cmd/litert-sidecar "$@"

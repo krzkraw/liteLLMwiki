@@ -71,6 +71,73 @@ func TestModelRendersRichVisualShell(t *testing.T) {
 	}
 }
 
+func TestModelRendersContextCommandRail(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+
+	dashboardView := model.View()
+	for _, expected := range []string{
+		"Command rail",
+		"Global: Tab/Right next | Shift+Tab/Left previous | 1-6 jump | Esc quit",
+		"Dashboard: specs + topology + runnable backends",
+		"API: status.get + /sidecar/v1/status",
+	} {
+		if !strings.Contains(dashboardView, expected) {
+			t.Fatalf("dashboard command rail missing %q:\n%s", expected, dashboardView)
+		}
+	}
+
+	model.setActiveTab("runner:main-litert")
+	runnerView := model.View()
+	for _, expected := range []string{
+		"Runner main-litert: s Start | x Stop | r Restart",
+		"Edit: b/p/h/i/m/e/u/f/l/v/t/o",
+		"API: RunnerController + /sidecar/v1/runners/main-litert",
+	} {
+		if !strings.Contains(runnerView, expected) {
+			t.Fatalf("runner command rail missing %q:\n%s", expected, runnerView)
+		}
+	}
+
+	model.setActiveTab("models")
+	modelsView := model.View()
+	for _, expected := range []string{
+		"Models: d Download | m Main | e Embedding | r Rerank",
+		"API: Catalog.Download + POST /sidecar/v1/models/download",
+	} {
+		if !strings.Contains(modelsView, expected) {
+			t.Fatalf("models command rail missing %q:\n%s", expected, modelsView)
+		}
+	}
+
+	model.setActiveTab("logs")
+	logsView := model.View()
+	for _, expected := range []string{
+		"Logs: live broadcaster cache | WebSocket logs.subscribe parity",
+		"API: LogBroadcaster + logs.subscribe",
+	} {
+		if !strings.Contains(logsView, expected) {
+			t.Fatalf("logs command rail missing %q:\n%s", expected, logsView)
+		}
+	}
+
+	model.setActiveTab("settings")
+	settingsView := model.View()
+	for _, expected := range []string{
+		"Settings: s/d/r/g/x runtime | e/h/p/m/i/u/f edit | l/a/v toggle",
+		"API: RuntimeController + WebSocket runtime.*",
+	} {
+		if !strings.Contains(settingsView, expected) {
+			t.Fatalf("settings command rail missing %q:\n%s", expected, settingsView)
+		}
+	}
+}
+
 func viewLineContainsAll(view string, needles ...string) bool {
 	for _, line := range strings.Split(view, "\n") {
 		matched := true

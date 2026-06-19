@@ -478,6 +478,8 @@ func (m Model) View() string {
 			builder.WriteString(renderPanel("Runner", []string{"No runner selected."}, "196"))
 		}
 	}
+	builder.WriteString("\n\n")
+	builder.WriteString(m.commandRailView())
 
 	return builder.String()
 }
@@ -654,6 +656,61 @@ func (m Model) tabBar() string {
 		parts = append(parts, tabStyle.Render(label))
 	}
 	return strings.Join(parts, " ")
+}
+
+func (m Model) commandRailView() string {
+	return renderPanel("Command rail", m.commandRailLines(), "39")
+}
+
+func (m Model) commandRailLines() []string {
+	lines := []string{
+		"Global: Tab/Right next | Shift+Tab/Left previous | 1-6 jump | Esc quit",
+	}
+
+	switch m.activeTabID() {
+	case "dashboard":
+		lines = append(
+			lines,
+			"Dashboard: specs + topology + runnable backends",
+			"API: status.get + /sidecar/v1/status",
+		)
+	case "models":
+		lines = append(
+			lines,
+			"Models: d Download | m Main | e Embedding | r Rerank",
+			"API: Catalog.Download + POST /sidecar/v1/models/download",
+			"API: RunnerController.CreateRunner + POST /sidecar/v1/runners",
+		)
+	case "logs":
+		lines = append(
+			lines,
+			"Logs: live broadcaster cache | WebSocket logs.subscribe parity",
+			"API: LogBroadcaster + logs.subscribe",
+		)
+	case "settings":
+		lines = append(
+			lines,
+			"Settings: s/d/r/g/x runtime | e/h/p/m/i/u/f edit | l/a/v toggle",
+			"API: RuntimeController + WebSocket runtime.*",
+			"API: api.request GET/PATCH/POST /sidecar/v1/*",
+		)
+	default:
+		runner, ok := m.activeRunner()
+		if !ok {
+			lines = append(lines, "Runner: no active runner")
+			return lines
+		}
+		basePath := "/sidecar/v1/runners/" + runner.ID
+		lines = append(
+			lines,
+			fmt.Sprintf("Runner %s: s Start | x Stop | r Restart", runner.ID),
+			"Edit: b/p/h/i/m/e/u/f/l/v/t/o",
+			"API: RunnerController + "+basePath,
+			"Route: "+runnerRoleRoute(runner.Role)+" -> "+fallback(runner.Upstream, "unavailable"),
+		)
+	}
+
+	return lines
 }
 
 func (m Model) dashboardView() string {

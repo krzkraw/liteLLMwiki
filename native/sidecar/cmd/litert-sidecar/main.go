@@ -229,6 +229,20 @@ func (c supervisorRunnerController) CreateRunner(
 	return c.runner(id)
 }
 
+func (c supervisorRunnerController) UpdateRunner(
+	ctx context.Context,
+	id string,
+	patch server.RunnerPatch,
+) (server.RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.UpdateRunner(id, toSupervisorRunnerPatch(patch)); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
 func (c supervisorRunnerController) StartRunner(
 	ctx context.Context,
 	id string,
@@ -334,6 +348,23 @@ func toSupervisorRunnerSpec(spec server.RunnerSpec) supervisor.RunnerSpec {
 		Upstream:         spec.Upstream,
 		HuggingFaceToken: spec.HuggingFaceToken,
 		Verbose:          spec.Verbose,
+	}
+}
+
+func toSupervisorRunnerPatch(patch server.RunnerPatch) supervisor.RunnerPatch {
+	return supervisor.RunnerPatch{
+		Runtime:          supervisor.Runtime(patch.Runtime),
+		Role:             supervisor.Role(patch.Role),
+		Backend:          supervisor.Backend(patch.Backend),
+		Executable:       patch.Executable,
+		ModelPath:        patch.ModelPath,
+		ModelID:          patch.ModelID,
+		Host:             patch.Host,
+		Port:             patch.Port,
+		Launch:           patch.Launch,
+		Upstream:         patch.Upstream,
+		HuggingFaceToken: patch.HuggingFaceToken,
+		Verbose:          patch.Verbose,
 	}
 }
 

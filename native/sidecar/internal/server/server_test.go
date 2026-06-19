@@ -379,6 +379,42 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 		t.Fatalf("runner state = %q, want external", createBody.Runner.State)
 	}
 
+	patchReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/sidecar/v1/runners/embedding-llamacpp",
+		strings.NewReader(`{
+			"backend": "gpu",
+			"port": 9592,
+			"modelId": "qwen3-embedding-gpu"
+		}`),
+	)
+	patchRec := httptest.NewRecorder()
+	handler.ServeHTTP(patchRec, patchReq)
+
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf(
+			"patch status = %d, want %d: %s",
+			patchRec.Code,
+			http.StatusOK,
+			patchRec.Body.String(),
+		)
+	}
+	var patchBody struct {
+		Runner RunnerSnapshot `json:"runner"`
+	}
+	if err := json.NewDecoder(patchRec.Body).Decode(&patchBody); err != nil {
+		t.Fatalf("decode patch response: %v", err)
+	}
+	if patchBody.Runner.Backend != "gpu" {
+		t.Fatalf("patched backend = %q, want gpu", patchBody.Runner.Backend)
+	}
+	if patchBody.Runner.Port != 9592 {
+		t.Fatalf("patched port = %d, want 9592", patchBody.Runner.Port)
+	}
+	if patchBody.Runner.ModelID != "qwen3-embedding-gpu" {
+		t.Fatalf("patched model id = %q", patchBody.Runner.ModelID)
+	}
+
 	listReq := httptest.NewRequest(http.MethodGet, "/sidecar/v1/runners", nil)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
@@ -472,6 +508,20 @@ func TestWebSocketAPIRequestControlsRunner(t *testing.T) {
 	}
 	if got, ok := runtimeSupervisor.UpstreamForPath("/v1/rerank"); !ok || got != "http://127.0.0.1:9493" {
 		t.Fatalf("rerank upstream = %q/%v, want created runner", got, ok)
+	}
+
+	patchBody := `{"backend":"gpu","port":9593}`
+	client.WriteJSON(t, map[string]any{
+		"type":       "api.request",
+		"id":         "patch-runner",
+		"method":     "PATCH",
+		"path":       "/sidecar/v1/runners/rerank-llamacpp",
+		"headers":    map[string]string{"content-type": "application/json"},
+		"bodyBase64": base64.StdEncoding.EncodeToString([]byte(patchBody)),
+	})
+	patchResponse := readAPIResponse(t, client, "patch-runner")
+	if patchResponse.status != http.StatusOK {
+		t.Fatalf("patch status = %d, want %d", patchResponse.status, http.StatusOK)
 	}
 }
 
@@ -1356,6 +1406,20 @@ func (c testRunnerController) CreateRunner(
 	return c.runner(id)
 }
 
+func (c testRunnerController) UpdateRunner(
+	ctx context.Context,
+	id string,
+	patch RunnerPatch,
+) (RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.UpdateRunner(id, testSupervisorRunnerPatch(patch)); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
 func (c testRunnerController) StartRunner(
 	ctx context.Context,
 	id string,
@@ -1418,6 +1482,23 @@ func testSupervisorRunnerSpec(spec RunnerSpec) supervisor.RunnerSpec {
 		Upstream:         spec.Upstream,
 		HuggingFaceToken: spec.HuggingFaceToken,
 		Verbose:          spec.Verbose,
+	}
+}
+
+func testSupervisorRunnerPatch(patch RunnerPatch) supervisor.RunnerPatch {
+	return supervisor.RunnerPatch{
+		Runtime:          supervisor.Runtime(patch.Runtime),
+		Role:             supervisor.Role(patch.Role),
+		Backend:          supervisor.Backend(patch.Backend),
+		Executable:       patch.Executable,
+		ModelPath:        patch.ModelPath,
+		ModelID:          patch.ModelID,
+		Host:             patch.Host,
+		Port:             patch.Port,
+		Launch:           patch.Launch,
+		Upstream:         patch.Upstream,
+		HuggingFaceToken: patch.HuggingFaceToken,
+		Verbose:          patch.Verbose,
 	}
 }
 

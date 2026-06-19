@@ -49,6 +49,13 @@ type runnerCreateMsg struct {
 	err    error
 }
 
+type runnerUpdateMsg struct {
+	field  string
+	value  string
+	runner server.RunnerSnapshot
+	err    error
+}
+
 type runnerPreset struct {
 	id      string
 	role    string
@@ -171,6 +178,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.setActiveTab("models")
 		m.notice = m.runnerCreateNotice(msg)
+	case runnerUpdateMsg:
+		m.refresh()
+		m.setActiveTab("runner:" + msg.runner.ID)
+		m.notice = m.runnerUpdateNotice(msg)
 	}
 
 	return m, nil
@@ -215,6 +226,13 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if runner, ok := m.activeRunner(); ok {
 			switch strings.ToLower(value) {
+			case "b":
+				return m, m.runnerUpdateCmd(
+					runner,
+					"backend",
+					nextBackend(runner.Backend),
+					server.RunnerPatch{Backend: nextBackend(runner.Backend)},
+				)
 			case "s":
 				return m, m.runnerActionCmd("start", runner.ID)
 			case "x":
@@ -460,6 +478,9 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		renderPanel("Runner "+runner.ID, []string{
 			"Controls",
 			"s Start   x Stop   r Restart",
+			"",
+			"Edit settings",
+			"b Backend CPU/GPU",
 		}, "39"),
 		renderPanel("Settings", settings, "45"),
 		renderPanel("Details", details, "214"),
@@ -643,6 +664,38 @@ func (m Model) runnerCreateCmd(role string) tea.Cmd {
 	}
 }
 
+func (m Model) runnerUpdateCmd(
+	runner server.RunnerSnapshot,
+	field string,
+	value string,
+	patch server.RunnerPatch,
+) tea.Cmd {
+	return func() tea.Msg {
+		if m.runnerController == nil {
+			return runnerUpdateMsg{
+				field:  field,
+				value:  value,
+				runner: runner,
+				err:    fmt.Errorf("runner controller is not configured"),
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+
+		updated, err := m.runnerController.UpdateRunner(ctx, runner.ID, patch)
+		if updated.ID == "" {
+			updated = runner
+		}
+		return runnerUpdateMsg{
+			field:  field,
+			value:  value,
+			runner: updated,
+			err:    err,
+		}
+	}
+}
+
 func (m Model) actionNotice(message runnerActionMsg) string {
 	if message.err != nil {
 		return fmt.Sprintf("%s %s failed: %v", message.action, message.id, message.err)
@@ -666,6 +719,13 @@ func (m Model) runnerCreateNotice(message runnerCreateMsg) string {
 	return "created runner " + message.runner.ID
 }
 
+func (m Model) runnerUpdateNotice(message runnerUpdateMsg) string {
+	if message.err != nil {
+		return fmt.Sprintf("update %s %s failed: %v", message.runner.ID, message.field, message.err)
+	}
+	return fmt.Sprintf("updated %s %s %s", message.runner.ID, message.field, message.value)
+}
+
 func (m Model) runtimeActionNotice(message runtimeActionMsg) string {
 	if message.err != nil {
 		return fmt.Sprintf("%s runtime failed: %v", message.action, message.err)
@@ -680,6 +740,13 @@ func (m Model) runtimeActionNotice(message runtimeActionMsg) string {
 	default:
 		return message.action + " runtime"
 	}
+}
+
+func nextBackend(current string) string {
+	if strings.EqualFold(current, "cpu") {
+		return "gpu"
+	}
+	return "cpu"
 }
 
 func (m Model) runnerSpecForRole(role string) (server.RunnerSpec, string, error) {

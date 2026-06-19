@@ -134,6 +134,21 @@ type RunnerSpec struct {
 	Verbose          bool
 }
 
+type RunnerPatch struct {
+	Runtime          Runtime
+	Role             Role
+	Backend          Backend
+	Executable       string
+	ModelPath        string
+	ModelID          string
+	Host             string
+	Port             int
+	Launch           *bool
+	Upstream         string
+	HuggingFaceToken *string
+	Verbose          *bool
+}
+
 type RunnerSnapshot struct {
 	ID           string            `json:"id"`
 	Runtime      Runtime           `json:"runtime"`
@@ -314,6 +329,67 @@ func (s *Supervisor) Runner(id string) (RunnerSnapshot, bool) {
 	}
 
 	return record.snapshot, true
+}
+
+func (s *Supervisor) UpdateRunner(id string, patch RunnerPatch) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	s.mu.Lock()
+	record := s.runners[id]
+	if record == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("runner %q not found", id)
+	}
+	if record.cmd != nil || record.snapshot.State == StateRunning || record.snapshot.State == StateStarting {
+		s.mu.Unlock()
+		return fmt.Errorf("runner %q cannot be updated while %s", id, record.snapshot.State)
+	}
+
+	spec := recordSpec(record)
+	applyRunnerPatch(&spec, patch)
+	normalized, err := normalizeRunnerSpec(spec, spec.ID)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+
+	oldRole := record.snapshot.Role
+	record.launch = normalized.Launch
+	record.executable = normalized.Executable
+	if patch.HuggingFaceToken != nil {
+		record.huggingFaceToken = strings.TrimSpace(*patch.HuggingFaceToken)
+	}
+	if patch.Verbose != nil {
+		record.verbose = *patch.Verbose
+	}
+	record.mode = initialRuntimeMode(record.verbose)
+	record.snapshot.Runtime = normalized.Runtime
+	record.snapshot.Role = normalized.Role
+	record.snapshot.Backend = normalized.Backend
+	record.snapshot.Executable = normalized.Executable
+	record.snapshot.ModelPath = normalized.ModelPath
+	record.snapshot.ModelID = normalized.ModelID
+	record.snapshot.Host = normalized.Host
+	record.snapshot.Port = normalized.Port
+	record.snapshot.PID = 0
+	record.snapshot.Command = nil
+	record.snapshot.Upstream = configuredUpstream(
+		normalized.Launch,
+		normalized.Upstream,
+		normalized.Host,
+		normalized.Port,
+	)
+	record.snapshot.State = initialState(normalized.Launch)
+	record.snapshot.Detail = initialDetail(normalized.Launch)
+	record.snapshot.LastError = ""
+	if oldRole != normalized.Role {
+		delete(s.routes, oldRole)
+	}
+	s.routes[normalized.Role] = record.snapshot.ID
+	s.mu.Unlock()
+	s.publishStatusChange()
+	return nil
 }
 
 func (s *Supervisor) Snapshot() Snapshot {
@@ -832,6 +908,63 @@ func (s *Supervisor) snapshotLocked() Snapshot {
 	return Snapshot{
 		Runners: runners,
 		Routes:  routes,
+	}
+}
+
+func recordSpec(record *runnerRecord) RunnerSpec {
+	return RunnerSpec{
+		ID:               record.snapshot.ID,
+		Runtime:          record.snapshot.Runtime,
+		Role:             record.snapshot.Role,
+		Backend:          record.snapshot.Backend,
+		Executable:       record.executable,
+		ModelPath:        record.snapshot.ModelPath,
+		ModelID:          record.snapshot.ModelID,
+		Host:             record.snapshot.Host,
+		Port:             record.snapshot.Port,
+		Launch:           record.launch,
+		Upstream:         record.snapshot.Upstream,
+		HuggingFaceToken: record.huggingFaceToken,
+		Verbose:          record.verbose,
+	}
+}
+
+func applyRunnerPatch(spec *RunnerSpec, patch RunnerPatch) {
+	if patch.Runtime != "" {
+		spec.Runtime = patch.Runtime
+	}
+	if patch.Role != "" {
+		spec.Role = patch.Role
+	}
+	if patch.Backend != "" {
+		spec.Backend = patch.Backend
+	}
+	if patch.Executable != "" {
+		spec.Executable = patch.Executable
+	}
+	if patch.ModelPath != "" {
+		spec.ModelPath = patch.ModelPath
+	}
+	if patch.ModelID != "" {
+		spec.ModelID = patch.ModelID
+	}
+	if patch.Host != "" {
+		spec.Host = patch.Host
+	}
+	if patch.Port > 0 {
+		spec.Port = patch.Port
+	}
+	if patch.Launch != nil {
+		spec.Launch = *patch.Launch
+	}
+	if patch.Upstream != "" {
+		spec.Upstream = patch.Upstream
+	}
+	if patch.HuggingFaceToken != nil {
+		spec.HuggingFaceToken = strings.TrimSpace(*patch.HuggingFaceToken)
+	}
+	if patch.Verbose != nil {
+		spec.Verbose = *patch.Verbose
 	}
 }
 

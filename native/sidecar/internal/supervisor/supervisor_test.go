@@ -99,6 +99,68 @@ func TestSupervisorRoutesByRunnerRole(t *testing.T) {
 	}
 }
 
+func TestSupervisorUpdatesStoppedRunnerSettings(t *testing.T) {
+	t.Parallel()
+
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{
+			Launch:   false,
+			ModelID:  "gemma4-e2b",
+			Upstream: "http://127.0.0.1:9381",
+		},
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:        "embedding-llamacpp",
+		Runtime:   RuntimeLlamaCPP,
+		Role:      RoleEmbedding,
+		Backend:   BackendGPU,
+		ModelPath: "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+		ModelID:   "qwen3-embedding",
+		Host:      "127.0.0.1",
+		Port:      9492,
+		Launch:    false,
+		Upstream:  "http://127.0.0.1:9492",
+	})
+	if err != nil {
+		t.Fatalf("create embedding runner: %v", err)
+	}
+
+	launch := true
+	err = supervisor.UpdateRunner(runnerID, RunnerPatch{
+		Backend:   BackendCPU,
+		Port:      9592,
+		Launch:    &launch,
+		ModelID:   "qwen3-embedding-cpu",
+		ModelPath: "models/llamacpp/embedding-cpu.gguf",
+	})
+	if err != nil {
+		t.Fatalf("update runner: %v", err)
+	}
+
+	runner, ok := supervisor.Runner(runnerID)
+	if !ok {
+		t.Fatalf("runner %q not found", runnerID)
+	}
+	if runner.Backend != BackendCPU {
+		t.Fatalf("backend = %q, want cpu", runner.Backend)
+	}
+	if runner.Port != 9592 {
+		t.Fatalf("port = %d, want 9592", runner.Port)
+	}
+	if runner.ModelID != "qwen3-embedding-cpu" {
+		t.Fatalf("model id = %q", runner.ModelID)
+	}
+	if runner.ModelPath != "models/llamacpp/embedding-cpu.gguf" {
+		t.Fatalf("model path = %q", runner.ModelPath)
+	}
+	if runner.State != StateCreated {
+		t.Fatalf("state = %q, want created after enabling managed launch", runner.State)
+	}
+	if runner.Upstream != "http://127.0.0.1:9592" {
+		t.Fatalf("upstream = %q, want patched managed upstream", runner.Upstream)
+	}
+}
+
 func TestSupervisorSerializesConcurrentStarts(t *testing.T) {
 	t.Parallel()
 

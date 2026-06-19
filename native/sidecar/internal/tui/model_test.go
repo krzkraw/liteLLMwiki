@@ -108,6 +108,8 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 		"Start",
 		"Stop",
 		"Restart",
+		"Edit settings",
+		"b Backend",
 		"Settings",
 		"Runtime",
 		"Role",
@@ -129,6 +131,42 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("runner tab missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestRunnerTabUpdatesBackendThroughSharedRunnerController(t *testing.T) {
+	t.Parallel()
+
+	runners := testRunnerController()
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	updated := next.(Model)
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("b"),
+	})
+	if cmd == nil {
+		t.Fatalf("backend edit returned no command")
+	}
+
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runners.lastCall(); got != "update:embed-qwen:backend=cpu" {
+		t.Fatalf("last call = %q, want backend update", got)
+	}
+	view := updated.View()
+	if !strings.Contains(view, "updated embed-qwen backend cpu") {
+		t.Fatalf("view missing update notice:\n%s", view)
+	}
+	if !strings.Contains(view, "Backend:       cpu") {
+		t.Fatalf("view missing updated backend:\n%s", view)
 	}
 }
 
@@ -411,6 +449,7 @@ func (c *fakeRuntimeController) lastCall() string {
 type fakeRunnerController struct {
 	calls   []string
 	created []server.RunnerSnapshot
+	patches map[string]server.RunnerPatch
 }
 
 func testRunnerController() *fakeRunnerController {
@@ -418,6 +457,9 @@ func testRunnerController() *fakeRunnerController {
 }
 
 func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
+	if c.patches == nil {
+		c.patches = map[string]server.RunnerPatch{}
+	}
 	runners := []server.RunnerSnapshot{
 		{
 			ID:         "main-litert",
@@ -468,6 +510,11 @@ func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
 		},
 	}
 	runners = append(runners, c.created...)
+	for index := range runners {
+		if patch, ok := c.patches[runners[index].ID]; ok {
+			applyFakeRunnerPatch(&runners[index], patch)
+		}
+	}
 	return server.RunnerSnapshotResponse{
 		Runners: runners,
 		Routes: map[string]string{
@@ -503,6 +550,43 @@ func (c *fakeRunnerController) CreateRunner(
 	}
 	c.created = append(c.created, runner)
 	return runner, nil
+}
+
+func (c *fakeRunnerController) UpdateRunner(
+	_ context.Context,
+	id string,
+	patch server.RunnerPatch,
+) (server.RunnerSnapshot, error) {
+	if c.patches == nil {
+		c.patches = map[string]server.RunnerPatch{}
+	}
+	parts := []string{"update", id}
+	if patch.Backend != "" {
+		parts = append(parts, "backend="+patch.Backend)
+	}
+	c.calls = append(c.calls, strings.Join(parts, ":"))
+	c.patches[id] = patch
+
+	snapshot := c.Snapshot()
+	for _, runner := range snapshot.Runners {
+		if runner.ID != id {
+			continue
+		}
+		return runner, nil
+	}
+	return server.RunnerSnapshot{}, nil
+}
+
+func applyFakeRunnerPatch(runner *server.RunnerSnapshot, patch server.RunnerPatch) {
+	if patch.Backend != "" {
+		runner.Backend = patch.Backend
+	}
+	if patch.Port > 0 {
+		runner.Port = patch.Port
+	}
+	if patch.ModelID != "" {
+		runner.ModelID = patch.ModelID
+	}
 }
 
 func (c *fakeRunnerController) StartRunner(

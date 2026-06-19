@@ -22,14 +22,15 @@ smoke tests, CI, or any process without a TTY.
 The TUI uses the same runtime and runner controller methods as the HTTP routes
 and WebSocket `api.request` bridge. Its dashboard lists runtime specs, route
 authority, and runnable backends. Each configured runner gets its own tab with
-settings, process details, command/capability/error state, and `s` start, `x`
-stop, and `r` restart controls. The Settings tab lists the matching WebSocket
-messages and sidecar API paths, and exposes default runtime controls with `s`
-start release, `d` start debug, `x` stop, and `r` restart release so terminal
-controls can be checked against the browser-facing API surface. The Models tab
-can also create catalog-backed llama.cpp runners with `m` main, `e` embedding,
-and `r` rerank by calling the same runner creation method behind
-`POST /sidecar/v1/runners`.
+settings, process details, command/capability/error state, `s` start, `x` stop,
+`r` restart controls, and `b` backend CPU/GPU editing through the same runner
+update method behind `PATCH /sidecar/v1/runners/{id}`. The Settings tab lists
+the matching WebSocket messages and sidecar API paths, and exposes default
+runtime controls with `s` start release, `d` start debug, `x` stop, and `r`
+restart release so terminal controls can be checked against the browser-facing
+API surface. The Models tab can also create catalog-backed llama.cpp runners
+with `m` main, `e` embedding, and `r` rerank by calling the same runner creation
+method behind `POST /sidecar/v1/runners`.
 
 By default it:
 
@@ -93,6 +94,7 @@ Runner management is also exposed over HTTP:
 ```text
 GET  /sidecar/v1/runners
 POST /sidecar/v1/runners
+PATCH /sidecar/v1/runners/{id}
 POST /sidecar/v1/runners/{id}/start
 POST /sidecar/v1/runners/{id}/restart
 POST /sidecar/v1/runners/{id}/stop
@@ -100,9 +102,11 @@ POST /sidecar/v1/runners/{id}/stop
 
 `POST /sidecar/v1/runners` accepts runner fields such as `id`, `runtime`,
 `role`, `backend`, `executable`, `modelPath`, `modelId`, `host`, `port`,
-`launch`, and `upstream`. The same routes are available through WebSocket
-`api.request` frames. Long-lived start and restart operations are detached from
-the request context, while stop operations still honor the caller timeout.
+`launch`, and `upstream`. `PATCH /sidecar/v1/runners/{id}` accepts the same
+fields as a partial update for a runner that is not currently starting or
+running. The same routes are available through WebSocket `api.request` frames.
+Long-lived start and restart operations are detached from the request context,
+while stop operations still honor the caller timeout.
 
 `/sidecar/v1/status` probes the upstream `/v1/models` endpoint when the runtime
 is available. The base `gemma4-e2b` model means the default CPU/base path is

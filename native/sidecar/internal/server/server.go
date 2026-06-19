@@ -81,6 +81,21 @@ type RunnerSpec struct {
 	Verbose          bool   `json:"verbose,omitempty"`
 }
 
+type RunnerPatch struct {
+	Runtime          string  `json:"runtime,omitempty"`
+	Role             string  `json:"role,omitempty"`
+	Backend          string  `json:"backend,omitempty"`
+	Executable       string  `json:"executable,omitempty"`
+	ModelPath        string  `json:"modelPath,omitempty"`
+	ModelID          string  `json:"modelId,omitempty"`
+	Host             string  `json:"host,omitempty"`
+	Port             int     `json:"port,omitempty"`
+	Launch           *bool   `json:"launch,omitempty"`
+	Upstream         string  `json:"upstream,omitempty"`
+	HuggingFaceToken *string `json:"huggingfaceToken,omitempty"`
+	Verbose          *bool   `json:"verbose,omitempty"`
+}
+
 type RunnerSnapshot struct {
 	ID           string            `json:"id"`
 	Runtime      string            `json:"runtime"`
@@ -110,6 +125,7 @@ type RunnerSnapshotResponse struct {
 type RunnerController interface {
 	Snapshot() RunnerSnapshotResponse
 	CreateRunner(context.Context, RunnerSpec) (RunnerSnapshot, error)
+	UpdateRunner(context.Context, string, RunnerPatch) (RunnerSnapshot, error)
 	StartRunner(context.Context, string) (RunnerSnapshot, error)
 	StopRunner(context.Context, string) (RunnerSnapshot, error)
 	RestartRunner(context.Context, string) (RunnerSnapshot, error)
@@ -358,7 +374,7 @@ func (s *Server) runnerAPIResponse(
 	case path == "/sidecar/v1/runners":
 		return s.runnerCollectionAPIResponse(ctx, method, body)
 	case strings.HasPrefix(path, "/sidecar/v1/runners/"):
-		return s.runnerActionAPIResponse(ctx, method, path)
+		return s.runnerResourceAPIResponse(ctx, method, path, body)
 	default:
 		return textAPIResponse(http.StatusNotFound, "not found\n")
 	}
@@ -394,11 +410,38 @@ func (s *Server) runnerCollectionAPIResponse(
 	}
 }
 
-func (s *Server) runnerActionAPIResponse(
+func (s *Server) runnerResourceAPIResponse(
 	ctx context.Context,
 	method string,
 	path string,
+	body []byte,
 ) rawAPIResponse {
+	if method == http.MethodPatch {
+		id, ok := parseRunnerResourcePath(path)
+		if !ok {
+			return textAPIResponse(http.StatusNotFound, "not found\n")
+		}
+		var patch RunnerPatch
+		if err := json.Unmarshal(body, &patch); err != nil {
+			return textAPIResponse(http.StatusBadRequest, "decode runner patch\n")
+		}
+		runner, err := s.runnerController.UpdateRunner(ctx, id, patch)
+		if err != nil {
+			if errors.Is(err, ErrRunnerNotFound) {
+				return textAPIResponse(http.StatusNotFound, err.Error()+"\n")
+			}
+			return textAPIResponse(http.StatusBadGateway, err.Error()+"\n")
+		}
+		return jsonAPIResponse(
+			http.StatusOK,
+			struct {
+				Runner RunnerSnapshot `json:"runner"`
+			}{
+				Runner: runner,
+			},
+		)
+	}
+
 	if method != http.MethodPost {
 		return textAPIResponse(http.StatusMethodNotAllowed, "method not allowed\n")
 	}
@@ -437,6 +480,19 @@ func (s *Server) runnerActionAPIResponse(
 			Runner: runner,
 		},
 	)
+}
+
+func parseRunnerResourcePath(path string) (string, bool) {
+	trimmed := strings.TrimPrefix(path, "/sidecar/v1/runners/")
+	if trimmed == "" || strings.Contains(trimmed, "/") {
+		return "", false
+	}
+
+	id, err := url.PathUnescape(trimmed)
+	if err != nil || strings.TrimSpace(id) == "" {
+		return "", false
+	}
+	return id, true
 }
 
 func parseRunnerActionPath(path string) (string, string, bool) {

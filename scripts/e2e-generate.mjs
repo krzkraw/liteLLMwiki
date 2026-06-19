@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
-import { createChromiumGpuArgs } from "./smokeRuntime.mjs";
+import { createChromiumGpuArgs, launchSmokeChromium } from "./smokeRuntime.mjs";
 
 const appUrl = process.env.APP_URL ?? "http://127.0.0.1:5173/";
 const modelPath = process.env.MODEL_PATH ? resolve(process.env.MODEL_PATH) : "";
@@ -27,7 +27,7 @@ if (!modelPath.toLowerCase().endsWith(".litertlm")) {
   process.exit(1);
 }
 
-const browser = await chromium.launch({
+const browser = await launchSmokeChromium(chromium, {
   channel,
   headless,
   args: createChromiumGpuArgs(),

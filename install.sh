@@ -873,6 +873,29 @@ ensure_npm_dependencies() {
     "Install Node packages and regenerate the LiteRT-LM WASM vendor files."
 }
 
+playwright_chromium_ready() {
+  has_command node || return 1
+
+  node --input-type=module - >/dev/null 2>&1 <<'NODE'
+import { existsSync } from "node:fs";
+
+try {
+  const { chromium } = await import("playwright");
+  process.exit(existsSync(chromium.executablePath()) ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+NODE
+}
+
+ensure_playwright_chromium() {
+  confirm_or_wait "Playwright Chromium" "npx playwright install chromium" \
+    "playwright_chromium_ready" \
+    "cd '$repo_root' && npx playwright install chromium" "required" \
+    "Playwright Chromium executable exists for smoke tests" \
+    "Install the Playwright Chromium browser artifact used by smoke UI tests."
+}
+
 print_install_tasks() {
   printf '\nInstall tasks\n'
   printf '-------------\n'
@@ -885,6 +908,7 @@ print_install_tasks() {
   print_task_status "litert-lm" "command -v litert-lm >/dev/null 2>&1" "available" "needs install"
   print_task_status "llama.cpp runtime" "test -n \"\$(installed_llama_server || true)\"" "available" "needs selection or manual install"
   print_task_status "npm dependencies" "test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" "already installed" "needs npm install"
+  print_task_status "Playwright Chromium" "playwright_chromium_ready" "available" "needs npx playwright install chromium"
   print_task_status "Gemma 4 E2B web model" "test -s '$repo_root/models/litert/gemma-4-E2B-it-web.litertlm'" "downloaded" "needs download"
   print_task_status "Gemma 4 E2B native LiteRT model" "test -s '$repo_root/models/litert/gemma-4-E2B-it.litertlm'" "downloaded" "needs download"
   print_task_status "Gemma 4 E2B llama.cpp GGUF model" "test -s '$repo_root/models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf'" "downloaded" "needs download"
@@ -977,6 +1001,7 @@ main() {
   ensure_llama_runtime
 
   ensure_npm_dependencies
+  ensure_playwright_chromium
 
   ensure_model "Gemma 4 E2B web model" \
     "models/litert/gemma-4-E2B-it-web.litertlm" \

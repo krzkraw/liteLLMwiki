@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
-import { createSmokeWorkspace } from "./smokeRuntime.mjs";
+import { createSmokeWorkspace, launchSmokeChromium } from "./smokeRuntime.mjs";
 
 function getArgValue(name) {
   const index = process.argv.indexOf(name);
@@ -34,7 +34,7 @@ try {
   );
   await writeFile(sampleModelPath, Buffer.alloc(16));
 
-  browser = await chromium.launch();
+  browser = await launchSmokeChromium(chromium);
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   const events = [];
 

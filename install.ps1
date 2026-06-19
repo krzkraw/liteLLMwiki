@@ -662,6 +662,42 @@ function Ensure-NpmDependencies {
     -Description "Install Node packages and regenerate the LiteRT-LM WASM vendor files."
 }
 
+function Test-PlaywrightChromium {
+  if (-not (Test-Command "node")) {
+    return $false
+  }
+
+  Push-Location $RepoRoot
+  try {
+    $CheckScript = @'
+import { existsSync } from "node:fs";
+
+try {
+  const { chromium } = await import("playwright");
+  process.exit(existsSync(chromium.executablePath()) ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+'@
+    & node --input-type=module --eval $CheckScript *> $null
+    return $LASTEXITCODE -eq 0
+  } finally {
+    Pop-Location
+  }
+}
+
+function Ensure-PlaywrightChromium {
+  Invoke-ConfirmOrWait -Label "Playwright Chromium" -CommandText "npx playwright install chromium" -Check {
+    Test-PlaywrightChromium
+  } -Action {
+    & npx playwright install chromium
+    if ($LASTEXITCODE -ne 0) {
+      throw "npx playwright install chromium failed"
+    }
+  } -ExpectedResult "Playwright Chromium executable exists for smoke tests" `
+    -Description "Install the Playwright Chromium browser artifact used by smoke UI tests."
+}
+
 function Print-InstallTasks {
   Write-Host ""
   Write-Host "Install tasks"
@@ -678,6 +714,7 @@ function Print-InstallTasks {
     (Test-Path (Join-Path $RepoRoot "node_modules")) -and
       (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
   } "already installed" "needs npm install"
+  Write-TaskStatus "Playwright Chromium" { Test-PlaywrightChromium } "available" "needs npx playwright install chromium"
   Write-TaskStatus "Gemma 4 E2B web model" {
     $Path = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it-web.litertlm"
     (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
@@ -859,6 +896,7 @@ try {
   Ensure-LlamaRuntime
 
   Ensure-NpmDependencies
+  Ensure-PlaywrightChromium
 
   Ensure-Model "Gemma 4 E2B web model" "models/litert/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
   Ensure-Model "Gemma 4 E2B native LiteRT model" "models/litert/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true

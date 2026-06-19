@@ -77,8 +77,10 @@ describe("interactive installer scripts", () => {
       expect(contents).toContain("go");
       expect(contents).toContain("git");
       expect(contents).toContain("curl");
+      expect(contents).toContain("Playwright Chromium");
       expect(contents).toContain("litert-lm");
       expect(contents).toContain("llama-server");
+      expect(contents).toContain("npx playwright install chromium");
       expect(contents).toContain("uv tool install litert-lm");
     }
   });
@@ -150,6 +152,7 @@ describe("interactive installer scripts", () => {
       const contents = readRootScript(scriptName);
 
       expect(contents).toContain("npm install");
+      expect(contents).toContain("npx playwright install chromium");
       expect(contents).toContain("npm run build");
       expect(contents).toContain("npm run build:sidecar");
       expect(contents).toContain("npm run smoke");

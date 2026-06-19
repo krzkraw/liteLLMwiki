@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { createSmokeWorkspace } from "./smokeRuntime.mjs";
+import { createSmokeWorkspace, launchSmokeChromium } from "./smokeRuntime.mjs";
 
 const targetUrl = process.env.SMOKE_URL ?? "http://127.0.0.1:5173/";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -72,7 +72,7 @@ try {
   const endpoint = `${serverInfo.url}/v1`;
   const statusResponse = await fetch(`${serverInfo.url}/sidecar/v1/status`);
   const sidecarStatus = await statusResponse.json();
-  browser = await chromium.launch();
+  browser = await launchSmokeChromium(chromium);
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   const events = [];
 

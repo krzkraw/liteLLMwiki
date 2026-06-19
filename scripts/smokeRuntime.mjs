@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,4 +29,46 @@ export function createChromiumGpuArgs(platform = process.platform) {
   }
 
   return args;
+}
+
+export function createSmokeChromiumLaunchOptions(browserType, launchOptions = {}) {
+  if (launchOptions.channel || launchOptions.executablePath) {
+    return { ...launchOptions };
+  }
+
+  const executablePath = browserType.executablePath();
+  if (!existsSync(executablePath)) {
+    throw new Error(
+      [
+        `Playwright Chromium executable is missing at ${executablePath}.`,
+        "Run: npx playwright install chromium",
+      ].join("\n"),
+    );
+  }
+
+  return { ...launchOptions, executablePath };
+}
+
+export async function launchSmokeChromium(browserType, launchOptions = {}) {
+  try {
+    return await browserType.launch(
+      createSmokeChromiumLaunchOptions(browserType, launchOptions),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes("Executable doesn't exist") ||
+      message.includes("chromium_headless_shell")
+    ) {
+      throw new Error(
+        [
+          "Playwright Chromium is not ready for smoke tests.",
+          "Run: npx playwright install chromium",
+          message,
+        ].join("\n"),
+      );
+    }
+
+    throw error;
+  }
 }

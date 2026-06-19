@@ -125,7 +125,8 @@ function Start-LiteRTTerminal {
     & osascript `
       -e 'tell application "Terminal"' `
       -e 'activate' `
-      -e "do script `"$EscapedCommand`"" `
+      -e 'set terminalWindow to (make new window)' `
+      -e "do script `"$EscapedCommand`" in selected tab of terminalWindow" `
       -e 'end tell' | Out-Null
     return
   }

@@ -163,15 +163,27 @@ describe("root launcher scripts", () => {
   });
 
   it("prefers separate terminal windows over tab handoff", () => {
-    for (const scriptName of ["launch-webui.sh", "launch-sidecar.sh"]) {
+    for (const scriptName of [
+      "launch-webui.sh",
+      "launch-sidecar.sh",
+      "launch-all.sh",
+    ]) {
       const contents = readRootScript(scriptName);
 
+      expect(contents).toContain("make new window");
+      expect(contents).toContain("selected tab of terminalWindow");
       expect(contents).not.toContain("--new-tab");
     }
 
-    for (const scriptName of ["launch-webui.ps1", "launch-sidecar.ps1"]) {
+    for (const scriptName of [
+      "launch-webui.ps1",
+      "launch-sidecar.ps1",
+      "launch-all.ps1",
+    ]) {
       const contents = readRootScript(scriptName);
 
+      expect(contents).toContain("make new window");
+      expect(contents).toContain("selected tab of terminalWindow");
       expect(contents).toContain("wt.exe");
       expect(contents).toContain("new-window");
       expect(contents).not.toContain("--new-tab");

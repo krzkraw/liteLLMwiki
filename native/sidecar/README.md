@@ -38,9 +38,11 @@ stop, and `r` restart release, and includes a runtime config editor for the same
 Settings keys edit `e` runtime executable, `h` runtime host, `p` runtime port,
 `m` model file, `i` model ID, `u` upstream, and `f` Hugging Face token, plus
 `l` launch runtime, `a` import model, and `v` runtime verbose toggles. The
-Models tab can also create catalog-backed llama.cpp runners with `m` main, `e`
-embedding, and `r` rerank by calling the same runner creation method behind
-`POST /sidecar/v1/runners`.
+Models tab can download the next missing required catalog artifact with `d` by
+calling the same catalog download method behind
+`POST /sidecar/v1/models/download`; it can also create catalog-backed llama.cpp
+runners with `m` main, `e` embedding, and `r` rerank by calling the same runner
+creation method behind `POST /sidecar/v1/runners`.
 
 By default it:
 

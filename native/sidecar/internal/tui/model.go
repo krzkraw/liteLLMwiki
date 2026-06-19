@@ -51,6 +51,12 @@ type runnerCreateMsg struct {
 	err    error
 }
 
+type modelDownloadMsg struct {
+	id    string
+	entry catalog.Entry
+	err   error
+}
+
 type runnerUpdateMsg struct {
 	field  string
 	value  string
@@ -208,6 +214,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.setActiveTab("models")
 		m.notice = m.runnerCreateNotice(msg)
+	case modelDownloadMsg:
+		m.refresh()
+		m.setActiveTab("models")
+		m.notice = m.modelDownloadNotice(msg)
 	case runnerUpdateMsg:
 		m.refresh()
 		m.setActiveTab("runner:" + msg.runner.ID)
@@ -285,6 +295,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeTabID() == "models" {
 			switch strings.ToLower(value) {
+			case "d":
+				return m, m.modelDownloadCmd()
 			case "m":
 				return m, m.runnerCreateCmd("main")
 			case "e":
@@ -911,17 +923,16 @@ func (m Model) modelsView() string {
 		"Create runners",
 		"m Main llama.cpp   e Embedding llama.cpp   r Rerank llama.cpp",
 		"",
+		"Download models",
+		"d Download next missing required model",
+		"POST /sidecar/v1/models/download",
+		"",
 	}
 	if len(m.models) == 0 {
 		lines = append(lines, "No model catalog configured.")
 	} else {
 		for _, entry := range m.models {
-			lines = append(lines, fmt.Sprintf(
-				"%s  %s  %s",
-				statusBadge(string(entry.State)),
-				entry.ID,
-				fallback(entry.TargetPath, "no target path"),
-			))
+			lines = append(lines, modelCatalogLine(entry))
 		}
 	}
 	lines = append(lines, "", "Download actions use POST /sidecar/v1/models/download through api.request.")
@@ -1130,6 +1141,33 @@ func (m Model) runnerCreateCmd(role string) tea.Cmd {
 	}
 }
 
+func (m Model) modelDownloadCmd() tea.Cmd {
+	entry, ok := m.nextDownloadEntry()
+	if !ok {
+		return func() tea.Msg {
+			return modelDownloadMsg{
+				err: fmt.Errorf("no missing required models to download"),
+			}
+		}
+	}
+
+	return func() tea.Msg {
+		if m.catalog == nil {
+			return modelDownloadMsg{
+				id:  entry.ID,
+				err: fmt.Errorf("model catalog is not configured"),
+			}
+		}
+
+		downloaded, err := m.catalog.Download(m.ctx, entry.ID)
+		return modelDownloadMsg{
+			id:    entry.ID,
+			entry: downloaded,
+			err:   err,
+		}
+	}
+}
+
 func (m Model) runnerUpdateCmd(
 	runner server.RunnerSnapshot,
 	field string,
@@ -1183,6 +1221,20 @@ func (m Model) runnerCreateNotice(message runnerCreateMsg) string {
 		return fmt.Sprintf("create %s runner failed: %v", message.label, message.err)
 	}
 	return "created runner " + message.runner.ID
+}
+
+func (m Model) modelDownloadNotice(message modelDownloadMsg) string {
+	if message.err != nil {
+		if message.id == "" {
+			return fmt.Sprintf("download model failed: %v", message.err)
+		}
+		return fmt.Sprintf("download %s failed: %v", message.id, message.err)
+	}
+	return fmt.Sprintf(
+		"downloaded model %s %s",
+		message.entry.ID,
+		modelProgress(message.entry),
+	)
 }
 
 func (m Model) runnerUpdateNotice(message runnerUpdateMsg) string {
@@ -1410,6 +1462,19 @@ func (m Model) catalogEntry(id string) (catalog.Entry, bool) {
 	return catalog.Entry{}, false
 }
 
+func (m Model) nextDownloadEntry() (catalog.Entry, bool) {
+	for _, entry := range m.models {
+		if !entry.Required {
+			continue
+		}
+		switch entry.State {
+		case catalog.StateMissing, catalog.StateError:
+			return entry, true
+		}
+	}
+	return catalog.Entry{}, false
+}
+
 func catalogRunnerSpec(entry catalog.Entry, preset runnerPreset) server.RunnerSpec {
 	return server.RunnerSpec{
 		ID:        preset.id,
@@ -1422,6 +1487,55 @@ func catalogRunnerSpec(entry catalog.Entry, preset runnerPreset) server.RunnerSp
 		Port:      preset.port,
 		Launch:    true,
 	}
+}
+
+func modelCatalogLine(entry catalog.Entry) string {
+	return fmt.Sprintf(
+		"%s %s  %s/%s  %s  %s",
+		modelStateGlyph(entry.State),
+		statusBadge(string(entry.State)),
+		fallback(entry.Runtime, "runtime"),
+		fallback(entry.Role, "role"),
+		entry.ID,
+		modelProgress(entry),
+	)
+}
+
+func modelStateGlyph(state catalog.State) string {
+	switch state {
+	case catalog.StatePresent:
+		return "●"
+	case catalog.StateDownloading:
+		return "◉"
+	case catalog.StateError:
+		return "!"
+	default:
+		return "○"
+	}
+}
+
+func modelProgress(entry catalog.Entry) string {
+	if entry.SizeBytes <= 0 {
+		return fallback(entry.TargetPath, "no target path")
+	}
+	if entry.BytesDownloaded < 1024 && entry.SizeBytes < 1024 {
+		return fmt.Sprintf("%d/%d B", entry.BytesDownloaded, entry.SizeBytes)
+	}
+	return fmt.Sprintf(
+		"%s/%s",
+		formatBytes(entry.BytesDownloaded),
+		formatBytes(entry.SizeBytes),
+	)
+}
+
+func formatBytes(value int64) string {
+	if value < 1024 {
+		return fmt.Sprintf("%d B", value)
+	}
+	if value < 1024*1024 {
+		return fmt.Sprintf("%.1f KiB", float64(value)/1024)
+	}
+	return fmt.Sprintf("%.1f MiB", float64(value)/(1024*1024))
 }
 
 func tick() tea.Cmd {

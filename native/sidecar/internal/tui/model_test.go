@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -527,6 +529,64 @@ func TestModelModelsViewShowsCatalogEntries(t *testing.T) {
 	}
 	if !strings.Contains(view, "Create runners") {
 		t.Fatalf("models view missing create controls:\n%s", view)
+	}
+	for _, expected := range []string{
+		"Download models",
+		"d Download next missing required model",
+		"POST /sidecar/v1/models/download",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("models view missing download control %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestModelsTabDownloadsNextMissingRequiredModelThroughSharedCatalog(t *testing.T) {
+	t.Parallel()
+
+	var requestedPath string
+	modelHost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.Header().Set("content-length", "10")
+		_, _ = w.Write([]byte("model-data"))
+	}))
+	defer modelHost.Close()
+
+	modelCatalog := catalog.NewDefault(t.TempDir(), catalog.WithBaseURL(modelHost.URL))
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           modelCatalog,
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	updated := next.(Model)
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("d"),
+	})
+	if cmd == nil {
+		t.Fatalf("download key returned no command")
+	}
+
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if requestedPath != "/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" {
+		t.Fatalf("requested path = %q, want first missing catalog artifact", requestedPath)
+	}
+	view := updated.View()
+	for _, expected := range []string{
+		"downloaded model gemma4-gguf",
+		"gemma4-gguf",
+		"present",
+		"10/10 B",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("models view missing download result %q:\n%s", expected, view)
+		}
 	}
 }
 

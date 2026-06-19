@@ -96,6 +96,10 @@ describe("root launcher scripts", () => {
     for (const scriptName of ["launch-webui.ps1", "launch-sidecar.ps1"]) {
       const contents = readRootScript(scriptName);
 
+      expect(contents).toContain("Start-LiteRTTerminal");
+      expect(contents).toContain("osascript");
+      expect(contents).toContain("gnome-terminal");
+      expect(contents).toContain("xterm");
       expect(contents).toContain("[switch]$Inline");
       expect(contents).toContain("Start-Process");
       expect(contents).toContain("-NoExit");
@@ -104,14 +108,29 @@ describe("root launcher scripts", () => {
   });
 
   it("launches web UI and sidecar TUI in separate terminals", () => {
+    const shellLauncher = readRootScript("launch-all.sh");
+    expect(shellLauncher).toContain("launch-webui");
+    expect(shellLauncher).toContain("launch-sidecar");
+    expect(shellLauncher).not.toContain("SIDECAR_HEADLESS");
+    expect(shellLauncher).not.toContain("cleanup");
+
+    const powershellLauncher = readRootScript("launch-all.ps1");
+    expect(powershellLauncher).toContain("launch-webui");
+    expect(powershellLauncher).toContain("launch-sidecar");
+    expect(powershellLauncher).not.toContain("SIDECAR_HEADLESS");
+    expect(powershellLauncher).not.toContain("-Headless");
+    expect(powershellLauncher).not.toContain("cleanup");
+    expect(powershellLauncher).not.toContain('"-Inline"');
+    expect(powershellLauncher).not.toContain("'-Inline'");
+  });
+
+  it("documents that launch-all preserves the sidecar TUI instead of headless mode", () => {
     for (const scriptName of ["launch-all.sh", "launch-all.ps1"]) {
       const contents = readRootScript(scriptName);
 
-      expect(contents).toContain("launch-webui");
-      expect(contents).toContain("launch-sidecar");
+      expect(contents).toContain("Sidecar TUI");
       expect(contents).not.toContain("SIDECAR_HEADLESS");
       expect(contents).not.toContain("-Headless");
-      expect(contents).not.toContain("cleanup");
     }
   });
 });

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -74,6 +75,96 @@ func TestModelRendersRichVisualShell(t *testing.T) {
 			t.Fatalf("rich visual shell missing %q:\n%s", expected, view)
 		}
 	}
+}
+
+func TestRunEnablesAlternateScreenRenderer(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("model.go")
+	if err != nil {
+		t.Fatalf("read model.go: %v", err)
+	}
+	if !strings.Contains(string(source), "tea.WithAltScreen()") {
+		t.Fatalf("Run must start Bubble Tea with tea.WithAltScreen()")
+	}
+}
+
+func TestManagedScreenViewLimitsFrameAndScrollsContent(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(64)
+	for index := range 32 {
+		logs.Publish(
+			"runner:main-litert",
+			"stdout",
+			fmt.Sprintf("managed screen log line %02d", index),
+		)
+	}
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+		ManagedScreen:     true,
+	})
+	model.width = 96
+	model.height = 32
+	model.setActiveTab("logs")
+
+	view := model.View()
+	if got := renderedLineCount(view); got > model.height {
+		t.Fatalf("managed screen view rendered %d lines, want at most %d:\n%s", got, model.height, view)
+	}
+	if !strings.Contains(view, "Scroll:") {
+		t.Fatalf("managed screen view missing in-app scroll indicator:\n%s", view)
+	}
+	if !strings.Contains(view, "Command rail") {
+		t.Fatalf("managed screen view must keep command rail visible:\n%s", view)
+	}
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	scrolled := next.(Model)
+	scrolledView := scrolled.View()
+	if scrolledView == view {
+		t.Fatalf("managed screen Down key did not scroll content")
+	}
+	if got := renderedLineCount(scrolledView); got > scrolled.height {
+		t.Fatalf("scrolled managed view rendered %d lines, want at most %d:\n%s", got, scrolled.height, scrolledView)
+	}
+}
+
+func TestManagedScreenWaitsForTerminalSizeWithoutDumpingFullPage(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(64)
+	for index := range 32 {
+		logs.Publish(
+			"runner:main-litert",
+			"stdout",
+			fmt.Sprintf("startup managed screen log line %02d", index),
+		)
+	}
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+		ManagedScreen:     true,
+	})
+	model.setActiveTab("logs")
+
+	view := model.View()
+	if got := renderedLineCount(view); got > 16 {
+		t.Fatalf("managed screen startup rendered %d lines before WindowSizeMsg:\n%s", got, view)
+	}
+	if !strings.Contains(view, "Measuring terminal") {
+		t.Fatalf("managed screen startup view missing size wait message:\n%s", view)
+	}
+}
+
+func renderedLineCount(value string) int {
+	if value == "" {
+		return 0
+	}
+	return strings.Count(value, "\n") + 1
 }
 
 func TestModelRendersPersistentMissionControlStrip(t *testing.T) {

@@ -35,6 +35,7 @@ type ModelOptions struct {
 	Catalog           *catalog.Catalog
 	Context           context.Context
 	ChatEndpoint      string
+	ManagedScreen     bool
 }
 
 type tickMsg time.Time
@@ -115,20 +116,22 @@ type Model struct {
 	ctx               context.Context
 	chatEndpoint      string
 
-	active       int
-	width        int
-	height       int
-	snapshot     server.RunnerSnapshotResponse
-	runtime      server.RuntimeStatus
-	logEntries   []server.LogEntry
-	models       []catalog.Entry
-	notice       string
-	edit         *runnerEdit
-	runtimeEdit  *runtimeEdit
-	runtimeDraft server.RuntimeControlConfig
-	chatDraft    string
-	chatMessages []chatMessage
-	chatBusy     bool
+	active        int
+	width         int
+	height        int
+	snapshot      server.RunnerSnapshotResponse
+	runtime       server.RuntimeStatus
+	logEntries    []server.LogEntry
+	models        []catalog.Entry
+	notice        string
+	edit          *runnerEdit
+	runtimeEdit   *runtimeEdit
+	runtimeDraft  server.RuntimeControlConfig
+	chatDraft     string
+	chatMessages  []chatMessage
+	chatBusy      bool
+	managedScreen bool
+	scrollOffset  int
 }
 
 var panelBorder = lipgloss.RoundedBorder()
@@ -175,6 +178,7 @@ func NewModel(options ModelOptions) Model {
 		ctx:               ctx,
 		chatEndpoint:      chatEndpoint,
 		active:            0,
+		managedScreen:     options.ManagedScreen,
 	}
 	model.refresh()
 	return model
@@ -194,8 +198,10 @@ func Run(
 			Logs:              logs,
 			Catalog:           modelCatalog,
 			Context:           ctx,
+			ManagedScreen:     true,
 		}),
 		tea.WithContext(ctx),
+		tea.WithAltScreen(),
 	)
 	_, err := program.Run()
 	return err
@@ -210,6 +216,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.clampScrollOffset()
 	case tea.KeyMsg:
 		if m.runtimeEdit != nil {
 			return m.updateRuntimeEditKey(msg)
@@ -220,6 +227,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateKey(msg)
 	case tickMsg:
 		m.refresh()
+		m.clampScrollOffset()
 		return m, tick()
 	case runnerActionMsg:
 		m.refresh()
@@ -256,14 +264,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.managedScreen {
+		if next, ok := m.updateScrollKey(msg); ok {
+			return next, nil
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
 		return m, tea.Quit
 	case tea.KeyRight, tea.KeyTab:
 		m.active = (m.active + 1) % len(m.tabs())
+		m.resetScroll()
 		return m, nil
 	case tea.KeyLeft, tea.KeyShiftTab:
 		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+		m.resetScroll()
 		return m, nil
 	case tea.KeyBackspace, tea.KeyCtrlH, tea.KeyEnter:
 		if m.activeTabID() == "chat" {
@@ -432,6 +448,27 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateScrollKey(msg tea.KeyMsg) (Model, bool) {
+	switch msg.Type {
+	case tea.KeyUp:
+		m.scrollOffset--
+	case tea.KeyDown:
+		m.scrollOffset++
+	case tea.KeyPgUp:
+		m.scrollOffset -= m.scrollPageSize()
+	case tea.KeyPgDown:
+		m.scrollOffset += m.scrollPageSize()
+	case tea.KeyHome:
+		m.scrollOffset = 0
+	case tea.KeyEnd:
+		m.scrollOffset = m.maxScrollOffset()
+	default:
+		return m, false
+	}
+	m.clampScrollOffset()
+	return m, true
+}
+
 func (m Model) updateEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	edit := *m.edit
 	switch msg.Type {
@@ -538,6 +575,16 @@ func (m Model) updateChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.managedScreen {
+		if m.height <= 0 {
+			return m.managedStartupView()
+		}
+		return m.managedScreenView()
+	}
+	return m.fullView()
+}
+
+func (m Model) fullView() string {
 	var builder strings.Builder
 	builder.WriteString(m.headerView())
 	builder.WriteString("\n\n")
@@ -550,30 +597,83 @@ func (m Model) View() string {
 		builder.WriteString("\n\n")
 	}
 
-	switch m.activeTabID() {
-	case "dashboard":
-		builder.WriteString(m.dashboardView())
-	case "wizard":
-		builder.WriteString(m.wizardView())
-	case "chat":
-		builder.WriteString(m.chatView())
-	case "models":
-		builder.WriteString(m.modelsView())
-	case "logs":
-		builder.WriteString(m.logsView())
-	case "settings":
-		builder.WriteString(m.settingsView())
-	default:
-		if runner, ok := m.activeRunner(); ok {
-			builder.WriteString(m.runnerView(runner))
-		} else {
-			builder.WriteString(renderPanel("Runner", []string{"No runner selected."}, "196"))
-		}
-	}
+	builder.WriteString(m.activeContentView())
 	builder.WriteString("\n\n")
 	builder.WriteString(m.commandRailView())
 
 	return builder.String()
+}
+
+func (m Model) managedScreenView() string {
+	top := m.managedTopView()
+	footer := m.commandRailView()
+	bodyHeight := managedBodyHeight(m.height, top, footer)
+	if bodyHeight <= 0 {
+		topHeight := m.height - viewLineCount(footer) - 2
+		if topHeight < 0 {
+			topHeight = 0
+		}
+		return fitLinesToHeight(joinPanels(sliceRenderedLines(top, 0, topHeight), footer), m.height)
+	}
+
+	body := m.activeContentView()
+	visibleBody := sliceRenderedLines(body, m.scrollOffset, bodyHeight)
+	if strings.TrimSpace(visibleBody) == "" {
+		visibleBody = mutedStyle.Render("No content in this pane.")
+	}
+
+	return fitLinesToHeight(joinPanels(top, visibleBody, footer), m.height)
+}
+
+func (m Model) managedStartupView() string {
+	return joinPanels(
+		m.headerView(),
+		m.tabBar(),
+		renderPanel(
+			"Managed screen",
+			[]string{
+				"Measuring terminal before drawing the TUI frame.",
+				"Content will scroll inside the app, not the terminal.",
+			},
+			"45",
+		),
+	)
+}
+
+func (m Model) managedTopView() string {
+	var builder strings.Builder
+	builder.WriteString(m.headerView())
+	builder.WriteString("\n\n")
+	builder.WriteString(m.tabBar())
+	builder.WriteString("\n\n")
+	builder.WriteString(m.missionControlView())
+	if strings.TrimSpace(m.notice) != "" {
+		builder.WriteString("\n\n")
+		builder.WriteString(noticeStyle.Render(m.notice))
+	}
+	return builder.String()
+}
+
+func (m Model) activeContentView() string {
+	switch m.activeTabID() {
+	case "dashboard":
+		return m.dashboardView()
+	case "wizard":
+		return m.wizardView()
+	case "chat":
+		return m.chatView()
+	case "models":
+		return m.modelsView()
+	case "logs":
+		return m.logsView()
+	case "settings":
+		return m.settingsView()
+	default:
+		if runner, ok := m.activeRunner(); ok {
+			return m.runnerView(runner)
+		}
+		return renderPanel("Runner", []string{"No runner selected."}, "196")
+	}
 }
 
 func newRunnerEdit(
@@ -730,6 +830,9 @@ func (m *Model) selectRuneTab(value string) bool {
 	if index < 0 || index >= len(m.tabs()) {
 		return false
 	}
+	if m.active != index {
+		m.resetScroll()
+	}
 	m.active = index
 	return true
 }
@@ -791,6 +894,9 @@ func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
 func (m *Model) setActiveTab(id string) {
 	for index, item := range m.tabs() {
 		if item.id == id {
+			if m.active != index {
+				m.resetScroll()
+			}
 			m.active = index
 			return
 		}
@@ -905,8 +1011,23 @@ func (m Model) commandRailView() string {
 }
 
 func (m Model) commandRailLines() []string {
+	scrollLine := ""
+	if m.managedScreen {
+		scrollLine = m.scrollStatusLine()
+	}
+	return m.commandRailLinesWithScrollLine(scrollLine)
+}
+
+func (m Model) commandRailViewWithScrollLine(scrollLine string) string {
+	return renderPanel("Command rail", m.commandRailLinesWithScrollLine(scrollLine), "39")
+}
+
+func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 	lines := []string{
 		fmt.Sprintf("Global: Tab/Right next | Shift+Tab/Left previous | 1-%d jump | Esc quit", len(m.tabs())),
+	}
+	if m.managedScreen && strings.TrimSpace(scrollLine) != "" {
+		lines = append(lines, scrollLine)
 	}
 
 	switch m.activeTabID() {
@@ -2862,6 +2983,129 @@ func joinPanels(panels ...string) string {
 
 func joinPanelRow(left string, right string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+}
+
+func managedBodyHeight(totalHeight int, top string, footer string) int {
+	bodyHeight := totalHeight - viewLineCount(top) - viewLineCount(footer) - 4
+	if bodyHeight < 0 {
+		return 0
+	}
+	return bodyHeight
+}
+
+func (m Model) scrollPageSize() int {
+	pageSize := managedBodyHeight(m.height, m.managedTopView(), m.commandRailSizingView())
+	if pageSize < 1 {
+		return 1
+	}
+	return pageSize
+}
+
+func (m Model) maxScrollOffset() int {
+	bodyHeight := managedBodyHeight(m.height, m.managedTopView(), m.commandRailSizingView())
+	if bodyHeight <= 0 {
+		return 0
+	}
+	lineCount := viewLineCount(m.activeContentView())
+	if lineCount <= bodyHeight {
+		return 0
+	}
+	return lineCount - bodyHeight
+}
+
+func (m Model) scrollStatusLine() string {
+	bodyHeight := managedBodyHeight(m.height, m.managedTopView(), m.commandRailSizingView())
+	totalLines := viewLineCount(m.activeContentView())
+	if bodyHeight <= 0 || totalLines <= bodyHeight {
+		return "Scroll: content fits | Up/Down PgUp/PgDn Home/End"
+	}
+	startLine := clampInt(m.scrollOffset, 0, m.maxScrollOffset()) + 1
+	endLine := minInt(startLine+bodyHeight-1, totalLines)
+	return fmt.Sprintf(
+		"Scroll: lines %d-%d/%d | Up/Down line | PgUp/PgDn page | Home/End",
+		startLine,
+		endLine,
+		totalLines,
+	)
+}
+
+func (m Model) commandRailSizingView() string {
+	if !m.managedScreen {
+		return m.commandRailViewWithScrollLine("")
+	}
+	return m.commandRailViewWithScrollLine("Scroll: Up/Down line | PgUp/PgDn page | Home/End content")
+}
+
+func (m *Model) resetScroll() {
+	m.scrollOffset = 0
+}
+
+func (m *Model) clampScrollOffset() {
+	m.scrollOffset = clampInt(m.scrollOffset, 0, m.maxScrollOffset())
+}
+
+func sliceRenderedLines(value string, offset int, height int) string {
+	if height <= 0 || value == "" {
+		return ""
+	}
+	lines := strings.Split(value, "\n")
+	offset = clampInt(offset, 0, maxInt(0, len(lines)-height))
+	end := offset + height
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return strings.Join(lines[offset:end], "\n")
+}
+
+func fitLinesToHeight(value string, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	lines := []string{}
+	if value != "" {
+		lines = strings.Split(value, "\n")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func viewLineCount(value string) int {
+	if value == "" {
+		return 0
+	}
+	return strings.Count(value, "\n") + 1
+}
+
+func clampInt(value int, minimum int, maximum int) int {
+	if maximum < minimum {
+		return minimum
+	}
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
+}
+
+func maxInt(left int, right int) int {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func minInt(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func formatKV(label string, value string) string {

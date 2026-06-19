@@ -1209,7 +1209,7 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 		"runtime.stop",
 		"runtime.restart",
 		"api.request POST /sidecar/v1/multimodal",
-		"api.request * /v1/* upstream proxy",
+		"api.request * /v1/* -> runner supervisor route authority",
 		"api.request GET /sidecar/v1/runners",
 		"api.request PATCH /sidecar/v1/runners/{id}",
 		"api.request POST /sidecar/v1/runners/{id}/start",
@@ -1217,10 +1217,49 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 		"api.request POST /sidecar/v1/runners/{id}/restart",
 		"RuntimeController",
 		"RunnerController",
-		"same methods",
+		"same backing methods",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("settings view missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestSettingsViewGroupsAPIParityBySharedMethodBacking(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	model.setActiveTab("settings")
+	view := model.View()
+
+	for _, expected := range []string{
+		"Direct WebSocket messages",
+		"status.get -> RuntimeController.Status",
+		"runtime.start -> RuntimeController.Start",
+		"runtime.restart -> RuntimeController.Restart",
+		"runtime.stop -> RuntimeController.Stop",
+		"logs.subscribe -> LogBroadcaster.Subscribe",
+		"Sidecar api.request routes",
+		"GET /sidecar/v1/status -> RuntimeController.Status",
+		"GET /sidecar/v1/models -> Catalog.Entries",
+		"POST /sidecar/v1/models/download -> Catalog.Download",
+		"GET /sidecar/v1/runners -> RunnerController.Snapshot",
+		"POST /sidecar/v1/runners -> RunnerController.CreateRunner",
+		"PATCH /sidecar/v1/runners/{id} -> RunnerController.UpdateRunner",
+		"POST /sidecar/v1/runners/{id}/start -> RunnerController.StartRunner",
+		"POST /sidecar/v1/runners/{id}/stop -> RunnerController.StopRunner",
+		"POST /sidecar/v1/runners/{id}/restart -> RunnerController.RestartRunner",
+		"POST /sidecar/v1/multimodal -> RuntimeController.Multimodal",
+		"OpenAI upstream proxy",
+		"* /v1/* -> runner supervisor route authority",
+		"TUI uses the same backing methods as WebSocket and HTTP handlers.",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("settings grouped API parity missing %q:\n%s", expected, view)
 		}
 	}
 }

@@ -65,8 +65,9 @@ TUI key beside the controller method and matching WebSocket/API route it uses.
 Its live runner API parity panel is generated from `RunnerController.Snapshot()`
 and lists each runner's role, state, routed OpenAI path, `RunnerController`
 methods, and concrete `api.request` PATCH/start/stop/restart paths. Its API
-parity panel includes the model catalog, runner management, native multimodal,
-and `/v1/*` upstream proxy paths supported by WebSocket `api.request`.
+parity panel groups direct WebSocket messages, sidecar `api.request` routes,
+and the `/v1/*` upstream proxy, with each row naming the backing controller,
+catalog, log broadcaster, or supervisor route-authority method.
 Settings keys edit `e` runtime executable, `h` runtime host, `p` runtime port,
 `m` model file, `i` model ID, `u` upstream, and `f` Hugging Face token, plus
 `l` launch runtime, `a` import model, and `v` runtime verbose toggles. The

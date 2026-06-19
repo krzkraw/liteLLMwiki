@@ -1744,26 +1744,7 @@ func (m Model) settingsView() string {
 	activeEditor := m.runtimeEditorView()
 	actionMap := renderPanel("Shared action map", settingsActionMapLines(), "214")
 	runnerParity := renderPanel("Runner API parity / Live snapshot", m.settingsRunnerParityLines(), "39")
-	webSocketParity := renderPanel("WebSocket API parity", []string{
-		"status.get",
-		"runtime.start",
-		"runtime.start config",
-		"runtime.stop",
-		"runtime.restart",
-		"runtime.restart config",
-		"api.request GET /sidecar/v1/status",
-		"api.request GET /sidecar/v1/models",
-		"api.request POST /sidecar/v1/models/download",
-		"api.request POST /sidecar/v1/multimodal",
-		"api.request GET /sidecar/v1/runners",
-		"api.request POST /sidecar/v1/runners",
-		"api.request PATCH /sidecar/v1/runners/{id}",
-		"api.request POST /sidecar/v1/runners/{id}/start",
-		"api.request POST /sidecar/v1/runners/{id}/stop",
-		"api.request POST /sidecar/v1/runners/{id}/restart",
-		"api.request * /v1/* upstream proxy",
-		"TUI controls call the same methods underneath: RuntimeController and RunnerController.",
-	}, "205")
+	webSocketParity := renderPanel("WebSocket API parity", settingsAPIParityLines(), "205")
 
 	if m.width >= 150 {
 		return joinPanels(
@@ -1832,6 +1813,73 @@ func (m Model) settingsRouteSummaryLine() string {
 		parts = append(parts, key+" -> "+m.snapshot.Routes[key])
 	}
 	return "Routes: " + strings.Join(parts, ", ")
+}
+
+type settingsAPIParityGroup struct {
+	title string
+	rows  []settingsAPIParityRow
+}
+
+type settingsAPIParityRow struct {
+	surface string
+	backing string
+}
+
+func settingsAPIParityGroups() []settingsAPIParityGroup {
+	return []settingsAPIParityGroup{
+		{
+			title: "Direct WebSocket messages",
+			rows: []settingsAPIParityRow{
+				{surface: "status.get", backing: "RuntimeController.Status"},
+				{surface: "runtime.start", backing: "RuntimeController.Start"},
+				{surface: "runtime.start config", backing: "RuntimeController.Start"},
+				{surface: "runtime.stop", backing: "RuntimeController.Stop"},
+				{surface: "runtime.restart", backing: "RuntimeController.Restart"},
+				{surface: "runtime.restart config", backing: "RuntimeController.Restart"},
+				{surface: "logs.subscribe", backing: "LogBroadcaster.Subscribe"},
+			},
+		},
+		{
+			title: "Sidecar api.request routes",
+			rows: []settingsAPIParityRow{
+				{surface: "api.request GET /sidecar/v1/status", backing: "RuntimeController.Status"},
+				{surface: "api.request GET /sidecar/v1/models", backing: "Catalog.Entries"},
+				{surface: "api.request POST /sidecar/v1/models/download", backing: "Catalog.Download"},
+				{surface: "api.request GET /sidecar/v1/runners", backing: "RunnerController.Snapshot"},
+				{surface: "api.request POST /sidecar/v1/runners", backing: "RunnerController.CreateRunner"},
+				{surface: "api.request PATCH /sidecar/v1/runners/{id}", backing: "RunnerController.UpdateRunner"},
+				{surface: "api.request POST /sidecar/v1/runners/{id}/start", backing: "RunnerController.StartRunner"},
+				{surface: "api.request POST /sidecar/v1/runners/{id}/stop", backing: "RunnerController.StopRunner"},
+				{
+					surface: "api.request POST /sidecar/v1/runners/{id}/restart",
+					backing: "RunnerController.RestartRunner",
+				},
+				{surface: "api.request POST /sidecar/v1/multimodal", backing: "RuntimeController.Multimodal"},
+			},
+		},
+		{
+			title: "OpenAI upstream proxy",
+			rows: []settingsAPIParityRow{
+				{surface: "api.request * /v1/*", backing: "runner supervisor route authority"},
+			},
+		},
+	}
+}
+
+func settingsAPIParityLines() []string {
+	groups := settingsAPIParityGroups()
+	lines := make([]string, 0, 32)
+	for groupIndex, group := range groups {
+		if groupIndex > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, group.title)
+		for _, row := range group.rows {
+			lines = append(lines, row.surface+" -> "+row.backing)
+		}
+	}
+	lines = append(lines, "", "TUI uses the same backing methods as WebSocket and HTTP handlers.")
+	return lines
 }
 
 func settingsActionMapLines() []string {

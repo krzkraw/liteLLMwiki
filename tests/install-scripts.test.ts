@@ -216,6 +216,25 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("keeps browser smoke launch failures recoverable during install", () => {
+    const shell = readRootScript("install.sh");
+    const powershell = readRootScript("install.ps1");
+
+    expect(shell).toContain("run_smoke_or_wait");
+    expect(shell).toContain("Smoke browser automation failed.");
+    expect(shell).toContain('add_summary "SKIP: $label"');
+    expect(shell).toContain('run_smoke_or_wait "smoke UI"');
+    expect(shell).toContain('expected_result="smoke command completes successfully"');
+    expect(shell).toContain("[N] No - continue without this smoke check");
+
+    expect(powershell).toContain("Invoke-SmokeOrWait");
+    expect(powershell).toContain("Smoke browser automation failed.");
+    expect(powershell).toContain('Add-Summary "SKIP: $Label"');
+    expect(powershell).toContain('Invoke-SmokeOrWait -Label "smoke UI"');
+    expect(powershell).toContain('$ExpectedResult = "smoke command completes successfully"');
+    expect(powershell).toContain("[N] No - continue without this smoke check");
+  });
+
   it("uses separate PowerShell smoke server stdout and stderr log files", () => {
     const contents = readRootScript("install.ps1");
 

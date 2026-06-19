@@ -115,6 +115,104 @@ run_logged() {
   add_summary "PASS: $label"
 }
 
+print_smoke_task_box() {
+  local label="$1"
+  local command_text="$2"
+  local expected_result="$3"
+  local line
+
+  printf '\n+------------------------------------------------------------+\n'
+  printf '| Task: %s\n' "$label"
+  printf '| Description: Automated browser smoke verification failed. Retry it, run it manually, or continue with a skipped smoke entry.\n'
+  printf '| Command or URL I would use:\n'
+  while IFS= read -r line; do
+    print_box_line "  $line"
+  done <<< "$command_text"
+  printf '| Expected result: %s\n' "$expected_result"
+  print_box_line "Do you want me to do it?"
+  printf '| Choices:\n'
+  print_box_line "  [Y] Yes - retry it now"
+  print_box_line "  [N] No - continue without this smoke check"
+  print_box_line "  [M] Manual & wait - I will do it and press Enter"
+  printf '+------------------------------------------------------------+\n'
+}
+
+prompt_smoke_choice() {
+  local label="$1"
+  local command_text="$2"
+  local expected_result="$3"
+  local answer
+
+  print_smoke_task_box "$label" "$command_text" "$expected_result"
+  while true; do
+    printf 'Choice [Y/N/M]: '
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) return 0 ;;
+      n|N|no|NO) return 1 ;;
+      m|M|manual|MANUAL) return 2 ;;
+      *) printf 'Choose Y, N, or M.\n' ;;
+    esac
+  done
+}
+
+wait_for_smoke_manual() {
+  local label="$1"
+  local expected_result="$2"
+
+  printf 'I will wait.\n'
+  printf 'Expected result: %s\n' "$expected_result"
+  printf 'Press Enter after the expected result is true: %s\n' "$label"
+  read -r _
+  print_green_check "$label - manual confirmation recorded"
+  add_summary "MANUAL: $label"
+}
+
+run_smoke_or_wait() {
+  local label="$1"
+  local command_text="$2"
+  shift 2
+  local expected_result="smoke command completes successfully"
+  local choice
+
+  printf '\n==> %s\n' "$label"
+  if "$@"; then
+    print_green_check "$label - done"
+    add_summary "PASS: $label"
+    return 0
+  fi
+
+  printf 'Smoke browser automation failed.\n'
+  printf 'Command or URL I would use:\n%s\n' "$command_text"
+  printf 'Expected result: %s\n' "$expected_result"
+  if prompt_smoke_choice "$label" "$command_text" "$expected_result"; then
+    choice=0
+  else
+    choice=$?
+  fi
+
+  case "$choice" in
+    0)
+      printf '\n==> %s retry\n' "$label"
+      if "$@"; then
+        print_green_check "$label - done"
+        add_summary "PASS: $label"
+      else
+        printf 'Smoke browser automation failed.\n'
+        printf 'The task failed. Here is the command or URL again:\n%s\n' "$command_text"
+        wait_for_smoke_manual "$label" "$expected_result"
+      fi
+      ;;
+    1)
+      printf 'Continuing without this smoke check.\n'
+      add_summary "SKIP: $label"
+      ;;
+    2)
+      wait_for_smoke_manual "$label" "$expected_result"
+      ;;
+  esac
+}
+
 usage() {
   cat <<'USAGE'
 Usage: ./install.sh [modelsNextcloud=<public-share-url>]
@@ -1080,11 +1178,14 @@ run_smoke_tests() {
     return 1
   fi
 
-  run_logged "smoke UI" env SMOKE_URL="$smoke_url" bun run smoke
-  run_logged "smoke executable sidecar" env SMOKE_URL="$smoke_url" bun run smoke:executable
+  run_smoke_or_wait "smoke UI" "env SMOKE_URL='$smoke_url' bun run smoke" \
+    env SMOKE_URL="$smoke_url" bun run smoke
+  run_smoke_or_wait "smoke executable sidecar" "env SMOKE_URL='$smoke_url' bun run smoke:executable" \
+    env SMOKE_URL="$smoke_url" bun run smoke:executable
 
   if [[ -s "$repo_root/models/litert/browser/gemma-4-E2B-it-web.litertlm" ]]; then
-    run_logged "smoke web model" env SMOKE_URL="$smoke_url" bun run smoke:model
+    run_smoke_or_wait "smoke web model" "env SMOKE_URL='$smoke_url' bun run smoke:model" \
+      env SMOKE_URL="$smoke_url" bun run smoke:model
   else
     add_summary "SKIP: smoke web model, models/litert/browser/gemma-4-E2B-it-web.litertlm missing"
   fi

@@ -134,6 +134,126 @@ function Invoke-RunLogged {
   Add-Summary "PASS: $Label"
 }
 
+function Write-SmokeTaskBox {
+  param(
+    [string]$Label,
+    [string]$CommandText,
+    [string]$ExpectedResult
+  )
+
+  Write-Host ""
+  Write-Host "+------------------------------------------------------------+"
+  Write-Host "| Task: $Label"
+  Write-Host "| Description: Automated browser smoke verification failed. Retry it, run it manually, or continue with a skipped smoke entry."
+  Write-Host "| Command or URL I would use:"
+  foreach ($Line in ($CommandText -split "`r?`n")) {
+    Write-BoxLine "  $Line"
+  }
+  Write-Host "| Expected result: $ExpectedResult"
+  Write-BoxLine "Do you want me to do it?"
+  Write-Host "| Choices:"
+  Write-BoxLine "  [Y] Yes - retry it now"
+  Write-BoxLine "  [N] No - continue without this smoke check"
+  Write-BoxLine "  [M] Manual & wait - I will do it and press Enter"
+  Write-Host "+------------------------------------------------------------+"
+}
+
+function Read-SmokeChoice {
+  param(
+    [string]$Label,
+    [string]$CommandText,
+    [string]$ExpectedResult
+  )
+
+  Write-SmokeTaskBox -Label $Label -CommandText $CommandText -ExpectedResult $ExpectedResult
+  while ($true) {
+    $Answer = Read-Host "Choice [Y/N/M]"
+    if ($Answer -match "^(y|yes)$") {
+      return "yes"
+    }
+    if ($Answer -match "^(n|no)$") {
+      return "no"
+    }
+    if ($Answer -match "^(m|manual)$") {
+      return "manual"
+    }
+    Write-Host "Choose Y, N, or M."
+  }
+}
+
+function Invoke-SmokeAction {
+  param([scriptblock]$Action)
+
+  try {
+    & $Action
+    return $LASTEXITCODE -eq 0
+  } catch {
+    Write-Host $_
+    return $false
+  }
+}
+
+function Invoke-WaitForSmokeManual {
+  param(
+    [string]$Label,
+    [string]$ExpectedResult
+  )
+
+  Write-Host "I will wait."
+  Write-Host "Expected result: $ExpectedResult"
+  Read-Host "Press Enter after the expected result is true: $Label" | Out-Null
+  Write-GreenCheck "$Label - manual confirmation recorded"
+  Add-Summary "MANUAL: $Label"
+}
+
+function Invoke-SmokeOrWait {
+  param(
+    [string]$Label,
+    [string]$CommandText,
+    [scriptblock]$Action
+  )
+
+  $ExpectedResult = "smoke command completes successfully"
+
+  Write-Host ""
+  Write-Host "==> $Label"
+  if (Invoke-SmokeAction -Action $Action) {
+    Write-GreenCheck "$Label - done"
+    Add-Summary "PASS: $Label"
+    return
+  }
+
+  Write-Host "Smoke browser automation failed."
+  Write-Host "Command or URL I would use:"
+  Write-Host $CommandText
+  Write-Host "Expected result: $ExpectedResult"
+  $Choice = Read-SmokeChoice -Label $Label -CommandText $CommandText -ExpectedResult $ExpectedResult
+
+  if ($Choice -eq "yes") {
+    Write-Host ""
+    Write-Host "==> $Label retry"
+    if (Invoke-SmokeAction -Action $Action) {
+      Write-GreenCheck "$Label - done"
+      Add-Summary "PASS: $Label"
+      return
+    }
+
+    Write-Host "Smoke browser automation failed."
+    Write-Host "The task failed. Here is the command or URL again:"
+    Write-Host $CommandText
+    Invoke-WaitForSmokeManual -Label $Label -ExpectedResult $ExpectedResult
+    return
+  }
+
+  if ($Choice -eq "manual") {
+    Invoke-WaitForSmokeManual -Label $Label -ExpectedResult $ExpectedResult
+    return
+  }
+
+  Write-Host "Continuing without this smoke check."
+  Add-Summary "SKIP: $Label"
+}
+
 function Initialize-ModelsNextcloud {
   param([string]$Share)
 
@@ -1005,18 +1125,18 @@ function Run-SmokeTests {
   }
 
   try {
-    Invoke-RunLogged "smoke UI" {
+    Invoke-SmokeOrWait -Label "smoke UI" -CommandText "`$env:SMOKE_URL = '$SmokeUrl'`nbun run smoke" -Action {
       $env:SMOKE_URL = $SmokeUrl
       & bun run smoke
     }
-    Invoke-RunLogged "smoke executable sidecar" {
+    Invoke-SmokeOrWait -Label "smoke executable sidecar" -CommandText "`$env:SMOKE_URL = '$SmokeUrl'`nbun run smoke:executable" -Action {
       $env:SMOKE_URL = $SmokeUrl
       & bun run smoke:executable
     }
 
     $WebModel = Join-Path $RepoRoot "models\litert\browser\gemma-4-E2B-it-web.litertlm"
     if ((Test-Path $WebModel) -and ((Get-Item $WebModel).Length -gt 0)) {
-      Invoke-RunLogged "smoke web model" {
+      Invoke-SmokeOrWait -Label "smoke web model" -CommandText "`$env:SMOKE_URL = '$SmokeUrl'`nbun run smoke:model" -Action {
         $env:SMOKE_URL = $SmokeUrl
         & bun run smoke:model
       }

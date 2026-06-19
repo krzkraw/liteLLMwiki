@@ -11,14 +11,15 @@ describe("native runner paths", () => {
       resolveSidecarSourceRoot,
     } = await import("./nativeRunnerPaths.mjs");
 
-    const scriptPath = resolve("/repo/scripts/nativeRunnerPaths.mjs");
-    expect(resolveAppRoot(pathToFileURL(scriptPath).href)).toBe(resolve("/repo"));
-    expect(resolveNativeRunnerRoot("/repo")).toBe(
-      resolve("/repo/native/sidecar-artifacts"),
+    const appRoot = resolve(process.cwd());
+    const scriptPath = resolve(appRoot, "scripts/nativeRunnerPaths.mjs");
+    expect(resolveAppRoot(pathToFileURL(scriptPath).href)).toBe(appRoot);
+    expect(resolveNativeRunnerRoot(appRoot)).toBe(
+      resolve(appRoot, "native/sidecar-artifacts"),
     );
-    expect(resolveRepoRoot("/repo")).toBe(resolve("/repo"));
-    expect(resolveSidecarSourceRoot("/repo")).toBe(
-      resolve("/repo/native/sidecar"),
+    expect(resolveRepoRoot(appRoot)).toBe(appRoot);
+    expect(resolveSidecarSourceRoot(appRoot)).toBe(
+      resolve(appRoot, "native/sidecar"),
     );
   });
 

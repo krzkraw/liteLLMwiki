@@ -1400,24 +1400,111 @@ func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
 }
 
 func (m Model) modelsView() string {
-	lines := []string{
+	readiness := renderPanel(
+		"Model readiness / Required artifacts",
+		m.modelReadinessLines(),
+		"82",
+	)
+	actions := renderPanel(
+		"Runner creation / Catalog presets",
+		modelActionLines(),
+		"214",
+	)
+	cards := renderPanel(
+		"Catalog cards / Download state",
+		m.modelCatalogCardLines(),
+		"45",
+	)
+
+	if m.width >= 150 {
+		return joinPanels(
+			joinPanelRow(readiness, actions),
+			cards,
+		)
+	}
+
+	return joinPanels(
+		readiness,
+		actions,
+		cards,
+	)
+}
+
+func (m Model) modelReadinessLines() []string {
+	if len(m.models) == 0 {
+		return []string{"No model catalog configured."}
+	}
+
+	required, present := m.requiredModelCounts()
+	missing := required - present
+	nextAction := "all required models ready"
+	if entry, ok := m.nextDownloadEntry(); ok {
+		nextAction = "d Download " + entry.ID + " via POST /sidecar/v1/models/download"
+	}
+
+	return []string{
+		formatSignalLine(
+			"Required",
+			modelSignalGlyph(present, required),
+			fmt.Sprintf("%d/%d present", present, required),
+			modelSignalMeter(present, required),
+		),
+		formatSignalLine(
+			"Missing",
+			modelMissingGlyph(missing),
+			fmt.Sprintf("%d missing", missing),
+			"download queue",
+		),
+		formatSignalLine(
+			"Catalog",
+			"●",
+			fmt.Sprintf("%d entries", len(m.models)),
+			"required artifacts",
+		),
+		fmt.Sprintf("%-11s %s", "Next", nextAction),
+		"Legend      ● present  ◉ downloading  ! error  ○ missing",
+	}
+}
+
+func modelActionLines() []string {
+	return []string{
 		"Create runners",
-		"m Main llama.cpp   e Embedding llama.cpp   r Rerank llama.cpp",
+		"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
+		"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
+		"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
+		"RunnerController.CreateRunner",
+		"POST /sidecar/v1/runners",
 		"",
 		"Download models",
 		"d Download next missing required model",
+		"Catalog.Download",
 		"POST /sidecar/v1/models/download",
-		"",
+		"WebSocket api.request parity for both actions",
 	}
+}
+
+func (m Model) modelCatalogCardLines() []string {
 	if len(m.models) == 0 {
-		lines = append(lines, "No model catalog configured.")
-	} else {
-		for _, entry := range m.models {
-			lines = append(lines, modelCatalogLine(entry))
+		return []string{"No model catalog configured."}
+	}
+
+	lines := make([]string, 0, len(m.models)*6)
+	for index, entry := range m.models {
+		if index > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(
+			lines,
+			modelCatalogCardHeader(entry),
+			formatKV("File", entry.Filename),
+			formatKV("Target", entry.TargetPath),
+			formatKV("Progress", modelProgress(entry)),
+		)
+		if entry.LastError != "" {
+			lines = append(lines, formatKV("Last error", entry.LastError))
 		}
 	}
-	lines = append(lines, "", "Download actions use POST /sidecar/v1/models/download through api.request.")
-	return renderPanel("Models", lines, "82")
+	return lines
 }
 
 func (m Model) logsView() string {
@@ -2066,6 +2153,23 @@ func modelCatalogLine(entry catalog.Entry) string {
 		entry.ID,
 		modelProgress(entry),
 	)
+}
+
+func modelCatalogCardHeader(entry catalog.Entry) string {
+	return fmt.Sprintf(
+		"%s %-11s %-18s %s",
+		modelStateGlyph(entry.State),
+		string(entry.State),
+		fallback(entry.Runtime, "runtime")+"/"+fallback(entry.Role, "role"),
+		entry.ID,
+	)
+}
+
+func modelMissingGlyph(missing int) string {
+	if missing == 0 {
+		return "●"
+	}
+	return "!"
 }
 
 func modelStateGlyph(state catalog.State) string {

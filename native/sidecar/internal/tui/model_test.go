@@ -935,6 +935,57 @@ func TestModelModelsViewShowsCatalogEntries(t *testing.T) {
 	}
 }
 
+func TestModelsTabRendersReadinessAndActionPanels(t *testing.T) {
+	t.Parallel()
+
+	modelCatalog := catalog.NewDefault(t.TempDir())
+	entries := modelCatalog.Entries()
+	if len(entries) == 0 {
+		t.Fatalf("test catalog has no entries")
+	}
+	if err := os.MkdirAll(filepath.Dir(entries[0].TargetPath), 0o755); err != nil {
+		t.Fatalf("create model dir: %v", err)
+	}
+	if err := os.WriteFile(entries[0].TargetPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model file: %v", err)
+	}
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           modelCatalog,
+	})
+	model.width = 180
+	model.height = 48
+	model.setActiveTab("models")
+	view := model.View()
+
+	for _, expected := range []string{
+		"Model readiness / Required artifacts",
+		"Required    ◐ 1/4 present [##--------] required ready",
+		"Missing     ! 3 missing   download queue",
+		"Next        d Download qwen3-embedding-gguf via POST /sidecar/v1/models/download",
+		"Runner creation / Catalog presets",
+		"Create runners",
+		"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
+		"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
+		"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
+		"POST /sidecar/v1/runners",
+		"Catalog cards / Download state",
+		"● present     llamacpp/main      gemma4-gguf",
+		"○ missing     llamacpp/embedding qwen3-embedding-gguf",
+		"Progress:      5/5 B",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("models view missing rich panel content %q:\n%s", expected, view)
+		}
+	}
+	if !viewLineContainsAll(view, "Model readiness / Required artifacts", "Runner creation / Catalog presets") {
+		t.Fatalf("wide models tab did not place readiness beside actions:\n%s", view)
+	}
+}
+
 func TestModelsTabDownloadsNextMissingRequiredModelThroughSharedCatalog(t *testing.T) {
 	t.Parallel()
 

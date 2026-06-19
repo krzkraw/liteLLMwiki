@@ -71,7 +71,11 @@ Models tab can download the next missing required catalog artifact with `d` by
 calling the same catalog download method behind
 `POST /sidecar/v1/models/download`; it can also create catalog-backed llama.cpp
 runners with `m` main, `e` embedding, and `r` rerank by calling the same runner
-creation method behind `POST /sidecar/v1/runners`.
+creation method behind `POST /sidecar/v1/runners`. The Models tab renders a
+readiness panel for required artifacts, a runner creation/action parity panel,
+and catalog cards that show runtime, role, target file, progress, and any
+download error for each artifact. On wide terminals it pairs readiness beside
+actions so download state and runnable presets stay visible together.
 
 By default it:
 

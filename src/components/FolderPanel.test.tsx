@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { FolderPanel } from "./FolderPanel";
 import type { FolderManifest } from "../lib/folderIndex";
 import type { SummaryResult } from "../lib/summarization";
@@ -61,7 +61,7 @@ describe("FolderPanel", () => {
   });
 
   it("renders folder selection controls with directory file input", async () => {
-    const onFilesSelected = vi.fn();
+    const onFilesSelected = mock();
 
     await renderFolderPanel({ onFilesSelected });
 
@@ -84,7 +84,7 @@ describe("FolderPanel", () => {
   });
 
   it("offers the direct directory picker when the browser supports it", async () => {
-    const onChooseDirectory = vi.fn();
+    const onChooseDirectory = mock();
 
     await renderFolderPanel({
       hasDirectoryPicker: true,

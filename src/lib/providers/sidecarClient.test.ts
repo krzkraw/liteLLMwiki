@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import { getSidecarStatus } from "./sidecarClient";
 
 describe("getSidecarStatus", () => {
   it("probes origin sidecar status before endpoint-local fallbacks", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
+    const fetchImpl = mock().mockResolvedValue({
       ok: true,
       json: async () => ({
         state: "available",
@@ -45,7 +45,7 @@ describe("getSidecarStatus", () => {
   });
 
   it("returns default unavailable state when no status endpoint responds", async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new Error("offline"));
+    const fetchImpl = mock().mockRejectedValue(new Error("offline"));
 
     const status = await getSidecarStatus("http://127.0.0.1:9379/v1", fetchImpl);
 
@@ -58,7 +58,7 @@ describe("getSidecarStatus", () => {
   });
 
   it("preserves explicit unavailable sidecar status responses", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
+    const fetchImpl = mock().mockResolvedValue({
       ok: true,
       json: async () => ({
         state: "unavailable",

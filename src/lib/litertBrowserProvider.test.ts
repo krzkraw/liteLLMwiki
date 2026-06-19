@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import { Backend, SamplerType } from "@litert-lm/core";
 import {
   createLiteRtBrowserProvider,
@@ -35,17 +35,17 @@ async function waitForPendingPromises() {
 
 function createProviderFakes(chunks: FakeLiteRtMessage[] = []) {
   const conversation = {
-    sendMessageStreaming: vi.fn(createAsyncChunks(chunks)),
-    cancel: vi.fn(),
-    delete: vi.fn().mockResolvedValue(undefined),
+    sendMessageStreaming: mock(createAsyncChunks(chunks)),
+    cancel: mock(),
+    delete: mock().mockResolvedValue(undefined),
   };
   const engine = {
-    createConversation: vi.fn().mockResolvedValue(conversation),
-    delete: vi.fn().mockResolvedValue(undefined),
+    createConversation: mock().mockResolvedValue(conversation),
+    delete: mock().mockResolvedValue(undefined),
   };
-  const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
+  const loadLiteRtLm = mock().mockResolvedValue(undefined);
   const Engine = {
-    create: vi.fn().mockResolvedValue(engine),
+    create: mock().mockResolvedValue(engine),
   };
 
   return { loadLiteRtLm, Engine, engine, conversation };
@@ -252,7 +252,7 @@ describe("createLiteRtBrowserProvider", () => {
       { role: "assistant", content: "lo" },
     ]);
     const provider = createLiteRtBrowserProvider({ loadLiteRtLm, Engine });
-    const onToken = vi.fn();
+    const onToken = mock();
 
     await provider.load(config);
     const result = await provider.generate({ text: "Say hello", onToken });
@@ -265,28 +265,27 @@ describe("createLiteRtBrowserProvider", () => {
 
   it("uses a temporary conversation for folder text generation", async () => {
     const chatConversation = {
-      sendMessageStreaming: vi.fn(
+      sendMessageStreaming: mock(
         createAsyncChunks([{ role: "assistant", content: "chat response" }]),
       ),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const summaryConversation = {
-      sendMessageStreaming: vi.fn(
+      sendMessageStreaming: mock(
         createAsyncChunks([{ role: "assistant", content: "folder summary" }]),
       ),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const engine = {
-      createConversation: vi
-        .fn()
+      createConversation: mock()
         .mockResolvedValueOnce(chatConversation)
         .mockResolvedValueOnce(summaryConversation),
-      delete: vi.fn().mockResolvedValue(undefined),
+      delete: mock().mockResolvedValue(undefined),
     };
-    const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
-    const Engine = { create: vi.fn().mockResolvedValue(engine) };
+    const loadLiteRtLm = mock().mockResolvedValue(undefined);
+    const Engine = { create: mock().mockResolvedValue(engine) };
     const provider = createLiteRtBrowserProvider({ loadLiteRtLm, Engine });
 
     await provider.load(config);
@@ -299,33 +298,32 @@ describe("createLiteRtBrowserProvider", () => {
     );
     expect(summaryConversation.delete).toHaveBeenCalledTimes(1);
     expect(chatConversation.sendMessageStreaming).not.toHaveBeenCalled();
-    await provider.generate({ text: "Chat", onToken: vi.fn() });
+    await provider.generate({ text: "Chat", onToken: mock() });
     expect(chatConversation.sendMessageStreaming).toHaveBeenCalledWith("Chat");
   });
 
   it("cancels active folder text generation during dispose without double deletion", async () => {
     const nextChunk = createDeferred<FakeLiteRtMessage>();
     const chatConversation = {
-      sendMessageStreaming: vi.fn(createAsyncChunks([])),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      sendMessageStreaming: mock(createAsyncChunks([])),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const summaryConversation = {
-      sendMessageStreaming: vi.fn(async function* streamChunks() {
+      sendMessageStreaming: mock(async function* streamChunks() {
         yield await nextChunk.promise;
       }),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const engine = {
-      createConversation: vi
-        .fn()
+      createConversation: mock()
         .mockResolvedValueOnce(chatConversation)
         .mockResolvedValueOnce(summaryConversation),
-      delete: vi.fn().mockResolvedValue(undefined),
+      delete: mock().mockResolvedValue(undefined),
     };
-    const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
-    const Engine = { create: vi.fn().mockResolvedValue(engine) };
+    const loadLiteRtLm = mock().mockResolvedValue(undefined);
+    const Engine = { create: mock().mockResolvedValue(engine) };
     const provider = createLiteRtBrowserProvider({ loadLiteRtLm, Engine });
 
     await provider.load(config);
@@ -343,34 +341,33 @@ describe("createLiteRtBrowserProvider", () => {
     const firstChunk = createDeferred<FakeLiteRtMessage>();
     const secondChunk = createDeferred<FakeLiteRtMessage>();
     const chatConversation = {
-      sendMessageStreaming: vi.fn(createAsyncChunks([])),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      sendMessageStreaming: mock(createAsyncChunks([])),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const firstSummaryConversation = {
-      sendMessageStreaming: vi.fn(async function* streamChunks() {
+      sendMessageStreaming: mock(async function* streamChunks() {
         yield await firstChunk.promise;
       }),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const secondSummaryConversation = {
-      sendMessageStreaming: vi.fn(async function* streamChunks() {
+      sendMessageStreaming: mock(async function* streamChunks() {
         yield await secondChunk.promise;
       }),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const engine = {
-      createConversation: vi
-        .fn()
+      createConversation: mock()
         .mockResolvedValueOnce(chatConversation)
         .mockResolvedValueOnce(firstSummaryConversation)
         .mockResolvedValueOnce(secondSummaryConversation),
-      delete: vi.fn().mockResolvedValue(undefined),
+      delete: mock().mockResolvedValue(undefined),
     };
-    const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
-    const Engine = { create: vi.fn().mockResolvedValue(engine) };
+    const loadLiteRtLm = mock().mockResolvedValue(undefined);
+    const Engine = { create: mock().mockResolvedValue(engine) };
     const provider = createLiteRtBrowserProvider({ loadLiteRtLm, Engine });
 
     await provider.load(config);
@@ -399,7 +396,7 @@ describe("createLiteRtBrowserProvider", () => {
     await expect(
       provider.generate({
         text: "Do not start",
-        onToken: vi.fn(),
+        onToken: mock(),
         signal: controller.signal,
       }),
     ).rejects.toThrow("Generation aborted");
@@ -410,27 +407,27 @@ describe("createLiteRtBrowserProvider", () => {
   it("cancels immediately when aborted during streaming and removes the listener", async () => {
     const nextChunk = createDeferred<FakeLiteRtMessage>();
     const conversation = {
-      sendMessageStreaming: vi.fn(async function* streamChunks() {
+      sendMessageStreaming: mock(async function* streamChunks() {
         yield await nextChunk.promise;
       }),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const engine = {
-      createConversation: vi.fn().mockResolvedValue(conversation),
-      delete: vi.fn().mockResolvedValue(undefined),
+      createConversation: mock().mockResolvedValue(conversation),
+      delete: mock().mockResolvedValue(undefined),
     };
-    const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
-    const Engine = { create: vi.fn().mockResolvedValue(engine) };
+    const loadLiteRtLm = mock().mockResolvedValue(undefined);
+    const Engine = { create: mock().mockResolvedValue(engine) };
     const provider = createLiteRtBrowserProvider({ loadLiteRtLm, Engine });
     const controller = new AbortController();
-    const addEventListener = vi.spyOn(controller.signal, "addEventListener");
-    const removeEventListener = vi.spyOn(controller.signal, "removeEventListener");
+    const addEventListener = spyOn(controller.signal, "addEventListener");
+    const removeEventListener = spyOn(controller.signal, "removeEventListener");
 
     await provider.load(config);
     const generation = provider.generate({
       text: "Start",
-      onToken: vi.fn(),
+      onToken: mock(),
       signal: controller.signal,
     });
     await waitForPendingPromises();
@@ -494,20 +491,20 @@ describe("createLiteRtBrowserProvider", () => {
   it("dispose deletes conversation then engine", async () => {
     const events: string[] = [];
     const conversation = {
-      sendMessageStreaming: vi.fn(),
-      cancel: vi.fn(),
-      delete: vi.fn().mockImplementation(async () => {
+      sendMessageStreaming: mock(),
+      cancel: mock(),
+      delete: mock().mockImplementation(async () => {
         events.push("conversation");
       }),
     };
     const engine = {
-      createConversation: vi.fn().mockResolvedValue(conversation),
-      delete: vi.fn().mockImplementation(async () => {
+      createConversation: mock().mockResolvedValue(conversation),
+      delete: mock().mockImplementation(async () => {
         events.push("engine");
       }),
     };
-    const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
-    const Engine = { create: vi.fn().mockResolvedValue(engine) };
+    const loadLiteRtLm = mock().mockResolvedValue(undefined);
+    const Engine = { create: mock().mockResolvedValue(engine) };
     const provider = createLiteRtBrowserProvider({ loadLiteRtLm, Engine });
 
     await provider.load(config);
@@ -519,31 +516,30 @@ describe("createLiteRtBrowserProvider", () => {
   it("reload disposes previous engine before creating a new one", async () => {
     const events: string[] = [];
     const firstConversation = {
-      sendMessageStreaming: vi.fn(),
-      cancel: vi.fn(),
-      delete: vi.fn().mockImplementation(async () => {
+      sendMessageStreaming: mock(),
+      cancel: mock(),
+      delete: mock().mockImplementation(async () => {
         events.push("first conversation deleted");
       }),
     };
     const firstEngine = {
-      createConversation: vi.fn().mockResolvedValue(firstConversation),
-      delete: vi.fn().mockImplementation(async () => {
+      createConversation: mock().mockResolvedValue(firstConversation),
+      delete: mock().mockImplementation(async () => {
         events.push("first engine deleted");
       }),
     };
     const secondConversation = {
-      sendMessageStreaming: vi.fn(),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      sendMessageStreaming: mock(),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const secondEngine = {
-      createConversation: vi.fn().mockResolvedValue(secondConversation),
-      delete: vi.fn().mockResolvedValue(undefined),
+      createConversation: mock().mockResolvedValue(secondConversation),
+      delete: mock().mockResolvedValue(undefined),
     };
-    const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
+    const loadLiteRtLm = mock().mockResolvedValue(undefined);
     const Engine = {
-      create: vi
-        .fn()
+      create: mock()
         .mockImplementationOnce(async () => {
           events.push("first engine created");
           return firstEngine;
@@ -569,16 +565,16 @@ describe("createLiteRtBrowserProvider", () => {
   it("deletes a stale load that completes after dispose", async () => {
     const wasmLoaded = createDeferred<void>();
     const conversation = {
-      sendMessageStreaming: vi.fn(createAsyncChunks([])),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      sendMessageStreaming: mock(createAsyncChunks([])),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const engine = {
-      createConversation: vi.fn().mockResolvedValue(conversation),
-      delete: vi.fn().mockResolvedValue(undefined),
+      createConversation: mock().mockResolvedValue(conversation),
+      delete: mock().mockResolvedValue(undefined),
     };
-    const loadLiteRtLm = vi.fn().mockReturnValue(wasmLoaded.promise);
-    const Engine = { create: vi.fn().mockResolvedValue(engine) };
+    const loadLiteRtLm = mock().mockReturnValue(wasmLoaded.promise);
+    const Engine = { create: mock().mockResolvedValue(engine) };
     const provider = createLiteRtBrowserProvider({ loadLiteRtLm, Engine });
 
     const load = provider.load(config);
@@ -590,38 +586,37 @@ describe("createLiteRtBrowserProvider", () => {
     expect(conversation.delete).toHaveBeenCalledTimes(1);
     expect(engine.delete).toHaveBeenCalledTimes(1);
     await expect(
-      provider.generate({ text: "Should fail", onToken: vi.fn() }),
+      provider.generate({ text: "Should fail", onToken: mock() }),
     ).rejects.toThrow("Load the browser Gemma provider before sending a message.");
   });
 
   it("deletes a stale load that completes after reload without publishing it", async () => {
     const firstConversation = {
-      sendMessageStreaming: vi.fn(
+      sendMessageStreaming: mock(
         createAsyncChunks([{ role: "assistant", content: "stale" }]),
       ),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const firstConversationReady = createDeferred<typeof firstConversation>();
     const firstEngine = {
-      createConversation: vi.fn().mockReturnValue(firstConversationReady.promise),
-      delete: vi.fn().mockResolvedValue(undefined),
+      createConversation: mock().mockReturnValue(firstConversationReady.promise),
+      delete: mock().mockResolvedValue(undefined),
     };
     const secondConversation = {
-      sendMessageStreaming: vi.fn(
+      sendMessageStreaming: mock(
         createAsyncChunks([{ role: "assistant", content: "current" }]),
       ),
-      cancel: vi.fn(),
-      delete: vi.fn().mockResolvedValue(undefined),
+      cancel: mock(),
+      delete: mock().mockResolvedValue(undefined),
     };
     const secondEngine = {
-      createConversation: vi.fn().mockResolvedValue(secondConversation),
-      delete: vi.fn().mockResolvedValue(undefined),
+      createConversation: mock().mockResolvedValue(secondConversation),
+      delete: mock().mockResolvedValue(undefined),
     };
-    const loadLiteRtLm = vi.fn().mockResolvedValue(undefined);
+    const loadLiteRtLm = mock().mockResolvedValue(undefined);
     const Engine = {
-      create: vi
-        .fn()
+      create: mock()
         .mockResolvedValueOnce(firstEngine)
         .mockResolvedValueOnce(secondEngine),
     };
@@ -638,7 +633,7 @@ describe("createLiteRtBrowserProvider", () => {
     expect(firstConversation.delete).toHaveBeenCalledTimes(1);
     expect(firstEngine.delete).toHaveBeenCalledTimes(1);
 
-    const result = await provider.generate({ text: "Current?", onToken: vi.fn() });
+    const result = await provider.generate({ text: "Current?", onToken: mock() });
 
     expect(result).toEqual({ text: "current" });
     expect(secondConversation.sendMessageStreaming).toHaveBeenCalledWith("Current?");

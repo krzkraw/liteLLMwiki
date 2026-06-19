@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { stat } from "fs/promises";
 import { resolveWebModelPath } from "./modelFiles.mjs";
 
 const modelPath = resolveWebModelPath(process.cwd(), process.argv[2]);

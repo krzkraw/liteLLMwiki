@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync } from "fs";
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 
 export async function createSmokeWorkspace(prefix) {
   const root = await mkdtemp(join(tmpdir(), prefix));
@@ -41,7 +41,7 @@ export function createSmokeChromiumLaunchOptions(browserType, launchOptions = {}
     throw new Error(
       [
         `Playwright Chromium executable is missing at ${executablePath}.`,
-        "Run: npx playwright install chromium",
+        "Run: bunx playwright install chromium",
       ].join("\n"),
     );
   }
@@ -63,7 +63,7 @@ export async function launchSmokeChromium(browserType, launchOptions = {}) {
       throw new Error(
         [
           "Playwright Chromium is not ready for smoke tests.",
-          "Run: npx playwright install chromium",
+          "Run: bunx playwright install chromium",
           message,
         ].join("\n"),
       );

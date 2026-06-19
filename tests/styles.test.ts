@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { describe, expect, it } from "bun:test";
 
 const stylesPath = join(process.cwd(), "src", "styles.css");
 const styles = readFileSync(stylesPath, "utf8");

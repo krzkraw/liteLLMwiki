@@ -5,7 +5,11 @@ import {
   normalizeExecutableEndpoint,
 } from "./endpoint";
 
-type FetchImpl = typeof fetch;
+type FetchResponse = Pick<Response, "json" | "ok">;
+type FetchImpl = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<FetchResponse>;
 
 export interface SidecarStatus {
   state: "available" | "unavailable" | "unknown";

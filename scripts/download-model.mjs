@@ -1,8 +1,8 @@
-import { createWriteStream } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
-import { dirname } from "node:path";
-import { Readable } from "node:stream";
-import { finished } from "node:stream/promises";
+import { createWriteStream } from "fs";
+import { mkdir, rename, rm } from "fs/promises";
+import { dirname } from "path";
+import { Readable } from "stream";
+import { finished } from "stream/promises";
 import { gemma4E2bWebFilename, resolveWebModelPath } from "./modelFiles.mjs";
 
 const repo = "litert-community/gemma-4-E2B-it-litert-lm";

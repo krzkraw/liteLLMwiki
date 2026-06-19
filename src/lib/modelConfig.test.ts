@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import {
   classifyModelResponse,
   classifySelectedModelFile,
@@ -11,7 +11,7 @@ import {
 } from "./modelConfig";
 
 async function readProjectFile(path: string): Promise<string> {
-  const fs = (await import("node:" + "fs")) as {
+  const fs = (await import("" + "fs")) as {
     readFileSync: (path: string, encoding: "utf8") => string;
   };
 
@@ -94,7 +94,7 @@ describe("getModelStatusMessage", () => {
 });
 
 describe("classifyModelResponse", () => {
-  it("treats Vite HTML fallback for a litertlm path as a missing model", () => {
+  it("treats dev-server HTML fallback for a litertlm path as a missing model", () => {
     expect(
       classifyModelResponse({
         ok: true,

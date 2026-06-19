@@ -16,8 +16,8 @@ func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash is required to run real-runtime-smoke.sh")
 	}
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node is required by real-runtime-smoke.sh and the fake runtime")
+	if _, err := exec.LookPath("bun"); err != nil {
+		t.Skip("bun is required by real-runtime-smoke.sh and the fake runtime")
 	}
 
 	root, err := filepath.Abs("..")
@@ -66,8 +66,8 @@ func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 }
 
 func fakeLiteRTLM() string {
-	return `#!/usr/bin/env node
-const http = require("node:http");
+	return `#!/usr/bin/env bun
+const http = require("http");
 
 const args = process.argv.slice(2);
 

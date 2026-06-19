@@ -74,4 +74,4 @@ if [[ "$inline_launch" != "1" ]]; then
 fi
 
 cd "$repo_root"
-exec npm run dev -- --host "$host" --port "$port" "$@"
+exec bun run dev --host "$host" --port "$port" "$@"

@@ -15,10 +15,10 @@ Gemma provider when available, and renders a deterministic knowledge graph.
 Install dependencies from the repository root:
 
 ```bash
-npm install
+bun install
 ```
 
-`npm install` runs `npm run prepare:wasm`, which copies LiteRT-LM WASM assets to:
+`bun install` runs `bun run prepare:wasm`, which copies LiteRT-LM WASM assets to:
 
 ```text
 public/vendor/litert-lm/core/wasm
@@ -27,7 +27,7 @@ public/vendor/litert-lm/core/wasm
 Start the dev server:
 
 ```bash
-npm run dev -- --port 5173
+bun run dev --port 5173
 ```
 
 Open:
@@ -56,7 +56,7 @@ Windows PowerShell equivalents:
 .\launch-all.ps1
 ```
 
-`launch-webui` opens a new terminal window and starts the Vite web UI with
+`launch-webui` opens a new terminal window and starts the Rspack web UI with
 `WEBUI_HOST` and `WEBUI_PORT` overrides. `launch-sidecar` opens a new terminal
 window and starts the interactive sidecar TUI from
 `native/sidecar-artifacts/` when a matching binary exists and falls back to
@@ -99,7 +99,7 @@ share paths such as `litert/...`.
 .\install.ps1 -modelsNextcloud "https://nextcloud.example/s/share-token"
 ```
 
-The installer checks local tools, npm dependencies, sidecar artifacts, and known
+The installer checks local tools, Bun dependencies, sidecar artifacts, and known
 model paths. It prints an up-front task list and marks already satisfied items
 with a green checkmark when terminal color is available. For every missing
 system dependency or model download it prints a boxed task prompt with the
@@ -132,7 +132,7 @@ The default URL inside the app is:
 /models/litert/gemma-4-E2B-it-web.litertlm
 ```
 
-The Vite dev and preview servers serve `/models/*` from `models/`, so the large
+The Rspack dev and preview servers serve `/models/*` from `models/`, so the large
 `.litertlm` files do not need to be copied into `public/`.
 
 The model source is:
@@ -144,9 +144,9 @@ https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
 Download it when network/auth is available:
 
 ```bash
-HF_TOKEN=... npm run download:model
-npm run check:model
-npm run smoke:model
+HF_TOKEN=... bun run download:model
+bun run check:model
+bun run smoke:model
 ```
 
 You can also choose the `.litertlm` from disk with the `Choose local .litertlm`
@@ -172,7 +172,7 @@ UI is placed under `native/sidecar-artifacts/`.
 Build the webUI-local native runner artifacts from the repository root:
 
 ```bash
-npm run build:sidecar
+bun run build:sidecar
 ```
 
 Then start the sidecar manually from the same directory tree the web UI uses:
@@ -260,16 +260,16 @@ path.
 ## Verify
 
 ```bash
-npm test
-npm run build
+bun test
+bun run build
 ```
 
 With the dev server running:
 
 ```bash
-npm run smoke
-npm run smoke:model
-npm run smoke:executable
+bun run smoke
+bun run smoke:model
+bun run smoke:executable
 ```
 
 `smoke` covers the UI without requiring the large web model. `smoke:model`
@@ -279,9 +279,9 @@ the real binary with `application/octet-stream`.
 To verify the production preview server catches the same route:
 
 ```bash
-npm run build
-npm run preview -- --port 5174
-npm run smoke:model -- --url http://127.0.0.1:5174/
+bun run build
+bun run preview --port 5174
+bun run smoke:model -- --url http://127.0.0.1:5174/
 ```
 
 `smoke:executable` uses a fast mock sidecar. To exercise the real native
@@ -298,5 +298,5 @@ Optional real-model generation check:
 ```bash
 HEADLESS=0 PLAYWRIGHT_CHANNEL=chrome \
 MODEL_PATH=/path/to/gemma-4-E2B-it-web.litertlm \
-npm run e2e:generate
+bun run e2e:generate
 ```

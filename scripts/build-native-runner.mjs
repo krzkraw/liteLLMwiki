@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { spawn } from "child_process";
+import { join, resolve } from "path";
+import { pathToFileURL } from "url";
 import {
   resolveAppRoot,
   resolveNativeRunnerRoot,

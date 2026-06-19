@@ -1,5 +1,5 @@
-import { cp, mkdir, rm, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { cp, mkdir, rm, stat } from "fs/promises";
+import { resolve } from "path";
 
 const wasmAssetCopies = [
   {
@@ -18,7 +18,7 @@ for (const { label, source, parent, target } of wasmAssetCopies) {
     }
   } catch (error) {
     console.error(
-      `${label} WASM assets are missing. Run npm install before npm run prepare:wasm.`,
+      `${label} WASM assets are missing. Run bun install before bun run prepare:wasm.`,
     );
     if (error instanceof Error) {
       console.error(error.message);

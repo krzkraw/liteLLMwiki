@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { KnowledgeGraphView } from "./KnowledgeGraphView";
 import type { KnowledgeGraph } from "../lib/knowledgeGraph";
 

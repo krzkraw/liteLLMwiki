@@ -540,30 +540,8 @@ dependency_install_command() {
   local dependency="$1"
 
   case "$dependency" in
-    node)
-      if has_command brew; then
-        printf 'brew install node\n'
-      elif has_command apt-get; then
-        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-          printf 'apt-get update && apt-get install -y nodejs npm\n'
-        else
-          printf 'sudo apt-get update && sudo apt-get install -y nodejs npm\n'
-        fi
-      elif has_command dnf; then
-        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-          printf 'dnf install -y nodejs npm\n'
-        else
-          printf 'sudo dnf install -y nodejs npm\n'
-        fi
-      elif has_command pacman; then
-        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-          printf 'pacman -Sy --needed --noconfirm nodejs npm\n'
-        else
-          printf 'sudo pacman -Sy --needed --noconfirm nodejs npm\n'
-        fi
-      else
-        printf 'Install Node.js from https://nodejs.org/\n'
-      fi
+    bun)
+      printf 'curl -fsSL https://bun.com/install | bash\n'
       ;;
     go)
       if has_command brew; then
@@ -865,19 +843,19 @@ Command: curl -L --fail -o '$relative_path' '$download_url'"
   add_summary "OK: $label at $relative_path"
 }
 
-ensure_npm_dependencies() {
-  confirm_or_wait "npm dependencies" "npm install" \
-    "test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" \
-    "cd '$repo_root' && npm install" "required" \
-    "node_modules and public/vendor/litert-lm/core/wasm exist" \
-    "Install Node packages and regenerate the LiteRT-LM WASM vendor files."
+ensure_bun_dependencies() {
+  confirm_or_wait "Bun dependencies" "bun install" \
+    "test -f '$repo_root/bun.lock' && test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" \
+    "cd '$repo_root' && bun install" "required" \
+    "bun.lock, node_modules, and public/vendor/litert-lm/core/wasm exist" \
+    "Install Bun packages and regenerate the LiteRT-LM WASM vendor files."
 }
 
 playwright_chromium_ready() {
-  has_command node || return 1
+  has_command bun || return 1
 
-  node --input-type=module - >/dev/null 2>&1 <<'NODE'
-import { existsSync } from "node:fs";
+  bun --eval "$(cat <<'BUN'
+import { existsSync } from "fs";
 
 try {
   const { chromium } = await import("playwright");
@@ -885,13 +863,14 @@ try {
 } catch {
   process.exit(1);
 }
-NODE
+BUN
+)" >/dev/null 2>&1
 }
 
 ensure_playwright_chromium() {
-  confirm_or_wait "Playwright Chromium" "npx playwright install chromium" \
+  confirm_or_wait "Playwright Chromium" "bunx playwright install chromium" \
     "playwright_chromium_ready" \
-    "cd '$repo_root' && npx playwright install chromium" "required" \
+    "cd '$repo_root' && bunx playwright install chromium" "required" \
     "Playwright Chromium executable exists for smoke tests" \
     "Install the Playwright Chromium browser artifact used by smoke UI tests."
 }
@@ -900,21 +879,20 @@ print_install_tasks() {
   printf '\nInstall tasks\n'
   printf '-------------\n'
   print_task_status "git" "command -v git >/dev/null 2>&1" "available" "needs install"
-  print_task_status "node" "command -v node >/dev/null 2>&1" "available" "needs install"
-  print_task_status "npm" "command -v npm >/dev/null 2>&1" "available" "needs install"
+  print_task_status "bun" "command -v bun >/dev/null 2>&1" "available" "needs install"
   print_task_status "go" "command -v go >/dev/null 2>&1" "available" "needs install"
   print_task_status "curl" "command -v curl >/dev/null 2>&1" "available" "needs install"
   print_task_status "uv" "command -v uv >/dev/null 2>&1" "available" "needs install"
   print_task_status "litert-lm" "command -v litert-lm >/dev/null 2>&1" "available" "needs install"
   print_task_status "llama.cpp runtime" "test -n \"\$(installed_llama_server || true)\"" "available" "needs selection or manual install"
-  print_task_status "npm dependencies" "test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" "already installed" "needs npm install"
-  print_task_status "Playwright Chromium" "playwright_chromium_ready" "available" "needs npx playwright install chromium"
+  print_task_status "Bun dependencies" "test -f '$repo_root/bun.lock' && test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" "already installed" "needs bun install"
+  print_task_status "Playwright Chromium" "playwright_chromium_ready" "available" "needs bunx playwright install chromium"
   print_task_status "Gemma 4 E2B web model" "test -s '$repo_root/models/litert/gemma-4-E2B-it-web.litertlm'" "downloaded" "needs download"
   print_task_status "Gemma 4 E2B native LiteRT model" "test -s '$repo_root/models/litert/gemma-4-E2B-it.litertlm'" "downloaded" "needs download"
   print_task_status "Gemma 4 E2B llama.cpp GGUF model" "test -s '$repo_root/models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf'" "downloaded" "needs download"
   print_task_status "Qwen3 embedding GGUF model" "test -s '$repo_root/models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf'" "downloaded" "needs download"
   print_task_status "EmbeddingGemma LiteRT embedding model" "test -s '$repo_root/models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite'" "downloaded" "needs download"
-  print_task_pending "npm test - will run"
+  print_task_pending "bun test - will run"
   print_task_pending "web production build - will run"
   print_task_pending "sidecar artifacts build - will run"
   print_task_pending "smoke UI - will run"
@@ -946,20 +924,20 @@ run_smoke_tests() {
   trap cleanup_dev_server EXIT
 
   printf '\n==> Starting temporary web UI for smoke tests at %s\n' "$smoke_url"
-  npm run dev -- --host 127.0.0.1 --port "$smoke_port" --strictPort >/tmp/litert-wiki-install-vite.log 2>&1 &
+  bun run dev --host 127.0.0.1 --port "$smoke_port" >/tmp/litert-wiki-install-rspack.log 2>&1 &
   dev_server_pid="$!"
 
   if ! wait_for_url "$smoke_url"; then
     printf 'Temporary web UI did not become ready. Log:\n'
-    cat /tmp/litert-wiki-install-vite.log
+    cat /tmp/litert-wiki-install-rspack.log
     return 1
   fi
 
-  run_logged "smoke UI" env SMOKE_URL="$smoke_url" npm run smoke
-  run_logged "smoke executable sidecar" env SMOKE_URL="$smoke_url" npm run smoke:executable
+  run_logged "smoke UI" env SMOKE_URL="$smoke_url" bun run smoke
+  run_logged "smoke executable sidecar" env SMOKE_URL="$smoke_url" bun run smoke:executable
 
   if [[ -s "$repo_root/models/litert/gemma-4-E2B-it-web.litertlm" ]]; then
-    run_logged "smoke web model" env SMOKE_URL="$smoke_url" npm run smoke:model
+    run_logged "smoke web model" env SMOKE_URL="$smoke_url" bun run smoke:model
   else
     add_summary "SKIP: smoke web model, models/litert/gemma-4-E2B-it-web.litertlm missing"
   fi
@@ -980,9 +958,9 @@ print_summary() {
 }
 
 main() {
-  local node_cmd git_cmd go_cmd curl_cmd uv_cmd llama_url
+  local bun_cmd git_cmd go_cmd curl_cmd uv_cmd llama_url
 
-  node_cmd="$(dependency_install_command node)"
+  bun_cmd="$(dependency_install_command bun)"
   git_cmd="$(dependency_install_command git)"
   go_cmd="$(dependency_install_command go)"
   curl_cmd="$(dependency_install_command curl)"
@@ -992,15 +970,14 @@ main() {
   print_install_tasks
 
   ensure_package_tool "git" "git" "git"
-  ensure_dependency "node" "node" "${node_cmd:-Install Node.js from https://nodejs.org/}"
-  ensure_dependency "npm" "npm" "${node_cmd:-Install Node.js from https://nodejs.org/}"
-  ensure_dependency "go" "go" "${go_cmd:-Install Go from https://go.dev/dl/}"
   ensure_dependency "curl" "curl" "${curl_cmd:-Install curl with your OS package manager.}"
+  ensure_dependency "bun" "bun" "${bun_cmd:-curl -fsSL https://bun.com/install | bash}"
+  ensure_dependency "go" "go" "${go_cmd:-Install Go from https://go.dev/dl/}"
   ensure_dependency "uv" "uv" "${uv_cmd:-curl -LsSf https://astral.sh/uv/install.sh | sh}"
   ensure_optional_tool "litert-lm" "litert-lm" "uv tool install litert-lm" "uv tool install litert-lm"
   ensure_llama_runtime
 
-  ensure_npm_dependencies
+  ensure_bun_dependencies
   ensure_playwright_chromium
 
   ensure_model "Gemma 4 E2B web model" \
@@ -1024,9 +1001,9 @@ main() {
     "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" \
     "true"
 
-  run_logged "npm test" npm test
-  run_logged "web production build" npm run build
-  run_logged "sidecar artifacts build" npm run build:sidecar
+  run_logged "bun test" bun run test
+  run_logged "web production build" bun run build
+  run_logged "sidecar artifacts build" bun run build:sidecar
   run_smoke_tests
 
   print_summary

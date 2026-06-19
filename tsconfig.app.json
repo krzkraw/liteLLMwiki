@@ -16,7 +16,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["@webgpu/types", "vitest/globals"]
+    "types": ["@webgpu/types", "bun-types"]
   },
   "include": ["src"]
 }

@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
-import { writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawn } from "child_process";
+import { once } from "events";
+import { writeFile } from "fs/promises";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { chromium } from "playwright";
 import { createSmokeWorkspace, launchSmokeChromium } from "./smokeRuntime.mjs";
 

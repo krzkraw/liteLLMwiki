@@ -166,11 +166,11 @@ runner logs.
   downloader redaction/resume behavior, API/WS compatibility, and Bubble Tea
   update-model behavior.
 - Existing checks:
-  - `npm test`
-  - `npm run build`
+  - `bun test`
+  - `bun run build`
   - `cd native/sidecar && go test ./...`
-  - `npm run build:sidecar`
-  - `npm run smoke:executable`
+  - `bun run build:sidecar`
+  - `bun run smoke:executable`
 - Add fake `litert-lm` and `llama-server` binaries to verify main/embed/rerank
   launch commands, health probes, log streaming, port allocation, route
   selection, and shutdown on host tests and cross-builds.
@@ -228,11 +228,11 @@ Verification required:
 - git status --short before edits.
 - Read README.md, package.json, native/sidecar/README.md, native/sidecar/go.mod
   before edits.
-- npm test
-- npm run build
+- bun test
+- bun run build
 - cd native/sidecar && go test ./...
-- npm run build:sidecar
-- npm run smoke:executable
+- bun run build:sidecar
+- bun run smoke:executable
 - Real sidecar/TUI smoke with fake binaries.
 - Real TUI smoke with available real LiteRT-LM and llama.cpp binaries/models.
 ```

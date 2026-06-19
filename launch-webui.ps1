@@ -209,6 +209,6 @@ if ($Port -eq 0) {
 }
 
 Set-Location $RepoRoot
-$NpmArgs = @("run", "dev", "--", "--host", $WebHost, "--port", [string]$Port) + $ExtraArgs
-& npm @NpmArgs
+$BunArgs = @("run", "dev", "--host", $WebHost, "--port", [string]$Port) + $ExtraArgs
+& bun @BunArgs
 exit $LASTEXITCODE

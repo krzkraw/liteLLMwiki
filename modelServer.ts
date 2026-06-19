@@ -1,7 +1,7 @@
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { createReadStream } from "fs";
+import { stat } from "fs/promises";
+import { join } from "path";
+import type { IncomingMessage, ServerResponse } from "http";
 
 type Next = () => void;
 

@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { resolve } from "path";
+import { describe, expect, it } from "bun:test";
 
 describe("model file script paths", () => {
   it("defaults web model tools to the repository-local models directory", async () => {

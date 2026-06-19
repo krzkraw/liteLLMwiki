@@ -31,7 +31,7 @@ PY
 
 require_cmd curl
 require_cmd go
-require_cmd node
+require_cmd bun
 
 if [[ -n "${LITERT_LM_BIN:-}" ]]; then
   runtime_exe="$LITERT_LM_BIN"
@@ -135,7 +135,7 @@ wait_for_available_status() {
     fi
 
     if status_json="$(curl --silent --show-error --max-time 5 "$sidecar_url/sidecar/v1/status" 2>/dev/null)" &&
-      STATUS_JSON="$status_json" node -e '
+      STATUS_JSON="$status_json" bun --eval '
         const status = JSON.parse(process.env.STATUS_JSON);
         process.exit(status.state === "available" ? 0 : 1);
       '; then
@@ -152,7 +152,7 @@ wait_for_available_status() {
 
 status_json="$(wait_for_available_status)"
 printf 'Sidecar status:\n'
-STATUS_JSON="$status_json" node -e '
+STATUS_JSON="$status_json" bun --eval '
   const status = JSON.parse(process.env.STATUS_JSON);
   console.log(JSON.stringify({
     state: status.state,
@@ -163,7 +163,7 @@ STATUS_JSON="$status_json" node -e '
 '
 
 models_json="$(curl --silent --show-error --max-time 20 "$sidecar_url/v1/models")"
-MODELS_JSON="$models_json" MODEL_ID="$model_id" node -e '
+MODELS_JSON="$models_json" MODEL_ID="$model_id" bun --eval '
   const models = JSON.parse(process.env.MODELS_JSON);
   const ids = (models.data || []).map((model) => model.id);
   if (!ids.includes(process.env.MODEL_ID)) {
@@ -174,7 +174,7 @@ MODELS_JSON="$models_json" MODEL_ID="$model_id" node -e '
 '
 
 payload="$(
-  MODEL_ID="$model_id" node -e '
+  MODEL_ID="$model_id" bun --eval '
     console.log(JSON.stringify({
       model: process.env.MODEL_ID,
       messages: [{ role: "user", content: "Say OK." }],
@@ -188,7 +188,7 @@ chat_json="$(
     -H 'Content-Type: application/json' \
     -d "$payload"
 )"
-CHAT_JSON="$chat_json" node -e '
+CHAT_JSON="$chat_json" bun --eval '
   const response = JSON.parse(process.env.CHAT_JSON);
   const text = response.choices?.[0]?.message?.content;
   if (typeof text !== "string" || text.length === 0) {
@@ -198,7 +198,7 @@ CHAT_JSON="$chat_json" node -e '
   console.log(`Assistant: ${text}`);
 '
 
-STATUS_JSON="$status_json" node -e '
+STATUS_JSON="$status_json" bun --eval '
   const status = JSON.parse(process.env.STATUS_JSON);
   if (status.capabilities?.multimodal?.state !== "available") {
     console.error("Sidecar did not advertise native multimodal capability.");
@@ -207,27 +207,28 @@ STATUS_JSON="$status_json" node -e '
 '
 
 sample_image="$work_dir/sample.png"
-SAMPLE_IMAGE="$sample_image" node -e '
-  const fs = require("node:fs");
+SAMPLE_IMAGE="$sample_image" bun --eval '
+  const fs = require("fs");
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X+XioAAAAASUVORK5CYII=";
   fs.writeFileSync(process.env.SAMPLE_IMAGE, Buffer.from(png, "base64"));
 '
 multimodal_payload="$(
-  SAMPLE_IMAGE="$sample_image" node - <<'NODE'
-    const fs = require("node:fs");
-    console.log(JSON.stringify({
-      prompt: "Describe this image in three words.",
-      backend: "cpu",
-      visionBackend: "cpu",
-      attachments: [
-        {
-          name: "sample.png",
-          mimeType: "image/png",
-          dataBase64: fs.readFileSync(process.env.SAMPLE_IMAGE).toString("base64"),
-        },
-      ],
-    }));
-NODE
+  SAMPLE_IMAGE="$sample_image" bun --eval "$(cat <<'BUN'
+const fs = require("fs");
+console.log(JSON.stringify({
+  prompt: "Describe this image in three words.",
+  backend: "cpu",
+  visionBackend: "cpu",
+  attachments: [
+    {
+      name: "sample.png",
+      mimeType: "image/png",
+      dataBase64: fs.readFileSync(process.env.SAMPLE_IMAGE).toString("base64"),
+    },
+  ],
+}));
+BUN
+)"
 )"
 multimodal_json="$(
   curl --silent --show-error --max-time "$multimodal_timeout" \
@@ -235,7 +236,7 @@ multimodal_json="$(
     -H 'Content-Type: application/json' \
     -d "$multimodal_payload"
 )"
-MULTIMODAL_JSON="$multimodal_json" node -e '
+MULTIMODAL_JSON="$multimodal_json" bun --eval '
   const response = JSON.parse(process.env.MULTIMODAL_JSON);
   const text = response.text;
   if (typeof text !== "string" || text.length === 0) {

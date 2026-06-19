@@ -1,8 +1,8 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, sep } from "node:path";
-import { describe, expect, it } from "vitest";
+import { existsSync } from "fs";
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import { dirname, isAbsolute, join, sep } from "path";
+import { describe, expect, it } from "bun:test";
 
 describe("smoke runtime helpers", () => {
   it("creates disposable smoke workspaces under the platform temp directory", async () => {
@@ -85,6 +85,6 @@ describe("smoke runtime helpers", () => {
           throw new Error("launch should not run");
         },
       }),
-    ).rejects.toThrow(/npx playwright install chromium/);
+    ).rejects.toThrow(/bunx playwright install chromium/);
   });
 });

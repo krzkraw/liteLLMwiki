@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
 import { chromium } from "playwright";
 import { createSmokeWorkspace, launchSmokeChromium } from "./smokeRuntime.mjs";
 
@@ -49,7 +49,7 @@ try {
 
   const wasmLoaderResponse = await page.request.get(
     new URL(
-      "/vendor/litert-lm/core/wasm/litert_lm_core_wasm.js",
+      "/vendor/litert-lm/core/wasm/litertlm_wasm_internal.js",
       targetUrl,
     ).toString(),
   );

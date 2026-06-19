@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import { createExecutableProvider, formatExecutableModel } from "./executableProvider";
 
 describe("formatExecutableModel", () => {
@@ -33,7 +33,7 @@ describe("createExecutableProvider", () => {
         controller.close();
       },
     });
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, body });
+    const fetchImpl = mock().mockResolvedValue({ ok: true, body });
     const provider = createExecutableProvider({ fetchImpl });
     const tokens: Array<[string, string]> = [];
 
@@ -76,9 +76,9 @@ describe("createExecutableProvider", () => {
         controller.close();
       },
     });
-    const fetchImpl = vi.fn();
+    const fetchImpl = mock();
     const transport = {
-      request: vi.fn().mockResolvedValue({
+      request: mock().mockResolvedValue({
         status: 200,
         headers: { "content-type": "text/event-stream" },
         body,
@@ -124,13 +124,13 @@ describe("createExecutableProvider", () => {
       },
     });
     const transport = {
-      request: vi.fn().mockResolvedValue({
+      request: mock().mockResolvedValue({
         status: 503,
         headers: { "content-type": "text/plain" },
         body,
       }),
     };
-    const provider = createExecutableProvider({ fetchImpl: vi.fn(), transport });
+    const provider = createExecutableProvider({ fetchImpl: mock(), transport });
 
     await provider.load({
       endpoint: "http://127.0.0.1:9379/v1",
@@ -142,7 +142,7 @@ describe("createExecutableProvider", () => {
     await expect(
       provider.generate({
         text: "Hello",
-        onToken: vi.fn(),
+        onToken: mock(),
       }),
     ).rejects.toThrow("Executable provider request failed: 503");
     expect(cancelled).toBe(true);
@@ -155,7 +155,7 @@ describe("createExecutableProvider", () => {
         controller.close();
       },
     });
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, body });
+    const fetchImpl = mock().mockResolvedValue({ ok: true, body });
     const provider = createExecutableProvider({ fetchImpl });
 
     await provider.load({
@@ -167,7 +167,7 @@ describe("createExecutableProvider", () => {
     });
     await provider.generate({
       text: "Hello",
-      onToken: vi.fn(),
+      onToken: mock(),
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -193,7 +193,7 @@ describe("createExecutableProvider", () => {
         controller.close();
       },
     });
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, body });
+    const fetchImpl = mock().mockResolvedValue({ ok: true, body });
     const provider = createExecutableProvider({ fetchImpl });
 
     await provider.load({
@@ -208,7 +208,7 @@ describe("createExecutableProvider", () => {
     });
     await provider.generate({
       text: "Hello",
-      onToken: vi.fn(),
+      onToken: mock(),
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -245,7 +245,7 @@ describe("createExecutableProvider", () => {
         controller.close();
       },
     });
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, body });
+    const fetchImpl = mock().mockResolvedValue({ ok: true, body });
     const provider = createExecutableProvider({ fetchImpl });
 
     await provider.load({
@@ -271,7 +271,7 @@ describe("createExecutableProvider", () => {
   });
 
   it("passes abort signals to executable folder summary generation", async () => {
-    const fetchImpl = vi.fn(
+    const fetchImpl = mock(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener("abort", () => {
@@ -310,7 +310,7 @@ describe("createExecutableProvider", () => {
       signal: AbortSignal;
       reject: (reason?: unknown) => void;
     }> = [];
-    const fetchImpl = vi.fn(
+    const fetchImpl = mock(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((_resolve, reject) => {
           const signal = init?.signal as AbortSignal;
@@ -331,7 +331,7 @@ describe("createExecutableProvider", () => {
     const folderGeneration = provider.generateText("Summarize folder");
     const chatGeneration = provider.generate({
       text: "Chat",
-      onToken: vi.fn(),
+      onToken: mock(),
     });
     const observedGenerations = Promise.allSettled([
       folderGeneration,
@@ -356,7 +356,7 @@ describe("createExecutableProvider", () => {
         controller.close();
       },
     });
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, body });
+    const fetchImpl = mock().mockResolvedValue({ ok: true, body });
     const provider = createExecutableProvider({ fetchImpl });
     const controller = new AbortController();
 
@@ -368,7 +368,7 @@ describe("createExecutableProvider", () => {
     });
     const generation = provider.generate({
       text: "Hello",
-      onToken: vi.fn(),
+      onToken: mock(),
       signal: controller.signal,
     });
 
@@ -393,7 +393,7 @@ describe("createExecutableProvider", () => {
   });
 
   it("allows provider cancel to abort the active fetch with caller signal present", async () => {
-    const fetchImpl = vi.fn(
+    const fetchImpl = mock(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener("abort", () => {
@@ -412,7 +412,7 @@ describe("createExecutableProvider", () => {
     });
     const generation = provider.generate({
       text: "Hello",
-      onToken: vi.fn(),
+      onToken: mock(),
       signal: controller.signal,
     });
 
@@ -422,12 +422,12 @@ describe("createExecutableProvider", () => {
   });
 
   it("routes attached prompts to the sidecar multimodal endpoint", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
+    const fetchImpl = mock().mockResolvedValue({
       ok: true,
       json: async () => ({ text: "image summary" }),
     });
     const provider = createExecutableProvider({ fetchImpl });
-    const onToken = vi.fn();
+    const onToken = mock();
 
     await provider.load({
       endpoint: "http://127.0.0.1:9379/v1",
@@ -505,9 +505,9 @@ describe("createExecutableProvider", () => {
   });
 
   it("uses a sidecar WebSocket API transport for multimodal executable prompts", async () => {
-    const fetchImpl = vi.fn();
+    const fetchImpl = mock();
     const transport = {
-      request: vi.fn().mockResolvedValue({
+      request: mock().mockResolvedValue({
         status: 200,
         headers: { "content-type": "application/json" },
         body: new ReadableStream<Uint8Array>(),
@@ -515,7 +515,7 @@ describe("createExecutableProvider", () => {
       }),
     };
     const provider = createExecutableProvider({ fetchImpl, transport });
-    const onToken = vi.fn();
+    const onToken = mock();
 
     await provider.load({
       endpoint: "http://127.0.0.1:9379/v1",
@@ -576,13 +576,13 @@ describe("createExecutableProvider", () => {
       },
     });
     const transport = {
-      request: vi.fn().mockResolvedValue({
+      request: mock().mockResolvedValue({
         status: 502,
         headers: { "content-type": "text/plain" },
         body,
       }),
     };
-    const provider = createExecutableProvider({ fetchImpl: vi.fn(), transport });
+    const provider = createExecutableProvider({ fetchImpl: mock(), transport });
 
     await provider.load({
       endpoint: "http://127.0.0.1:9379/v1",
@@ -602,14 +602,14 @@ describe("createExecutableProvider", () => {
             file: new File(["image bytes"], "sample.png", { type: "image/png" }),
           },
         ],
-        onToken: vi.fn(),
+        onToken: mock(),
       }),
     ).rejects.toThrow("Executable multimodal request failed: 502");
     expect(cancelled).toBe(true);
   });
 
   it("preserves zero-valued multimodal sampling options", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
+    const fetchImpl = mock().mockResolvedValue({
       ok: true,
       json: async () => ({ text: "image summary" }),
     });
@@ -633,7 +633,7 @@ describe("createExecutableProvider", () => {
           file: new File(["image bytes"], "sample.png", { type: "image/png" }),
         },
       ],
-      onToken: vi.fn(),
+      onToken: mock(),
     });
 
     const requestBody = JSON.parse(

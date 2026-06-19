@@ -1,8 +1,8 @@
-import { createServer, type Server } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { createServer, type Server } from "http";
+import { mkdir, mkdtemp, rm, writeFile } from "fs/promises";
+import { dirname, join } from "path";
+import { tmpdir } from "os";
+import { afterEach, describe, expect, it } from "bun:test";
 import { createModelFileMiddleware } from "./modelServer";
 
 let server: Server | null = null;

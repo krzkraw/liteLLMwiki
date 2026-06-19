@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import {
   createSidecarControlClient,
   createSidecarWebSocketUrl,
@@ -79,7 +79,7 @@ describe("createSidecarControlClient", () => {
   it("sends runtime control messages and emits parsed status/log events", () => {
     FakeWebSocket.instances = [];
     const events: SidecarControlEvent[] = [];
-    const onOpen = vi.fn();
+    const onOpen = mock();
     const client = createSidecarControlClient({
       endpoint: "http://127.0.0.1:9379/v1",
       WebSocketImpl: FakeWebSocket,
@@ -126,7 +126,7 @@ describe("createSidecarControlClient", () => {
     });
 
     expect(socket.url).toBe("ws://127.0.0.1:9379/sidecar/v1/ws");
-    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledTimes(1);
     expect(socket.sent.map((message) => JSON.parse(message))).toEqual([
       { type: "status.get" },
       { type: "logs.subscribe" },

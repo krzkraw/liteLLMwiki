@@ -1,8 +1,9 @@
-import { accessSync, constants, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { accessSync, constants, readFileSync } from "fs";
+import { join } from "path";
+import { describe, expect, it } from "bun:test";
 
 const repoRoot = process.cwd();
+const oldPackageRunner = "n" + "pm";
 
 function readRootScript(name: string): string {
   return readFileSync(join(repoRoot, name), "utf8");
@@ -40,17 +41,18 @@ describe("root launcher scripts", () => {
     }
   });
 
-  it("launches the web UI through the existing npm dev command", () => {
+  it("launches the web UI through the Bun Rspack dev command", () => {
     for (const scriptName of ["launch-webui.sh", "launch-webui.ps1"]) {
       const contents = readRootScript(scriptName);
 
       expect(contents).toContain("WEBUI_HOST");
       expect(contents).toContain("WEBUI_PORT");
-      expect(contents).toContain("npm");
+      expect(contents).toContain("bun");
       expect(contents).toContain("run");
       expect(contents).toContain("dev");
       expect(contents).toContain("--host");
       expect(contents).toContain("--port");
+      expect(contents).not.toContain(oldPackageRunner);
     }
   });
 

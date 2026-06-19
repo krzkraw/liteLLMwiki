@@ -22,8 +22,8 @@ https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
 Download and verify:
 
 ```bash
-npm run download:model
-npm run check:model
+bun run download:model
+bun run check:model
 ```
 
 You can also choose the `.litertlm` model directly from disk in the app. That

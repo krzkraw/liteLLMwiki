@@ -656,28 +656,29 @@ function Ensure-Model {
 
 Initialize-ModelsNextcloud -Share $modelsNextcloud
 
-function Ensure-NpmDependencies {
-  Invoke-ConfirmOrWait -Label "npm dependencies" -CommandText "npm install" -Check {
-    (Test-Path (Join-Path $RepoRoot "node_modules")) -and
+function Ensure-BunDependencies {
+  Invoke-ConfirmOrWait -Label "Bun dependencies" -CommandText "bun install" -Check {
+    (Test-Path (Join-Path $RepoRoot "bun.lock")) -and
+      (Test-Path (Join-Path $RepoRoot "node_modules")) -and
       (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
   } -Action {
-    & npm install
+    & bun install
     if ($LASTEXITCODE -ne 0) {
-      throw "npm install failed"
+      throw "bun install failed"
     }
-  } -ExpectedResult "node_modules and public/vendor/litert-lm/core/wasm exist" `
-    -Description "Install Node packages and regenerate the LiteRT-LM WASM vendor files."
+  } -ExpectedResult "bun.lock, node_modules, and public/vendor/litert-lm/core/wasm exist" `
+    -Description "Install Bun packages and regenerate the LiteRT-LM WASM vendor files."
 }
 
 function Test-PlaywrightChromium {
-  if (-not (Test-Command "node")) {
+  if (-not (Test-Command "bun")) {
     return $false
   }
 
   Push-Location $RepoRoot
   try {
     $CheckScript = @'
-import { existsSync } from "node:fs";
+import { existsSync } from "fs";
 
 try {
   const { chromium } = await import("playwright");
@@ -686,7 +687,7 @@ try {
   process.exit(1);
 }
 '@
-    & node --input-type=module --eval $CheckScript *> $null
+    & bun --eval $CheckScript *> $null
     return $LASTEXITCODE -eq 0
   } finally {
     Pop-Location
@@ -694,12 +695,12 @@ try {
 }
 
 function Ensure-PlaywrightChromium {
-  Invoke-ConfirmOrWait -Label "Playwright Chromium" -CommandText "npx playwright install chromium" -Check {
+  Invoke-ConfirmOrWait -Label "Playwright Chromium" -CommandText "bunx playwright install chromium" -Check {
     Test-PlaywrightChromium
   } -Action {
-    & npx playwright install chromium
+    & bunx playwright install chromium
     if ($LASTEXITCODE -ne 0) {
-      throw "npx playwright install chromium failed"
+      throw "bunx playwright install chromium failed"
     }
   } -ExpectedResult "Playwright Chromium executable exists for smoke tests" `
     -Description "Install the Playwright Chromium browser artifact used by smoke UI tests."
@@ -710,18 +711,18 @@ function Print-InstallTasks {
   Write-Host "Install tasks"
   Write-Host "-------------"
   Write-TaskStatus "git" { Test-Command "git" } "available" "needs install"
-  Write-TaskStatus "node" { Test-Command "node" } "available" "needs install"
-  Write-TaskStatus "npm" { Test-Command "npm" } "available" "needs install"
+  Write-TaskStatus "bun" { Test-Command "bun" } "available" "needs install"
   Write-TaskStatus "go" { Test-Command "go" } "available" "needs install"
   Write-TaskStatus "curl" { Test-Command "curl" } "available" "needs install"
   Write-TaskStatus "uv" { Test-Command "uv" } "available" "needs install"
   Write-TaskStatus "litert-lm" { Test-Command "litert-lm" } "available" "needs install"
   Write-TaskStatus "llama.cpp runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer)) } "available" "needs selection or manual install"
-  Write-TaskStatus "npm dependencies" {
-    (Test-Path (Join-Path $RepoRoot "node_modules")) -and
+  Write-TaskStatus "Bun dependencies" {
+    (Test-Path (Join-Path $RepoRoot "bun.lock")) -and
+      (Test-Path (Join-Path $RepoRoot "node_modules")) -and
       (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
-  } "already installed" "needs npm install"
-  Write-TaskStatus "Playwright Chromium" { Test-PlaywrightChromium } "available" "needs npx playwright install chromium"
+  } "already installed" "needs bun install"
+  Write-TaskStatus "Playwright Chromium" { Test-PlaywrightChromium } "available" "needs bunx playwright install chromium"
   Write-TaskStatus "Gemma 4 E2B web model" {
     $Path = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it-web.litertlm"
     (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
@@ -742,7 +743,7 @@ function Print-InstallTasks {
     $Path = Join-Path $RepoRoot "models\litert\embeddinggemma-300M_seq2048_mixed-precision.tflite"
     (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
   } "downloaded" "needs download"
-  Write-TaskPending "npm test - will run"
+  Write-TaskPending "bun test - will run"
   Write-TaskPending "web production build - will run"
   Write-TaskPending "sidecar artifacts build - will run"
   Write-TaskPending "smoke UI - will run"
@@ -811,11 +812,11 @@ function Stop-ProcessTree {
   }
 }
 
-function Get-NpmStartProcessSpec {
+function Get-BunStartProcessSpec {
   $RunningOnWindows = Test-IsWindows
 
   if ($RunningOnWindows) {
-    foreach ($Name in @("npm.cmd", "npm.exe")) {
+    foreach ($Name in @("bun.exe")) {
       $Command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
       if ($null -ne $Command) {
         return [pscustomobject]@{
@@ -832,20 +833,20 @@ function Get-NpmStartProcessSpec {
 
     return [pscustomobject]@{
       FilePath = $ComSpec
-      PrefixArgs = [string[]]@("/d", "/s", "/c", "npm")
+      PrefixArgs = [string[]]@("/d", "/s", "/c", "bun")
     }
   }
 
-  $NpmCommand = Get-Command "npm" -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($null -ne $NpmCommand) {
+  $BunCommand = Get-Command "bun" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -ne $BunCommand) {
     return [pscustomobject]@{
-      FilePath = $NpmCommand.Source
+      FilePath = $BunCommand.Source
       PrefixArgs = [string[]]@()
     }
   }
 
   return [pscustomobject]@{
-    FilePath = "npm"
+    FilePath = "bun"
     PrefixArgs = [string[]]@()
   }
 }
@@ -854,24 +855,22 @@ function Run-SmokeTests {
   Write-Host ""
   Write-Host "==> Starting temporary web UI for smoke tests at $SmokeUrl"
 
-  $StdoutLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stdout.log"
-  $StderrLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stderr.log"
-  $StdinPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stdin.txt"
+  $StdoutLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-rspack.stdout.log"
+  $StderrLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-rspack.stderr.log"
+  $StdinPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-rspack.stdin.txt"
   Remove-Item -Force -ErrorAction SilentlyContinue $StdoutLogPath, $StderrLogPath
   Set-Content -Path $StdinPath -Value "" -NoNewline
   $script:DevServerStdinPath = $StdinPath
-  $NpmSpec = Get-NpmStartProcessSpec
-  $NpmArguments = @($NpmSpec.PrefixArgs) + @(
+  $BunSpec = Get-BunStartProcessSpec
+  $BunArguments = @($BunSpec.PrefixArgs) + @(
     "run",
     "dev",
-    "--",
     "--host",
     "127.0.0.1",
     "--port",
-    [string]$SmokePort,
-    "--strictPort"
+    [string]$SmokePort
   )
-  $script:DevServerProcess = Start-Process -FilePath $NpmSpec.FilePath -ArgumentList $NpmArguments `
+  $script:DevServerProcess = Start-Process -FilePath $BunSpec.FilePath -ArgumentList $BunArguments `
     -WorkingDirectory $RepoRoot `
     -RedirectStandardInput $StdinPath `
     -RedirectStandardOutput $StdoutLogPath `
@@ -891,18 +890,18 @@ function Run-SmokeTests {
   try {
     Invoke-RunLogged "smoke UI" {
       $env:SMOKE_URL = $SmokeUrl
-      & npm run smoke
+      & bun run smoke
     }
     Invoke-RunLogged "smoke executable sidecar" {
       $env:SMOKE_URL = $SmokeUrl
-      & npm run smoke:executable
+      & bun run smoke:executable
     }
 
     $WebModel = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it-web.litertlm"
     if ((Test-Path $WebModel) -and ((Get-Item $WebModel).Length -gt 0)) {
       Invoke-RunLogged "smoke web model" {
         $env:SMOKE_URL = $SmokeUrl
-        & npm run smoke:model
+        & bun run smoke:model
       }
     } else {
       Add-Summary "SKIP: smoke web model, models/litert/gemma-4-E2B-it-web.litertlm missing"
@@ -925,7 +924,7 @@ function Print-Summary {
 }
 
 try {
-  $NodeCommand = Get-PackageInstallCommand "OpenJS.NodeJS.LTS" "nodejs-lts" "Install Node.js from https://nodejs.org/"
+  $BunCommand = 'powershell -c "irm bun.sh/install.ps1|iex"'
   $GitCommand = Get-PackageInstallCommand "Git.Git" "git" "Install Git from https://git-scm.com/download/win"
   $GoCommand = Get-PackageInstallCommand "GoLang.Go" "golang" "Install Go from https://go.dev/dl/"
   $CurlCommand = Get-PackageInstallCommand "cURL.cURL" "curl" "Install curl with winget, choco, or from https://curl.se/windows/"
@@ -934,15 +933,14 @@ try {
   Print-InstallTasks
 
   Ensure-Dependency "git" "git" $GitCommand
-  Ensure-Dependency "node" "node" $NodeCommand
-  Ensure-Dependency "npm" "npm" $NodeCommand
+  Ensure-Dependency "bun" "bun" $BunCommand
   Ensure-Dependency "go" "go" $GoCommand
   Ensure-Dependency "curl" "curl" $CurlCommand
   Ensure-Dependency "uv" "uv" $UvCommand
   Ensure-Dependency "litert-lm" "litert-lm" "uv tool install litert-lm"
   Ensure-LlamaRuntime
 
-  Ensure-NpmDependencies
+  Ensure-BunDependencies
   Ensure-PlaywrightChromium
 
   Ensure-Model "Gemma 4 E2B web model" "models/litert/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
@@ -951,9 +949,9 @@ try {
   Ensure-Model "Qwen3 embedding GGUF model" "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf" "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf" $false
   Ensure-Model "EmbeddingGemma LiteRT embedding model" "models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite" "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" $true
 
-  Invoke-RunLogged "npm test" { & npm test }
-  Invoke-RunLogged "web production build" { & npm run build }
-  Invoke-RunLogged "sidecar artifacts build" { & npm run build:sidecar }
+  Invoke-RunLogged "bun test" { & bun run test }
+  Invoke-RunLogged "web production build" { & bun run build }
+  Invoke-RunLogged "sidecar artifacts build" { & bun run build:sidecar }
   Run-SmokeTests
 
   Print-Summary

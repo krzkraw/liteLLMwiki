@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolve } from "path";
 
 export const gemma4E2bWebFilename = "gemma-4-E2B-it-web.litertlm";
 export const defaultWebModelRelativePath = `models/litert/${gemma4E2bWebFilename}`;

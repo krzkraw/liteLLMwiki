@@ -1,8 +1,9 @@
-import { accessSync, constants, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { accessSync, constants, readFileSync } from "fs";
+import { join } from "path";
+import { describe, expect, it } from "bun:test";
 
 const repoRoot = process.cwd();
+const oldPackageRunner = "n" + "pm";
 
 function readRootScript(name: string): string {
   return readFileSync(join(repoRoot, name), "utf8");
@@ -38,7 +39,7 @@ describe("interactive installer scripts", () => {
 
       expect(contents).toContain("Install tasks");
       expect(contents).toContain("✓");
-      expect(contents).toContain("node");
+      expect(contents).toContain("bun");
       expect(contents).toContain("Gemma 4 E2B web model");
       expect(contents).toContain("smoke executable sidecar");
       expect(contents).toContain("Green");
@@ -72,15 +73,15 @@ describe("interactive installer scripts", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);
 
-      expect(contents).toContain("node");
-      expect(contents).toContain("npm");
+      expect(contents).toContain("bun");
+      expect(contents).not.toContain(`${oldPackageRunner} install`);
       expect(contents).toContain("go");
       expect(contents).toContain("git");
       expect(contents).toContain("curl");
       expect(contents).toContain("Playwright Chromium");
       expect(contents).toContain("litert-lm");
       expect(contents).toContain("llama-server");
-      expect(contents).toContain("npx playwright install chromium");
+      expect(contents).toContain("bunx playwright install chromium");
       expect(contents).toContain("uv tool install litert-lm");
     }
   });
@@ -147,16 +148,17 @@ describe("interactive installer scripts", () => {
     );
   });
 
-  it("installs npm dependencies, builds artifacts, runs smoke checks, and prints a summary", () => {
+  it("installs Bun dependencies, builds artifacts, runs smoke checks, and prints a summary", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);
 
-      expect(contents).toContain("npm install");
-      expect(contents).toContain("npx playwright install chromium");
-      expect(contents).toContain("npm run build");
-      expect(contents).toContain("npm run build:sidecar");
-      expect(contents).toContain("npm run smoke");
-      expect(contents).toContain("npm run smoke:executable");
+      expect(contents).toContain("bun install");
+      expect(contents).toContain("bunx playwright install chromium");
+      expect(contents).toContain("bun run build");
+      expect(contents).toContain("bun run build:sidecar");
+      expect(contents).toContain("bun run smoke");
+      expect(contents).toContain("bun run smoke:executable");
+      expect(contents).not.toContain(`${oldPackageRunner} run`);
       expect(contents).toContain("Summary");
       expect(contents).toContain("launch-all");
     }
@@ -174,16 +176,15 @@ describe("interactive installer scripts", () => {
     );
   });
 
-  it("uses a Windows executable npm shim for PowerShell Start-Process", () => {
+  it("uses a Windows executable Bun shim for PowerShell Start-Process", () => {
     const contents = readRootScript("install.ps1");
 
-    expect(contents).toContain("Get-NpmStartProcessSpec");
-    expect(contents).toContain("npm.cmd");
-    expect(contents).toContain("npm.exe");
-    expect(contents).toContain("$NpmSpec = Get-NpmStartProcessSpec");
-    expect(contents).toContain("Start-Process -FilePath $NpmSpec.FilePath");
-    expect(contents).toContain("-ArgumentList $NpmArguments");
-    expect(contents).not.toContain('Start-Process -FilePath "npm"');
+    expect(contents).toContain("Get-BunStartProcessSpec");
+    expect(contents).toContain("bun.exe");
+    expect(contents).toContain("$BunSpec = Get-BunStartProcessSpec");
+    expect(contents).toContain("Start-Process -FilePath $BunSpec.FilePath");
+    expect(contents).toContain("-ArgumentList $BunArguments");
+    expect(contents).not.toContain('Start-Process -FilePath "bun"');
   });
 
   it("isolates the PowerShell smoke dev server from the interactive console", () => {

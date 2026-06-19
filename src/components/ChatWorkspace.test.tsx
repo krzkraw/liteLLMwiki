@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { ChatWorkspace, type ChatWorkspaceProps } from "./ChatWorkspace";
 import { createChatSession } from "../lib/chatSessions";
 
@@ -77,8 +77,8 @@ describe("ChatWorkspace", () => {
   });
 
   it("shows and clears selected native attachments", async () => {
-    const onAttachmentsSelected = vi.fn();
-    const onRemoveAttachment = vi.fn();
+    const onAttachmentsSelected = mock();
+    const onRemoveAttachment = mock();
 
     await renderChatWorkspace({
       attachments: [{ id: "diagram", name: "diagram.png", mimeType: "image/png" }],
@@ -98,7 +98,7 @@ describe("ChatWorkspace", () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
-    expect(onAttachmentsSelected).toHaveBeenCalledOnce();
+    expect(onAttachmentsSelected).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       getByTestId<HTMLButtonElement>("remove-attachment-diagram").dispatchEvent(
@@ -122,9 +122,9 @@ describe("ChatWorkspace", () => {
   });
 
   it("renders chat tabs and routes tab actions to callbacks", async () => {
-    const onActiveSessionChange = vi.fn();
-    const onNewSession = vi.fn();
-    const onCloseSession = vi.fn();
+    const onActiveSessionChange = mock();
+    const onNewSession = mock();
+    const onCloseSession = mock();
 
     await renderChatWorkspace({
       sessions: [
@@ -162,7 +162,7 @@ describe("ChatWorkspace", () => {
     });
 
     expect(onActiveSessionChange).toHaveBeenCalledWith("chat-2");
-    expect(onNewSession).toHaveBeenCalledOnce();
+    expect(onNewSession).toHaveBeenCalledTimes(1);
     expect(onCloseSession).toHaveBeenCalledWith("chat-1");
   });
 
@@ -191,7 +191,7 @@ describe("ChatWorkspace", () => {
   });
 
   it("sends on Enter and keeps Shift+Enter available for a newline", async () => {
-    const onSend = vi.fn();
+    const onSend = mock();
 
     await renderChatWorkspace({ prompt: "Explain runtime", onSend });
 
@@ -218,11 +218,11 @@ describe("ChatWorkspace", () => {
 
     expect(shiftEnter.defaultPrevented).toBe(false);
     expect(enter.defaultPrevented).toBe(true);
-    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it("groups the prompt and action controls in one compact composer surface", async () => {
-    const onSend = vi.fn();
+    const onSend = mock();
 
     await renderChatWorkspace({ prompt: "Explain runtime", onSend });
 
@@ -242,9 +242,15 @@ describe("ChatWorkspace", () => {
     expect(getByTestId<HTMLButtonElement>("send-button").closest(".prompt-surface")).toBe(
       promptSurface,
     );
-    expect(promptActions).toContain(getByTestId<HTMLInputElement>("attachment-input"));
-    expect(promptActions).toContain(getByTestId<HTMLButtonElement>("stop-button"));
-    expect(promptActions).toContain(getByTestId<HTMLButtonElement>("send-button"));
+    expect(promptActions?.contains(getByTestId<HTMLInputElement>("attachment-input"))).toBe(
+      true,
+    );
+    expect(promptActions?.contains(getByTestId<HTMLButtonElement>("stop-button"))).toBe(
+      true,
+    );
+    expect(promptActions?.contains(getByTestId<HTMLButtonElement>("send-button"))).toBe(
+      true,
+    );
 
     await act(async () => {
       getByTestId<HTMLButtonElement>("send-button").dispatchEvent(
@@ -252,13 +258,13 @@ describe("ChatWorkspace", () => {
       );
     });
 
-    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it("renders model option controls and forwards changes", async () => {
-    const onSystemPromptChange = vi.fn();
-    const onContextLengthChange = vi.fn();
-    const onThinkingEnabledChange = vi.fn();
+    const onSystemPromptChange = mock();
+    const onContextLengthChange = mock();
+    const onThinkingEnabledChange = mock();
 
     await renderChatWorkspace({
       systemPrompt: "Be concise.",

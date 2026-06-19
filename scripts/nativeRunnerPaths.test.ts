@@ -1,6 +1,6 @@
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { resolve } from "path";
+import { pathToFileURL } from "url";
+import { describe, expect, it } from "bun:test";
 
 describe("native runner paths", () => {
   it("places sidecar release artifacts outside the sidecar source tree", async () => {

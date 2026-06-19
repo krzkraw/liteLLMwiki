@@ -5,7 +5,12 @@ import { createSidecarEndpoint, normalizeExecutableEndpoint } from "./endpoint";
 import { collectOpenAiSseText } from "./openaiSse";
 import type { SidecarApiRequest, SidecarApiResponse } from "./sidecarControlClient";
 
-type FetchImpl = typeof fetch;
+type FetchResponse = Pick<Response, "body" | "json" | "ok"> &
+  Partial<Pick<Response, "status">>;
+type FetchImpl = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<FetchResponse>;
 
 export interface ExecutableProviderTransport {
   request(request: SidecarApiRequest): Promise<SidecarApiResponse>;

@@ -98,8 +98,8 @@ status for embeddings and reranking.
 ### R7: Verification
 
 WHEN implementation is complete
-THE SYSTEM SHALL pass `npm test`, `npm run build`, `cd native/sidecar && go test
-./...`, `npm run build:sidecar`, `npm run smoke:executable`, fake-runtime
+THE SYSTEM SHALL pass `bun test`, `bun run build`, `cd native/sidecar && go test
+./...`, `bun run build:sidecar`, `bun run smoke:executable`, fake-runtime
 sidecar/TUI smoke, and real TUI testing with downloaded artifacts or a concrete
 external blocker.
 

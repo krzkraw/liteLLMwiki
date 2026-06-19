@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync } from "fs";
+import { resolve } from "path";
 import { chromium } from "playwright";
 import { createChromiumGpuArgs, launchSmokeChromium } from "./smokeRuntime.mjs";
 
@@ -12,7 +12,7 @@ const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
 if (!modelPath) {
   console.error("MODEL_PATH is required.");
   console.error(
-    "Example: HEADLESS=0 PLAYWRIGHT_CHANNEL=chrome MODEL_PATH=/path/to/gemma-4-E2B-it-web.litertlm npm run e2e:generate",
+    "Example: HEADLESS=0 PLAYWRIGHT_CHANNEL=chrome MODEL_PATH=/path/to/gemma-4-E2B-it-web.litertlm bun run e2e:generate",
   );
   process.exit(1);
 }

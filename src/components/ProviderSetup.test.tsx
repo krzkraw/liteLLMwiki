@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { ProviderSetup, type ProviderSetupProps } from "./ProviderSetup";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -99,7 +99,7 @@ describe("ProviderSetup", () => {
   });
 
   it("enables executable sidecar connection", async () => {
-    const onConnectExecutable = vi.fn();
+    const onConnectExecutable = mock();
 
     await renderProviderSetup({ onConnectExecutable });
 
@@ -111,7 +111,7 @@ describe("ProviderSetup", () => {
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onConnectExecutable).toHaveBeenCalledOnce();
+    expect(onConnectExecutable).toHaveBeenCalledTimes(1);
   });
 
   it("shows connected executable provider state", async () => {
@@ -146,10 +146,10 @@ describe("ProviderSetup", () => {
   });
 
   it("renders runtime websocket controls and debug output", async () => {
-    const onConnectRuntimeControl = vi.fn();
-    const onStartRuntime = vi.fn();
-    const onRestartRuntime = vi.fn();
-    const onStopRuntime = vi.fn();
+    const onConnectRuntimeControl = mock();
+    const onStartRuntime = mock();
+    const onRestartRuntime = mock();
+    const onStopRuntime = mock();
 
     await renderProviderSetup({
       sidecarControlConnected: true,
@@ -185,11 +185,11 @@ describe("ProviderSetup", () => {
       );
     });
 
-    expect(onConnectRuntimeControl).toHaveBeenCalledOnce();
+    expect(onConnectRuntimeControl).toHaveBeenCalledTimes(1);
     expect(onStartRuntime).toHaveBeenCalledWith("debug");
     expect(onRestartRuntime).toHaveBeenCalledWith("release");
     expect(onRestartRuntime).toHaveBeenCalledWith("debug");
-    expect(onStopRuntime).toHaveBeenCalledOnce();
+    expect(onStopRuntime).toHaveBeenCalledTimes(1);
     const manualCommand = getByTestId("manual-sidecar-command").textContent ?? "";
     expect(manualCommand).toContain(
       "./native/sidecar-artifacts/litert-sidecar-darwin-arm64/litert-sidecar",
@@ -298,7 +298,7 @@ describe("ProviderSetup", () => {
   });
 
   it("forwards provider option edits from advanced pills", async () => {
-    const onWebProviderOptionChange = vi.fn();
+    const onWebProviderOptionChange = mock();
 
     await renderProviderSetup({
       providerKind: "web",

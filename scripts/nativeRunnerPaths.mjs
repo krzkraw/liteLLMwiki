@@ -1,5 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 
 export function resolveAppRoot(scriptUrl = import.meta.url) {
   return resolve(dirname(fileURLToPath(scriptUrl)), "..");

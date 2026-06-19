@@ -995,6 +995,37 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 	}
 }
 
+func TestSettingsViewShowsRunnerAPIParityFromLiveSnapshot(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	updated := next.(Model)
+	view := updated.View()
+
+	for _, expected := range []string{
+		"Runner API parity / Live snapshot",
+		"Runner role/state/route comes from RunnerController.Snapshot()",
+		"Routes: embedding -> embed-qwen, main -> main-litert",
+		"main-litert  main       running  /v1/chat/completions",
+		"TUI: s/x/r + b/p/h/i/m/e/u/f/l/v/t/o",
+		"Controller: RunnerController.StartRunner/StopRunner/RestartRunner/UpdateRunner",
+		"WS: api.request PATCH /sidecar/v1/runners/main-litert",
+		"WS: api.request POST /sidecar/v1/runners/main-litert/start|stop|restart",
+		"embed-qwen   embedding  created  /v1/embeddings",
+		"WS: api.request PATCH /sidecar/v1/runners/embed-qwen",
+		"WS: api.request POST /sidecar/v1/runners/embed-qwen/start|stop|restart",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("settings runner API parity missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestSettingsViewShowsSharedActionMethodMap(t *testing.T) {
 	t.Parallel()
 

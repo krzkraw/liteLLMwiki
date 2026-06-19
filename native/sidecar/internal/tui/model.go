@@ -1356,6 +1356,7 @@ func (m Model) settingsView() string {
 		renderPanel("Runtime config editor", m.runtimeConfigLines(), "82"),
 		m.runtimeEditorView(),
 		renderPanel("Shared action map", settingsActionMapLines(), "214"),
+		renderPanel("Runner API parity / Live snapshot", m.settingsRunnerParityLines(), "39"),
 		renderPanel("WebSocket API parity", []string{
 			"status.get",
 			"runtime.start",
@@ -1377,6 +1378,56 @@ func (m Model) settingsView() string {
 			"TUI controls call the same methods underneath: RuntimeController and RunnerController.",
 		}, "205"),
 	)
+}
+
+func (m Model) settingsRunnerParityLines() []string {
+	lines := []string{
+		"Runner role/state/route comes from RunnerController.Snapshot()",
+		m.settingsRouteSummaryLine(),
+	}
+	if len(m.snapshot.Runners) == 0 {
+		return append(lines, "No runners configured.")
+	}
+
+	for index, runner := range m.snapshot.Runners {
+		if index > 0 {
+			lines = append(lines, "")
+		}
+		basePath := "/sidecar/v1/runners/" + runner.ID
+		lines = append(
+			lines,
+			fmt.Sprintf(
+				"%-12s %-10s %-8s %s",
+				runner.ID,
+				fallback(runner.Role, "unknown"),
+				fallback(runner.State, "unknown"),
+				runnerRoleRoute(runner.Role),
+			),
+			"TUI: s/x/r + b/p/h/i/m/e/u/f/l/v/t/o",
+			"Controller: RunnerController.StartRunner/StopRunner/RestartRunner/UpdateRunner",
+			"WS: api.request PATCH "+basePath,
+			"WS: api.request POST "+basePath+"/start|stop|restart",
+		)
+	}
+	return lines
+}
+
+func (m Model) settingsRouteSummaryLine() string {
+	if len(m.snapshot.Routes) == 0 {
+		return "Routes: none"
+	}
+
+	keys := make([]string, 0, len(m.snapshot.Routes))
+	for key := range m.snapshot.Routes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+" -> "+m.snapshot.Routes[key])
+	}
+	return "Routes: " + strings.Join(parts, ", ")
 }
 
 func settingsActionMapLines() []string {

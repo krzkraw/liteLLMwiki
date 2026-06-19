@@ -185,7 +185,10 @@ describe("root launcher scripts", () => {
       expect(contents).toContain("make new window");
       expect(contents).toContain("selected tab of terminalWindow");
       expect(contents).toContain("wt.exe");
-      expect(contents).toContain("new-window");
+      expect(contents).toContain('"--window"');
+      expect(contents).toContain('"new"');
+      expect(contents).toContain('"new-tab"');
+      expect(contents).not.toContain("new-window");
       expect(contents).not.toContain("--new-tab");
     }
   });

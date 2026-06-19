@@ -68,7 +68,8 @@ for the sidecar TUI. It starts the web UI first, then opens the sidecar TUI so
 the dashboard is the foreground terminal. It forces the sidecar launcher onto
 the TUI path even if a headless environment variable was left behind by smoke
 testing. On Windows the PowerShell scripts prefer Windows Terminal
-`new-window` when available and fall back to starting a new PowerShell console.
+`--window new new-tab` when available and fall back to starting a new
+PowerShell console.
 For explicit non-interactive sidecar launches, pass `--headless` to
 `launch-sidecar.sh` or `-Headless` to `launch-sidecar.ps1`.
 

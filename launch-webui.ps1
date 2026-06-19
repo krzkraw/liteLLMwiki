@@ -151,7 +151,9 @@ function Start-LiteRTTerminal {
 
   if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
     $WindowsTerminalArgs = @(
-      "new-window",
+      "--window",
+      "new",
+      "new-tab",
       "--title",
       $Title,
       "-d",

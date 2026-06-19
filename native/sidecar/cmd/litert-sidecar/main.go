@@ -395,6 +395,8 @@ func toServerRunnerSnapshot(snapshot supervisor.RunnerSnapshot) server.RunnerSna
 		ModelID:      snapshot.ModelID,
 		Host:         snapshot.Host,
 		Port:         snapshot.Port,
+		Launch:       snapshot.Launch,
+		Verbose:      snapshot.Verbose,
 		State:        string(snapshot.State),
 		PID:          snapshot.PID,
 		Upstream:     snapshot.Upstream,

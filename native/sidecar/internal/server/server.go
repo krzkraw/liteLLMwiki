@@ -107,6 +107,8 @@ type RunnerSnapshot struct {
 	ModelID      string            `json:"modelId,omitempty"`
 	Host         string            `json:"host,omitempty"`
 	Port         int               `json:"port,omitempty"`
+	Launch       bool              `json:"launch"`
+	Verbose      bool              `json:"verbose"`
 	State        string            `json:"state"`
 	PID          int               `json:"pid,omitempty"`
 	Upstream     string            `json:"upstream,omitempty"`

@@ -160,6 +160,8 @@ type RunnerSnapshot struct {
 	ModelID      string            `json:"modelId,omitempty"`
 	Host         string            `json:"host,omitempty"`
 	Port         int               `json:"port,omitempty"`
+	Launch       bool              `json:"launch"`
+	Verbose      bool              `json:"verbose"`
 	State        State             `json:"state"`
 	PID          int               `json:"pid,omitempty"`
 	Upstream     string            `json:"upstream,omitempty"`
@@ -265,6 +267,8 @@ func (s *Supervisor) addDefaultLiteRTRunner(config LiteRTConfig) {
 			ModelID:    modelID,
 			Host:       host,
 			Port:       port,
+			Launch:     config.Launch,
+			Verbose:    config.Verbose,
 			State:      state,
 			Upstream:   upstream,
 			Detail:     detail,
@@ -301,6 +305,8 @@ func (s *Supervisor) CreateRunner(spec RunnerSpec) (string, error) {
 			ModelID:    normalized.ModelID,
 			Host:       normalized.Host,
 			Port:       normalized.Port,
+			Launch:     normalized.Launch,
+			Verbose:    normalized.Verbose,
 			State:      initialState(normalized.Launch),
 			Upstream:   configuredUpstream(normalized.Launch, normalized.Upstream, normalized.Host, normalized.Port),
 			Detail:     initialDetail(normalized.Launch),
@@ -372,6 +378,8 @@ func (s *Supervisor) UpdateRunner(id string, patch RunnerPatch) error {
 	record.snapshot.ModelID = normalized.ModelID
 	record.snapshot.Host = normalized.Host
 	record.snapshot.Port = normalized.Port
+	record.snapshot.Launch = normalized.Launch
+	record.snapshot.Verbose = record.verbose
 	record.snapshot.PID = 0
 	record.snapshot.Command = nil
 	record.snapshot.Upstream = configuredUpstream(
@@ -838,6 +846,7 @@ func (s *Supervisor) applyDefaultLiteRTPatch(
 	record.mode = mode
 	if patch.Launch != nil {
 		record.launch = *patch.Launch
+		record.snapshot.Launch = record.launch
 	}
 	if patch.Executable != "" {
 		record.executable = patch.Executable
@@ -863,6 +872,7 @@ func (s *Supervisor) applyDefaultLiteRTPatch(
 	}
 	if patch.Verbose != nil {
 		record.verbose = *patch.Verbose
+		record.snapshot.Verbose = record.verbose
 	}
 
 	upstream := patch.Upstream

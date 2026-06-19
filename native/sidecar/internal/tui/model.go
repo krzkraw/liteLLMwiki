@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +57,15 @@ type runnerUpdateMsg struct {
 	err    error
 }
 
+type runnerEdit struct {
+	runner  server.RunnerSnapshot
+	field   string
+	label   string
+	current string
+	value   string
+	numeric bool
+}
+
 type runnerPreset struct {
 	id      string
 	role    string
@@ -78,6 +88,7 @@ type Model struct {
 	logEntries []server.LogEntry
 	models     []catalog.Entry
 	notice     string
+	edit       *runnerEdit
 }
 
 var asciiBorder = lipgloss.Border{
@@ -164,6 +175,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.KeyMsg:
+		if m.edit != nil {
+			return m.updateEditKey(msg)
+		}
 		return m.updateKey(msg)
 	case tickMsg:
 		m.refresh()
@@ -227,11 +241,66 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if runner, ok := m.activeRunner(); ok {
 			switch strings.ToLower(value) {
 			case "b":
+				backend := nextBackend(runner.Backend)
 				return m, m.runnerUpdateCmd(
 					runner,
 					"backend",
-					nextBackend(runner.Backend),
-					server.RunnerPatch{Backend: nextBackend(runner.Backend)},
+					backend,
+					server.RunnerPatch{Backend: backend},
+				)
+			case "p":
+				m.edit = newRunnerEdit(runner, "port", "Port", fallbackInt(runner.Port, ""), true)
+				return m, nil
+			case "h":
+				m.edit = newRunnerEdit(runner, "host", "Host", runner.Host, false)
+				return m, nil
+			case "i":
+				m.edit = newRunnerEdit(runner, "modelId", "Model ID", runner.ModelID, false)
+				return m, nil
+			case "m":
+				m.edit = newRunnerEdit(runner, "modelPath", "Model path", runner.ModelPath, false)
+				return m, nil
+			case "e":
+				m.edit = newRunnerEdit(runner, "executable", "Executable", runner.Executable, false)
+				return m, nil
+			case "u":
+				m.edit = newRunnerEdit(runner, "upstream", "Upstream", runner.Upstream, false)
+				return m, nil
+			case "l":
+				launch := !runner.Launch
+				value := "external"
+				if launch {
+					value = "managed"
+				}
+				return m, m.runnerUpdateCmd(
+					runner,
+					"launch",
+					value,
+					server.RunnerPatch{Launch: &launch},
+				)
+			case "v":
+				verbose := !runner.Verbose
+				return m, m.runnerUpdateCmd(
+					runner,
+					"verbose",
+					strconv.FormatBool(verbose),
+					server.RunnerPatch{Verbose: &verbose},
+				)
+			case "t":
+				runtimeName := nextRuntime(runner.Runtime)
+				return m, m.runnerUpdateCmd(
+					runner,
+					"runtime",
+					runtimeName,
+					server.RunnerPatch{Runtime: runtimeName},
+				)
+			case "o":
+				role := nextRole(runner.Role)
+				return m, m.runnerUpdateCmd(
+					runner,
+					"role",
+					role,
+					server.RunnerPatch{Role: role},
 				)
 			case "s":
 				return m, m.runnerActionCmd("start", runner.ID)
@@ -244,6 +313,45 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) updateEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	edit := *m.edit
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.edit = nil
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		if len(m.edit.value) > 0 {
+			m.edit.value = m.edit.value[:len(m.edit.value)-1]
+		}
+		return m, nil
+	case tea.KeyEnter:
+		m.edit = nil
+		patch, value, err := runnerEditPatch(edit)
+		if err != nil {
+			return m, func() tea.Msg {
+				return runnerUpdateMsg{
+					field:  edit.field,
+					value:  edit.value,
+					runner: edit.runner,
+					err:    err,
+				}
+			}
+		}
+		return m, m.runnerUpdateCmd(edit.runner, edit.field, value, patch)
+	case tea.KeyRunes:
+		input := msg.String()
+		if edit.numeric && !isDigits(input) {
+			return m, nil
+		}
+		m.edit.value += input
+		return m, nil
+	default:
+		return m, nil
+	}
 }
 
 func (m Model) View() string {
@@ -278,6 +386,23 @@ func (m Model) View() string {
 	}
 
 	return builder.String()
+}
+
+func newRunnerEdit(
+	runner server.RunnerSnapshot,
+	field string,
+	label string,
+	value string,
+	numeric bool,
+) *runnerEdit {
+	return &runnerEdit{
+		runner:  runner,
+		field:   field,
+		label:   label,
+		current: value,
+		value:   "",
+		numeric: numeric,
+	}
 }
 
 func (m Model) activeTabID() string {
@@ -459,6 +584,7 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		formatKV("Host", fallback(runner.Host, "127.0.0.1")),
 		formatKV("Port", fallbackInt(runner.Port, "auto")),
 		formatKV("Launch", runnerLaunchMode(runner)),
+		formatKV("Verbose", strconv.FormatBool(runner.Verbose)),
 		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
 	}
 
@@ -480,11 +606,32 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 			"s Start   x Stop   r Restart",
 			"",
 			"Edit settings",
-			"b Backend CPU/GPU",
+			"b Backend CPU/GPU   l Launch managed/external   v Verbose",
+			"t Runtime   o Role",
+			"p Port   h Host   i Model ID",
+			"m Model path   e Executable   u Upstream",
 		}, "39"),
+		m.runnerEditorView(runner),
 		renderPanel("Settings", settings, "45"),
 		renderPanel("Details", details, "214"),
 	}, "\n\n")
+}
+
+func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
+	if m.edit == nil || m.edit.runner.ID != runner.ID {
+		return ""
+	}
+	return renderPanel(
+		"Editing "+m.edit.label+" for "+runner.ID,
+		[]string{
+			formatKV("Current", fallback(m.edit.current, "not configured")),
+			"",
+			"New value",
+			m.edit.value,
+			"Enter saves through PATCH /sidecar/v1/runners/{id}; Esc cancels.",
+		},
+		"205",
+	)
 }
 
 func (m Model) modelsView() string {
@@ -563,6 +710,7 @@ func (m Model) settingsView() string {
 			"api.request POST /sidecar/v1/models/download",
 			"api.request GET /sidecar/v1/runners",
 			"api.request POST /sidecar/v1/runners",
+			"api.request PATCH /sidecar/v1/runners/{id}",
 			"api.request POST /sidecar/v1/runners/{id}/start",
 			"api.request POST /sidecar/v1/runners/{id}/stop",
 			"api.request POST /sidecar/v1/runners/{id}/restart",
@@ -749,6 +897,60 @@ func nextBackend(current string) string {
 	return "cpu"
 }
 
+func nextRuntime(current string) string {
+	if strings.EqualFold(current, "litert") {
+		return "llamacpp"
+	}
+	return "litert"
+}
+
+func nextRole(current string) string {
+	switch strings.ToLower(current) {
+	case "main":
+		return "embedding"
+	case "embedding":
+		return "reranking"
+	default:
+		return "main"
+	}
+}
+
+func runnerEditPatch(edit runnerEdit) (server.RunnerPatch, string, error) {
+	value := strings.TrimSpace(edit.value)
+	switch edit.field {
+	case "port":
+		port, err := strconv.Atoi(value)
+		if err != nil || port <= 0 {
+			return server.RunnerPatch{}, value, fmt.Errorf("port must be a positive integer")
+		}
+		return server.RunnerPatch{Port: port}, strconv.Itoa(port), nil
+	case "host":
+		return server.RunnerPatch{Host: value}, value, nil
+	case "modelId":
+		return server.RunnerPatch{ModelID: value}, value, nil
+	case "modelPath":
+		return server.RunnerPatch{ModelPath: value}, value, nil
+	case "executable":
+		return server.RunnerPatch{Executable: value}, value, nil
+	case "upstream":
+		return server.RunnerPatch{Upstream: value}, value, nil
+	default:
+		return server.RunnerPatch{}, value, fmt.Errorf("unknown runner field %q", edit.field)
+	}
+}
+
+func isDigits(value string) bool {
+	if value == "" {
+		return true
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (m Model) runnerSpecForRole(role string) (server.RunnerSpec, string, error) {
 	switch role {
 	case "main":
@@ -856,12 +1058,10 @@ func statusBadge(state string) string {
 }
 
 func runnerLaunchMode(runner server.RunnerSnapshot) string {
-	switch strings.ToLower(runner.State) {
-	case "external":
+	if !runner.Launch {
 		return "external upstream"
-	default:
-		return "managed or ready"
 	}
+	return "managed by sidecar"
 }
 
 func commandLine(command []string) string {

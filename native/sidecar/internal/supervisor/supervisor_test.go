@@ -126,10 +126,12 @@ func TestSupervisorUpdatesStoppedRunnerSettings(t *testing.T) {
 	}
 
 	launch := true
+	verbose := true
 	err = supervisor.UpdateRunner(runnerID, RunnerPatch{
 		Backend:   BackendCPU,
 		Port:      9592,
 		Launch:    &launch,
+		Verbose:   &verbose,
 		ModelID:   "qwen3-embedding-cpu",
 		ModelPath: "models/llamacpp/embedding-cpu.gguf",
 	})
@@ -152,6 +154,12 @@ func TestSupervisorUpdatesStoppedRunnerSettings(t *testing.T) {
 	}
 	if runner.ModelPath != "models/llamacpp/embedding-cpu.gguf" {
 		t.Fatalf("model path = %q", runner.ModelPath)
+	}
+	if !runner.Launch {
+		t.Fatalf("launch = false, want true")
+	}
+	if !runner.Verbose {
+		t.Fatalf("verbose = false, want true")
 	}
 	if runner.State != StateCreated {
 		t.Fatalf("state = %q, want created after enabling managed launch", runner.State)

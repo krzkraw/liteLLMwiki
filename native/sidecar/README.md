@@ -23,8 +23,11 @@ The TUI uses the same runtime and runner controller methods as the HTTP routes
 and WebSocket `api.request` bridge. Its dashboard lists runtime specs, route
 authority, and runnable backends. Each configured runner gets its own tab with
 settings, process details, command/capability/error state, `s` start, `x` stop,
-`r` restart controls, and `b` backend CPU/GPU editing through the same runner
-update method behind `PATCH /sidecar/v1/runners/{id}`. The Settings tab lists
+and `r` restart controls. Runner tabs edit settings through the same update
+method behind `PATCH /sidecar/v1/runners/{id}`: `b` backend, `p` port, `h` host,
+`i` model ID, `m` model path, `e` executable, `u` upstream, `l` launch mode, `v`
+verbose, `t` runtime, and `o` role. Typed edits show the current value, accept a
+replacement value, save with Enter, and cancel with Esc. The Settings tab lists
 the matching WebSocket messages and sidecar API paths, and exposes default
 runtime controls with `s` start release, `d` start debug, `x` stop, and `r`
 restart release so terminal controls can be checked against the browser-facing

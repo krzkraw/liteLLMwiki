@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,6 +111,16 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 		"Restart",
 		"Edit settings",
 		"b Backend",
+		"p Port",
+		"h Host",
+		"i Model ID",
+		"m Model path",
+		"e Executable",
+		"u Upstream",
+		"l Launch",
+		"v Verbose",
+		"t Runtime",
+		"o Role",
 		"Settings",
 		"Runtime",
 		"Role",
@@ -120,6 +131,7 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 		"Host",
 		"Port",
 		"Launch",
+		"Verbose",
 		"Upstream",
 		"Details",
 		"PID",
@@ -131,6 +143,88 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("runner tab missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestRunnerTabEditsPortThroughSharedRunnerController(t *testing.T) {
+	t.Parallel()
+
+	runners := testRunnerController()
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	updated := next.(Model)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	updated = next.(Model)
+	if !strings.Contains(updated.View(), "Editing Port for embed-qwen") {
+		t.Fatalf("view missing port editor:\n%s", updated.View())
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("9599")})
+	updated = next.(Model)
+	nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("port editor enter returned no command")
+	}
+
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runners.lastCall(); got != "update:embed-qwen:port=9599" {
+		t.Fatalf("last call = %q, want port update", got)
+	}
+	view := updated.View()
+	if !strings.Contains(view, "updated embed-qwen port 9599") {
+		t.Fatalf("view missing port update notice:\n%s", view)
+	}
+	if !strings.Contains(view, "Port:          9599") {
+		t.Fatalf("view missing updated port:\n%s", view)
+	}
+}
+
+func TestRunnerTabEditsModelIDThroughSharedRunnerController(t *testing.T) {
+	t.Parallel()
+
+	runners := testRunnerController()
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	updated := next.(Model)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	updated = next.(Model)
+	if !strings.Contains(updated.View(), "Editing Model ID for embed-qwen") {
+		t.Fatalf("view missing model id editor:\n%s", updated.View())
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom-embedding")})
+	updated = next.(Model)
+	nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("model id editor enter returned no command")
+	}
+
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runners.lastCall(); got != "update:embed-qwen:modelId=custom-embedding" {
+		t.Fatalf("last call = %q, want model id update", got)
+	}
+	view := updated.View()
+	if !strings.Contains(view, "updated embed-qwen modelId custom-embedding") {
+		t.Fatalf("view missing model id update notice:\n%s", view)
+	}
+	if !strings.Contains(view, "Model ID:      custom-embedding") {
+		t.Fatalf("view missing updated model id:\n%s", view)
 	}
 }
 
@@ -167,6 +261,65 @@ func TestRunnerTabUpdatesBackendThroughSharedRunnerController(t *testing.T) {
 	}
 	if !strings.Contains(view, "Backend:       cpu") {
 		t.Fatalf("view missing updated backend:\n%s", view)
+	}
+}
+
+func TestRunnerTabTogglesLaunchAndVerboseThroughSharedRunnerController(t *testing.T) {
+	t.Parallel()
+
+	runners := testRunnerController()
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	updated := next.(Model)
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("l"),
+	})
+	if cmd == nil {
+		t.Fatalf("launch edit returned no command")
+	}
+
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runners.lastCall(); got != "update:embed-qwen:launch=false" {
+		t.Fatalf("last call = %q, want launch update", got)
+	}
+	view := updated.View()
+	if !strings.Contains(view, "updated embed-qwen launch external") {
+		t.Fatalf("view missing launch update notice:\n%s", view)
+	}
+	if !strings.Contains(view, "external upstream") {
+		t.Fatalf("view missing updated launch mode:\n%s", view)
+	}
+
+	nextModel, cmd = updated.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("v"),
+	})
+	if cmd == nil {
+		t.Fatalf("verbose edit returned no command")
+	}
+
+	message = cmd()
+	afterAction, _ = nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runners.lastCall(); got != "update:embed-qwen:verbose=true" {
+		t.Fatalf("last call = %q, want verbose update", got)
+	}
+	view = updated.View()
+	if !strings.Contains(view, "updated embed-qwen verbose true") {
+		t.Fatalf("view missing verbose update notice:\n%s", view)
+	}
+	if !strings.Contains(view, "Verbose:") || !strings.Contains(view, "true") {
+		t.Fatalf("view missing updated verbose setting:\n%s", view)
 	}
 }
 
@@ -336,6 +489,7 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 		"runtime.stop",
 		"runtime.restart",
 		"api.request GET /sidecar/v1/runners",
+		"api.request PATCH /sidecar/v1/runners/{id}",
 		"api.request POST /sidecar/v1/runners/{id}/start",
 		"api.request POST /sidecar/v1/runners/{id}/stop",
 		"api.request POST /sidecar/v1/runners/{id}/restart",
@@ -472,6 +626,7 @@ func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
 			ModelID:    "gemma4-e2b",
 			Host:       "127.0.0.1",
 			Port:       9381,
+			Launch:     true,
 			State:      "running",
 			PID:        1234,
 			Upstream:   "http://127.0.0.1:9381",
@@ -500,6 +655,7 @@ func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
 			ModelID:    "qwen3-embedding",
 			Host:       "127.0.0.1",
 			Port:       9382,
+			Launch:     true,
 			State:      "created",
 			Upstream:   "http://127.0.0.1:9382",
 			Capabilities: map[string]string{
@@ -544,6 +700,8 @@ func (c *fakeRunnerController) CreateRunner(
 		ModelID:   spec.ModelID,
 		Host:      spec.Host,
 		Port:      spec.Port,
+		Launch:    spec.Launch,
+		Verbose:   spec.Verbose,
 		State:     "created",
 		Upstream:  spec.Upstream,
 		Detail:    "Runner has not been started yet.",
@@ -563,6 +721,18 @@ func (c *fakeRunnerController) UpdateRunner(
 	parts := []string{"update", id}
 	if patch.Backend != "" {
 		parts = append(parts, "backend="+patch.Backend)
+	}
+	if patch.Port > 0 {
+		parts = append(parts, "port="+strconv.Itoa(patch.Port))
+	}
+	if patch.ModelID != "" {
+		parts = append(parts, "modelId="+patch.ModelID)
+	}
+	if patch.Launch != nil {
+		parts = append(parts, "launch="+strconv.FormatBool(*patch.Launch))
+	}
+	if patch.Verbose != nil {
+		parts = append(parts, "verbose="+strconv.FormatBool(*patch.Verbose))
 	}
 	c.calls = append(c.calls, strings.Join(parts, ":"))
 	c.patches[id] = patch
@@ -586,6 +756,17 @@ func applyFakeRunnerPatch(runner *server.RunnerSnapshot, patch server.RunnerPatc
 	}
 	if patch.ModelID != "" {
 		runner.ModelID = patch.ModelID
+	}
+	if patch.Launch != nil {
+		runner.Launch = *patch.Launch
+		if runner.Launch {
+			runner.State = "created"
+		} else {
+			runner.State = "external"
+		}
+	}
+	if patch.Verbose != nil {
+		runner.Verbose = *patch.Verbose
 	}
 }
 

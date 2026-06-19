@@ -352,6 +352,7 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 			"host": "127.0.0.1",
 			"port": 9492,
 			"launch": false,
+			"verbose": true,
 			"upstream": "http://127.0.0.1:9492"
 		}`),
 	)
@@ -378,6 +379,12 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 	if createBody.Runner.State != "external" {
 		t.Fatalf("runner state = %q, want external", createBody.Runner.State)
 	}
+	if createBody.Runner.Launch {
+		t.Fatalf("runner launch = true, want false")
+	}
+	if !createBody.Runner.Verbose {
+		t.Fatalf("runner verbose = false, want true")
+	}
 
 	patchReq := httptest.NewRequest(
 		http.MethodPatch,
@@ -385,6 +392,7 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 		strings.NewReader(`{
 			"backend": "gpu",
 			"port": 9592,
+			"verbose": false,
 			"modelId": "qwen3-embedding-gpu"
 		}`),
 	)
@@ -413,6 +421,12 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 	}
 	if patchBody.Runner.ModelID != "qwen3-embedding-gpu" {
 		t.Fatalf("patched model id = %q", patchBody.Runner.ModelID)
+	}
+	if patchBody.Runner.Launch {
+		t.Fatalf("patched launch = true, want false")
+	}
+	if patchBody.Runner.Verbose {
+		t.Fatalf("patched verbose = true, want false")
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/sidecar/v1/runners", nil)
@@ -1529,6 +1543,8 @@ func testRunnerSnapshot(snapshot supervisor.RunnerSnapshot) RunnerSnapshot {
 		ModelID:      snapshot.ModelID,
 		Host:         snapshot.Host,
 		Port:         snapshot.Port,
+		Launch:       snapshot.Launch,
+		Verbose:      snapshot.Verbose,
 		State:        string(snapshot.State),
 		PID:          snapshot.PID,
 		Upstream:     snapshot.Upstream,

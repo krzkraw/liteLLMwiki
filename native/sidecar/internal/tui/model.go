@@ -252,6 +252,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.runtimeActionCmd("stop", "")
 			case "r":
 				return m, m.runtimeActionCmd("restart", server.RuntimeModeRelease)
+			case "g":
+				return m, m.runtimeActionCmd("restart", server.RuntimeModeDebug)
 			case "e":
 				m.runtimeEdit = m.newRuntimeEdit("runtimeExe", "Runtime exe", m.runtimeConfigValue("runtimeExe"), false)
 				return m, nil
@@ -974,7 +976,7 @@ func (m Model) settingsView() string {
 	return joinPanels(
 		renderPanel("Settings", []string{
 			"Controls",
-			"s Start release   d Start debug   r Restart release   x Stop runtime",
+			"s Start release   d Start debug   r Restart release   g Restart debug   x Stop runtime",
 			"",
 			formatKV("Runtime controller", runtimeState),
 			formatKV("Runner controller", runnerState),

@@ -668,6 +668,7 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 
 	for _, expected := range []string{
 		"WebSocket API parity",
+		"g Restart debug",
 		"status.get",
 		"runtime.start",
 		"runtime.stop",
@@ -809,6 +810,7 @@ func TestSettingsControlsUseSharedRuntimeController(t *testing.T) {
 		{key: "d", wantCall: "start:debug", wantToast: "started runtime debug"},
 		{key: "x", wantCall: "stop", wantToast: "stopped runtime"},
 		{key: "r", wantCall: "restart:release", wantToast: "restarted runtime release"},
+		{key: "g", wantCall: "restart:debug", wantToast: "restarted runtime debug"},
 	} {
 		nextModel, cmd := updated.Update(tea.KeyMsg{
 			Type:  tea.KeyRunes,

@@ -97,22 +97,22 @@ function New-LlamaRuntimeDefinition {
 
 function Get-LlamaRuntimeDefinitions {
   $Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-  $IsWindowsOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+  $RunningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
     [System.Runtime.InteropServices.OSPlatform]::Windows
   )
-  $IsMacOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+  $RunningOnMacOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
     [System.Runtime.InteropServices.OSPlatform]::OSX
   )
 
   $Definitions = @()
 
-  if ($IsMacOs -and ($Architecture.ToString() -eq "Arm64")) {
+  if ($RunningOnMacOs -and ($Architecture.ToString() -eq "Arm64")) {
     $Definitions += New-LlamaRuntimeDefinition "macos-arm64" "llama-macos-arm64" "macOS Apple Silicon" "$LlamaReleaseBase/llama-b9724-bin-macos-arm64.tar.gz" "sha256:b4582c69bc58e6b84d16105011d9431eeec9a0d1745d9ca8e48472a285db6b7f"
   }
-  if ($IsMacOs -and ($Architecture.ToString() -eq "X64")) {
+  if ($RunningOnMacOs -and ($Architecture.ToString() -eq "X64")) {
     $Definitions += New-LlamaRuntimeDefinition "macos-x64" "llama-macos-x64" "macOS Intel" "$LlamaReleaseBase/llama-b9724-bin-macos-x64.tar.gz" "sha256:4fd4228bd23dbc6ae53805a89b1811861c1b9da5d2ff07bfd9a08fb5f0c87f6e"
   }
-  if ($IsWindowsOs -and ($Architecture.ToString() -eq "X64")) {
+  if ($RunningOnWindows -and ($Architecture.ToString() -eq "X64")) {
     $Definitions += New-LlamaRuntimeDefinition "win-cpu-x64" "llama-win-cpu-x64" "Windows x64 CPU" "$LlamaReleaseBase/llama-b9724-bin-win-cpu-x64.zip" "sha256:e06bafb4e1aaf3745be816d5d072cd965e52ef49ef8e9e93f031e196703780bf"
     $Definitions += New-LlamaRuntimeDefinition "win-cuda13-x64" "llama-win-cuda-13.3-x64" "Windows x64 CUDA 13.3" "$LlamaReleaseBase/llama-b9724-bin-win-cuda-13.3-x64.zip" "sha256:c16700717a20daebc12a2de2bf1ac711ba43f9565dac9d6fbcdf04099dde975a" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-13.3-x64.zip" "sha256:1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e"
     $Definitions += New-LlamaRuntimeDefinition "win-cuda12-x64" "llama-win-cuda-12.4-x64" "Windows x64 CUDA 12.4" "$LlamaReleaseBase/llama-b9724-bin-win-cuda-12.4-x64.zip" "sha256:913d47f80a3cad43fe95eda2ed0cf0dbd5fe01d758f66c097fa0a6138021729d" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-12.4-x64.zip" "sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
@@ -121,7 +121,7 @@ function Get-LlamaRuntimeDefinitions {
     $Definitions += New-LlamaRuntimeDefinition "win-sycl-x64" "llama-win-sycl-x64" "Windows x64 SYCL" "$LlamaReleaseBase/llama-b9724-bin-win-sycl-x64.zip" "sha256:f660e83887af4a1c62742010a8064ab26aa9befacecaa5c86c6061ae68a3c04f"
     $Definitions += New-LlamaRuntimeDefinition "win-hip-x64" "llama-win-hip-radeon-x64" "Windows x64 HIP Radeon" "$LlamaReleaseBase/llama-b9724-bin-win-hip-radeon-x64.zip" "sha256:2b861729d7b1620a7ee09ebc8681f2534be9da307f93fd68afb6410f160a016b"
   }
-  if ($IsWindowsOs -and ($Architecture.ToString() -eq "Arm64")) {
+  if ($RunningOnWindows -and ($Architecture.ToString() -eq "Arm64")) {
     $Definitions += New-LlamaRuntimeDefinition "win-cpu-arm64" "llama-win-cpu-arm64" "Windows arm64 CPU" "$LlamaReleaseBase/llama-b9724-bin-win-cpu-arm64.zip" "sha256:092191286aa8c1d11e909308358e6ac9bd7b5dc83e01d71d96807f6b0cf948bf"
     $Definitions += New-LlamaRuntimeDefinition "win-opencl-adreno-arm64" "llama-win-opencl-adreno-arm64" "Windows arm64 OpenCL Adreno" "$LlamaReleaseBase/llama-b9724-bin-win-opencl-adreno-arm64.zip" "sha256:3e465918a49382fd466003e2d1658b261e87c68b8aa77c087a441ef3b7dee62c"
   }

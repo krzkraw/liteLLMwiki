@@ -15,6 +15,12 @@ describe("interactive installer scripts", () => {
     accessSync(join(repoRoot, "install.sh"), constants.X_OK);
   });
 
+  it("does not assign PowerShell automatic OS variables", () => {
+    const contents = readRootScript("install.ps1");
+
+    expect(contents).not.toMatch(/\$(IsMacOS|IsWindows|IsLinux)\s*=/i);
+  });
+
   it("uses confirm-or-wait gates for installs and downloads", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

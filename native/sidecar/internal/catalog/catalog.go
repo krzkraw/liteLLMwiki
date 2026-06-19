@@ -102,7 +102,7 @@ func NewDefault(modelRoot string, options ...Option) *Catalog {
 		ID:         "gemma4-litert",
 		Repo:       "litert-community/gemma-4-E2B-it-litert-lm",
 		Filename:   "gemma-4-E2B-it.litertlm",
-		TargetPath: filepath.Join(modelRoot, "gemma-4-E2B-it.litertlm"),
+		TargetPath: filepath.Join(modelRoot, "litert", "gemma-4-E2B-it.litertlm"),
 		Runtime:    "litert",
 		Role:       "main",
 		Required:   true,

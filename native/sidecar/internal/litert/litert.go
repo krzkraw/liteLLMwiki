@@ -20,6 +20,7 @@ import (
 const (
 	DefaultExecutableName = "litert-lm"
 	DefaultModelFileName  = "gemma-4-E2B-it.litertlm"
+	DefaultModelDirectory = "litert"
 	DefaultModelID        = "gemma4-e2b"
 	DefaultRuntimeHost    = "127.0.0.1"
 	DefaultRuntimePort    = 9381
@@ -784,7 +785,12 @@ func executableSearchPaths() []string {
 
 func defaultModelSearchPaths() []string {
 	name := DefaultModelFileName
+	dir := DefaultModelDirectory
 	paths := []string{
+		filepath.Join("models", dir, name),
+		filepath.Join("..", "models", dir, name),
+		filepath.Join("..", "..", "models", dir, name),
+		filepath.Join("..", "..", "..", "models", dir, name),
 		filepath.Join("models", name),
 		filepath.Join("..", "models", name),
 		filepath.Join("..", "..", "models", name),
@@ -792,12 +798,16 @@ func defaultModelSearchPaths() []string {
 	}
 
 	if currentExe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(currentExe)
+		exeDir := filepath.Dir(currentExe)
 		paths = append(paths,
-			filepath.Join(dir, "models", name),
-			filepath.Join(dir, "..", "models", name),
-			filepath.Join(dir, "..", "..", "models", name),
-			filepath.Join(dir, "..", "..", "..", "models", name),
+			filepath.Join(exeDir, "models", dir, name),
+			filepath.Join(exeDir, "..", "models", dir, name),
+			filepath.Join(exeDir, "..", "..", "models", dir, name),
+			filepath.Join(exeDir, "..", "..", "..", "models", dir, name),
+			filepath.Join(exeDir, "models", name),
+			filepath.Join(exeDir, "..", "models", name),
+			filepath.Join(exeDir, "..", "..", "models", name),
+			filepath.Join(exeDir, "..", "..", "..", "models", name),
 		)
 	}
 

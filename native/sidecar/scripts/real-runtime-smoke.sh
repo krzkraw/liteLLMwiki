@@ -47,7 +47,7 @@ if [[ ! -x "$runtime_exe" ]]; then
   exit 1
 fi
 
-model_file="${MODEL_FILE:-"$repo_root/models/gemma-4-E2B-it.litertlm"}"
+model_file="${MODEL_FILE:-"$repo_root/models/litert/gemma-4-E2B-it.litertlm"}"
 model_id="${MODEL_ID:-gemma4-e2b}"
 
 if [[ ! -f "$model_file" ]]; then

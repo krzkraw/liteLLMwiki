@@ -23,7 +23,7 @@ func TestSupervisorCreatesDefaultLiteRTRunner(t *testing.T) {
 		DefaultLiteRT: LiteRTConfig{
 			Launch:    false,
 			ModelID:   "gemma4-e2b",
-			ModelFile: "models/gemma-4-E2B-it.litertlm",
+			ModelFile: "models/litert/gemma-4-E2B-it.litertlm",
 			Upstream:  "http://127.0.0.1:9999",
 		},
 	})
@@ -338,7 +338,7 @@ func TestSupervisorStartsDefaultLiteRTWithControlPatch(t *testing.T) {
 		Host:             "127.0.0.1",
 		Port:             9481,
 		Upstream:         "http://127.0.0.1:9999",
-		ModelPath:        "models/gemma-4-E2B-it.litertlm",
+		ModelPath:        "models/litert/gemma-4-E2B-it.litertlm",
 		ModelID:          "gemma4-e2b",
 		HuggingFaceToken: &token,
 		ImportModel:      &importModel,
@@ -362,7 +362,7 @@ func TestSupervisorStartsDefaultLiteRTWithControlPatch(t *testing.T) {
 	if config.Executable != "/opt/litert-lm" {
 		t.Fatalf("executable = %q", config.Executable)
 	}
-	if config.ModelID != "gemma4-e2b" || config.ModelFile != "models/gemma-4-E2B-it.litertlm" {
+	if config.ModelID != "gemma4-e2b" || config.ModelFile != "models/litert/gemma-4-E2B-it.litertlm" {
 		t.Fatalf("model config = %#v", config)
 	}
 	if config.HuggingFaceToken != "hf_secret" {

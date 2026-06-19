@@ -615,7 +615,7 @@ function createExecutableConfigRows({
   const runtimePort = optionText(values.runtimePort, "9381");
   const modelFile = optionText(
     values.modelFile,
-    runtimeStatus?.modelFile ?? "models/gemma-4-E2B-it.litertlm",
+    runtimeStatus?.modelFile ?? "models/litert/gemma-4-E2B-it.litertlm",
   );
 
   return [

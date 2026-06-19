@@ -40,12 +40,12 @@ func TestBuildServeCommand(t *testing.T) {
 func TestBuildImportCommand(t *testing.T) {
 	t.Parallel()
 
-	cmd := BuildImportCommand("litert-lm", "models/gemma-4-E2B-it.litertlm", "gemma4-e2b")
+	cmd := BuildImportCommand("litert-lm", "models/litert/gemma-4-E2B-it.litertlm", "gemma4-e2b")
 	got := cmd.Args
 	want := []string{
 		"litert-lm",
 		"import",
-		"models/gemma-4-E2B-it.litertlm",
+		"models/litert/gemma-4-E2B-it.litertlm",
 		"gemma4-e2b",
 	}
 
@@ -59,7 +59,7 @@ func TestBuildImportCommandInjectsHuggingFaceTokenEnvironment(t *testing.T) {
 
 	cmd := BuildImportCommandWithHuggingFaceToken(
 		"litert-lm",
-		"models/gemma-4-E2B-it.litertlm",
+		"models/litert/gemma-4-E2B-it.litertlm",
 		"gemma4-e2b",
 		"hf_secret",
 	)
@@ -67,6 +67,20 @@ func TestBuildImportCommandInjectsHuggingFaceTokenEnvironment(t *testing.T) {
 	assertCommandDoesNotLeakSecret(t, cmd, "hf_secret")
 	assertCommandEnvContains(t, cmd, "HF_TOKEN", "hf_secret")
 	assertCommandEnvContains(t, cmd, "HUGGING_FACE_HUB_TOKEN", "hf_secret")
+}
+
+func TestDefaultModelSearchPathsPreferLiteRTDirectory(t *testing.T) {
+	t.Parallel()
+
+	paths := defaultModelSearchPaths()
+	want := filepath.Join("models", "litert", "gemma-4-E2B-it.litertlm")
+
+	if len(paths) == 0 {
+		t.Fatal("default model search paths are empty")
+	}
+	if paths[0] != want {
+		t.Fatalf("first default model path = %q, want %q", paths[0], want)
+	}
 }
 
 func TestEnsureModelImportedRedactsHuggingFaceTokenFromImportOutput(t *testing.T) {

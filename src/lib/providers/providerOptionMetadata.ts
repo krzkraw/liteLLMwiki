@@ -463,7 +463,7 @@ export const providerOptionMetadata: ProviderOptionDefinition[] = [
     group: "Sidecar",
     type: "text",
     label: "Model file",
-    defaultValue: "models/gemma-4-E2B-it.litertlm",
+    defaultValue: "models/litert/gemma-4-E2B-it.litertlm",
     tooltip: "Local .litertlm model file imported before serving when needed.",
     source: `${sidecarSource}; ${litertSource}; ${nativeDocsSource}`,
     requiresReload: true,

@@ -1,7 +1,7 @@
 export const gemma4E2bRepo = "litert-community/gemma-4-E2B-it-litert-lm";
 export const gemma4E2bWebFilename = "gemma-4-E2B-it-web.litertlm";
 export const gemma4E2bNativeFilename = "gemma-4-E2B-it.litertlm";
-export const defaultModelPath = `/models/${gemma4E2bWebFilename}`;
+export const defaultModelPath = `/models/litert/${gemma4E2bWebFilename}`;
 export const defaultWasmPath = "/vendor/litert-lm/core/wasm";
 
 export type ModelProbeState = "idle" | "checking" | "ready" | "missing" | "blocked";

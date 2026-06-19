@@ -45,8 +45,8 @@ describe("interactive installer scripts", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);
 
-      expect(contents).toContain("models/gemma-4-E2B-it-web.litertlm");
-      expect(contents).toContain("models/gemma-4-E2B-it.litertlm");
+      expect(contents).toContain("models/litert/gemma-4-E2B-it-web.litertlm");
+      expect(contents).toContain("models/litert/gemma-4-E2B-it.litertlm");
       expect(contents).toContain(
         "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
       );

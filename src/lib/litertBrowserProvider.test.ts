@@ -52,7 +52,7 @@ function createProviderFakes(chunks: FakeLiteRtMessage[] = []) {
 }
 
 const config = {
-  model: { kind: "url" as const, value: "/models/gemma-4-E2B-it-web.litertlm" },
+  model: { kind: "url" as const, value: "/models/litert/gemma-4-E2B-it-web.litertlm" },
   wasmPath: "/vendor/litert-lm/core/wasm",
   maxNumTokens: 8192,
   maxOutputTokens: 1024,
@@ -99,7 +99,7 @@ describe("createLiteRtBrowserProvider", () => {
 
     expect(Engine.create).toHaveBeenCalledTimes(1);
     expect(Engine.create).toHaveBeenCalledWith({
-      model: "/models/gemma-4-E2B-it-web.litertlm",
+      model: "/models/litert/gemma-4-E2B-it-web.litertlm",
       mainExecutorSettings: { maxNumTokens: 8192 },
     });
     expect(engine.createConversation).toHaveBeenCalledTimes(1);
@@ -152,7 +152,7 @@ describe("createLiteRtBrowserProvider", () => {
     });
 
     expect(Engine.create).toHaveBeenCalledWith({
-      model: "/models/gemma-4-E2B-it-web.litertlm",
+      model: "/models/litert/gemma-4-E2B-it-web.litertlm",
       backend: Backend.GPU,
       mainExecutorSettings: {
         maxNumTokens: 8192,

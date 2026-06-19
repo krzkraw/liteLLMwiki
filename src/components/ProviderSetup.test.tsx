@@ -21,7 +21,7 @@ function getByTestId<T extends Element = Element>(testId: string): T {
 
 const defaultProps: ProviderSetupProps = {
   providerKind: "executable",
-  modelPath: "/models/gemma-4-E2B-it-web.litertlm",
+  modelPath: "/models/litert/gemma-4-E2B-it-web.litertlm",
   localModelFileName: null,
   webGpu: {
     state: "blocked",
@@ -251,7 +251,7 @@ describe("ProviderSetup", () => {
         backend: "cpu",
         runtimeHost: "127.0.0.1",
         runtimePort: 9381,
-        modelFile: "models/gemma-4-E2B-it.litertlm",
+        modelFile: "models/litert/gemma-4-E2B-it.litertlm",
         maxTokens: 512,
       },
     });
@@ -279,7 +279,7 @@ describe("ProviderSetup", () => {
     expect(config.textContent).toContain("Runtime host");
     expect(config.textContent).toContain("127.0.0.1");
     expect(config.textContent).toContain("Model file");
-    expect(config.textContent).toContain("models/gemma-4-E2B-it.litertlm");
+    expect(config.textContent).toContain("models/litert/gemma-4-E2B-it.litertlm");
   });
 
   it("renders collapsible advanced options for the selected provider", async () => {

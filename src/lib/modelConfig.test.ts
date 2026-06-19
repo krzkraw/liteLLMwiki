@@ -21,7 +21,9 @@ async function readProjectFile(path: string): Promise<string> {
 describe("Gemma 4 browser model config", () => {
   it("uses the Gemma 4 E2B web model by default", () => {
     expect(gemma4E2bWebFilename).toBe("gemma-4-E2B-it-web.litertlm");
-    expect(defaultModelPath).toBe("/models/gemma-4-E2B-it-web.litertlm");
+    expect(defaultModelPath).toBe(
+      "/models/litert/gemma-4-E2B-it-web.litertlm",
+    );
   });
 
   it("returns the LiteRT Community resolve URL for the web model", () => {
@@ -99,7 +101,7 @@ describe("classifyModelResponse", () => {
         status: 200,
         contentType: "text/html",
         contentLength: "590",
-        modelPath: "/models/gemma-4-E2B-it-web.litertlm",
+        modelPath: "/models/litert/gemma-4-E2B-it-web.litertlm",
       }),
     ).toEqual({ state: "missing" });
   });
@@ -111,7 +113,7 @@ describe("classifyModelResponse", () => {
         status: 200,
         contentType: "application/octet-stream",
         contentLength: "4294967296",
-        modelPath: "/models/gemma-4-E2B-it-web.litertlm",
+        modelPath: "/models/litert/gemma-4-E2B-it-web.litertlm",
       }),
     ).toEqual({ state: "ready", sizeBytes: 4_294_967_296 });
   });

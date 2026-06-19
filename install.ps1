@@ -270,14 +270,14 @@ function Run-SmokeTests {
       & npm run smoke:executable
     }
 
-    $WebModel = Join-Path $RepoRoot "models\gemma-4-E2B-it-web.litertlm"
+    $WebModel = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it-web.litertlm"
     if ((Test-Path $WebModel) -and ((Get-Item $WebModel).Length -gt 0)) {
       Invoke-RunLogged "smoke web model" {
         $env:SMOKE_URL = $SmokeUrl
         & npm run smoke:model
       }
     } else {
-      Add-Summary "SKIP: smoke web model, models/gemma-4-E2B-it-web.litertlm missing"
+      Add-Summary "SKIP: smoke web model, models/litert/gemma-4-E2B-it-web.litertlm missing"
     }
   } finally {
     Stop-DevServer
@@ -319,8 +319,8 @@ try {
 
   Ensure-NpmDependencies
 
-  Ensure-Model "Gemma 4 E2B web model" "models/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
-  Ensure-Model "Gemma 4 E2B native LiteRT model" "models/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true
+  Ensure-Model "Gemma 4 E2B web model" "models/litert/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
+  Ensure-Model "Gemma 4 E2B native LiteRT model" "models/litert/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true
   Ensure-Model "Gemma 4 E2B llama.cpp GGUF model" "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" $false
   Ensure-Model "Qwen3 embedding GGUF model" "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf" "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf" $false
   Ensure-Model "EmbeddingGemma LiteRT embedding model" "models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite" "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" $true

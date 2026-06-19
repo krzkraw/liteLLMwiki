@@ -154,7 +154,7 @@ Stores catalog entries for the four required artifacts:
 
 - `models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf`
 - `models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf`
-- `models/gemma-4-E2B-it.litertlm`
+- `models/litert/gemma-4-E2B-it.litertlm`
 - `models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite`
 
 Downloads use environment-only auth, resumable partial files, atomic rename,

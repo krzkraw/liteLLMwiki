@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModelFileMiddleware } from "./modelServer";
@@ -11,7 +11,9 @@ let tmpRoot: string | null = null;
 async function startModelServer(files: Record<string, string>) {
   tmpRoot = await mkdtemp(join(tmpdir(), "litert-model-server-test-"));
   for (const [name, content] of Object.entries(files)) {
-    await writeFile(join(tmpRoot, name), content);
+    const filePath = join(tmpRoot, name);
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, content);
   }
 
   const middleware = createModelFileMiddleware(tmpRoot);
@@ -47,12 +49,15 @@ describe("createModelFileMiddleware", () => {
 
   it("serves direct HEAD requests for model files", async () => {
     const baseUrl = await startModelServer({
-      "gemma-4-E2B-it-web.litertlm": "model bytes",
+      "litert/gemma-4-E2B-it-web.litertlm": "model bytes",
     });
 
-    const response = await fetch(`${baseUrl}/models/gemma-4-E2B-it-web.litertlm`, {
-      method: "HEAD",
-    });
+    const response = await fetch(
+      `${baseUrl}/models/litert/gemma-4-E2B-it-web.litertlm`,
+      {
+        method: "HEAD",
+      },
+    );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/octet-stream");
@@ -62,12 +67,15 @@ describe("createModelFileMiddleware", () => {
 
   it("serves byte ranges for large model fetches", async () => {
     const baseUrl = await startModelServer({
-      "gemma-4-E2B-it-web.litertlm": "0123456789",
+      "litert/gemma-4-E2B-it-web.litertlm": "0123456789",
     });
 
-    const response = await fetch(`${baseUrl}/models/gemma-4-E2B-it-web.litertlm`, {
-      headers: { range: "bytes=2-5" },
-    });
+    const response = await fetch(
+      `${baseUrl}/models/litert/gemma-4-E2B-it-web.litertlm`,
+      {
+        headers: { range: "bytes=2-5" },
+      },
+    );
 
     expect(response.status).toBe(206);
     expect(response.headers.get("content-range")).toBe("bytes 2-5/10");
@@ -76,28 +84,29 @@ describe("createModelFileMiddleware", () => {
 
   it("rejects unsatisfiable byte ranges without streaming the full file", async () => {
     const baseUrl = await startModelServer({
-      "gemma-4-E2B-it-web.litertlm": "0123456789",
+      "litert/gemma-4-E2B-it-web.litertlm": "0123456789",
     });
 
-    const response = await fetch(`${baseUrl}/models/gemma-4-E2B-it-web.litertlm`, {
-      headers: { range: "bytes=20-25" },
-    });
+    const response = await fetch(
+      `${baseUrl}/models/litert/gemma-4-E2B-it-web.litertlm`,
+      {
+        headers: { range: "bytes=20-25" },
+      },
+    );
 
     expect(response.status).toBe(416);
     expect(response.headers.get("content-range")).toBe("bytes */10");
     expect(await response.text()).toBe("");
   });
 
-  it("does not serve nested, traversal, or malformed paths", async () => {
+  it("does not serve traversal or malformed paths", async () => {
     const baseUrl = await startModelServer({
-      "gemma-4-E2B-it-web.litertlm": "model bytes",
+      "litert/gemma-4-E2B-it-web.litertlm": "model bytes",
     });
 
-    const nested = await fetch(`${baseUrl}/models/subdir/model.litertlm`);
     const traversal = await fetch(`${baseUrl}/models/../package.json`);
     const malformed = await fetch(`${baseUrl}/models/%E0%A4%A`);
 
-    expect(nested.status).toBe(404);
     expect(traversal.status).toBe(404);
     expect(malformed.status).toBe(404);
   });

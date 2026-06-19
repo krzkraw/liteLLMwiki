@@ -92,13 +92,13 @@ The browser provider expects the web model under the repository-local model
 directory:
 
 ```text
-models/gemma-4-E2B-it-web.litertlm
+models/litert/gemma-4-E2B-it-web.litertlm
 ```
 
 The default URL inside the app is:
 
 ```text
-/models/gemma-4-E2B-it-web.litertlm
+/models/litert/gemma-4-E2B-it-web.litertlm
 ```
 
 The Vite dev and preview servers serve `/models/*` from `models/`, so the large
@@ -127,7 +127,7 @@ The native executable model is hosted outside this repository. Place the
 externally hosted file at the path expected by the sidecar:
 
 ```text
-models/gemma-4-E2B-it.litertlm
+models/litert/gemma-4-E2B-it.litertlm
 ```
 
 Model binaries, partial downloads, and split model chunks are ignored by Git.
@@ -161,7 +161,7 @@ The sidecar opens an interactive terminal dashboard by default. Use
 ```
 
 The sidecar searches for `litert-lm`, imports
-`models/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
+`models/litert/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
 `litert-lm serve --host 127.0.0.1 --port 9381`.
 
 The sidecar still exposes HTTP endpoints for manual checks and smoke scripts,
@@ -242,7 +242,7 @@ npm run smoke:executable
 ```
 
 `smoke` covers the UI without requiring the large web model. `smoke:model`
-requires `models/gemma-4-E2B-it-web.litertlm` and checks that `/models/*` serves
+requires `models/litert/gemma-4-E2B-it-web.litertlm` and checks that `/models/*` serves
 the real binary with `application/octet-stream`.
 
 To verify the production preview server catches the same route:

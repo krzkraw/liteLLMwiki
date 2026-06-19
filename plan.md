@@ -106,7 +106,7 @@ download_hf \
 download_hf \
   "litert-community/gemma-4-E2B-it-litert-lm" \
   "gemma-4-E2B-it.litertlm" \
-  "models/gemma-4-E2B-it.litertlm"
+  "models/litert/gemma-4-E2B-it.litertlm"
 
 download_hf \
   "litert-community/embeddinggemma-300m" \

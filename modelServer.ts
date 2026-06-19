@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 type Next = () => void;
@@ -27,18 +27,23 @@ function parseModelRequest(url: string | undefined): string | null {
     return null;
   }
 
-  let rawName: string;
+  let modelPath: string;
   try {
-    rawName = decodeURIComponent(parsed.pathname.slice("/models/".length));
+    modelPath = decodeURIComponent(parsed.pathname.slice("/models/".length));
   } catch {
     return "";
   }
 
-  if (!rawName || rawName !== basename(rawName)) {
+  if (!modelPath || modelPath.startsWith("/") || modelPath.includes("\\")) {
     return "";
   }
 
-  return rawName;
+  const segments = modelPath.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
+    return "";
+  }
+
+  return segments.join("/");
 }
 
 type ParsedRange =

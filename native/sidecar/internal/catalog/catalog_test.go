@@ -20,7 +20,7 @@ func TestDefaultCatalogContainsRequiredArtifacts(t *testing.T) {
 
 	assertEntry(t, entries, "gemma4-gguf", filepath.Join(root, "llamacpp", "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"))
 	assertEntry(t, entries, "qwen3-embedding-gguf", filepath.Join(root, "llamacpp", "Qwen3-Embedding-0.6B-Q8_0.gguf"))
-	assertEntry(t, entries, "gemma4-litert", filepath.Join(root, "gemma-4-E2B-it.litertlm"))
+	assertEntry(t, entries, "gemma4-litert", filepath.Join(root, "litert", "gemma-4-E2B-it.litertlm"))
 	assertEntry(t, entries, "embeddinggemma-litert", filepath.Join(root, "litert", "embeddinggemma-300M_seq2048_mixed-precision.tflite"))
 
 	for _, entry := range entries {

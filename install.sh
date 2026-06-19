@@ -380,10 +380,10 @@ run_smoke_tests() {
   run_logged "smoke UI" env SMOKE_URL="$smoke_url" npm run smoke
   run_logged "smoke executable sidecar" env SMOKE_URL="$smoke_url" npm run smoke:executable
 
-  if [[ -s "$repo_root/models/gemma-4-E2B-it-web.litertlm" ]]; then
+  if [[ -s "$repo_root/models/litert/gemma-4-E2B-it-web.litertlm" ]]; then
     run_logged "smoke web model" env SMOKE_URL="$smoke_url" npm run smoke:model
   else
-    add_summary "SKIP: smoke web model, models/gemma-4-E2B-it-web.litertlm missing"
+    add_summary "SKIP: smoke web model, models/litert/gemma-4-E2B-it-web.litertlm missing"
   fi
 
   cleanup_dev_server
@@ -423,11 +423,11 @@ main() {
   ensure_npm_dependencies
 
   ensure_model "Gemma 4 E2B web model" \
-    "models/gemma-4-E2B-it-web.litertlm" \
+    "models/litert/gemma-4-E2B-it-web.litertlm" \
     "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" \
     "true"
   ensure_model "Gemma 4 E2B native LiteRT model" \
-    "models/gemma-4-E2B-it.litertlm" \
+    "models/litert/gemma-4-E2B-it.litertlm" \
     "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" \
     "true"
   ensure_model "Gemma 4 E2B llama.cpp GGUF model" \

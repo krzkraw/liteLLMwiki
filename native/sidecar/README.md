@@ -22,14 +22,14 @@ smoke tests, CI, or any process without a TTY.
 By default it:
 
 - searches for `litert-lm` on `PATH` or beside the sidecar binary;
-- searches for `models/gemma-4-E2B-it.litertlm`;
+- searches for `models/litert/gemma-4-E2B-it.litertlm`;
 - imports the model as `gemma4-e2b` when it is missing from the LiteRT-LM
   registry;
 - starts `litert-lm serve --host 127.0.0.1 --port 9381`.
 
 In a fresh clone, provide the native model from the external model host before
 starting the sidecar. The default local path is
-`models/gemma-4-E2B-it.litertlm`; model binaries are ignored by Git.
+`models/litert/gemma-4-E2B-it.litertlm`; model binaries are ignored by Git.
 The sidecar also exposes a model catalog at `/sidecar/v1/models` and supports
 authenticated Hugging Face downloads through `/sidecar/v1/models/download`.
 The supervisor can also start a `llama-server` main runner against a GGUF model
@@ -155,7 +155,7 @@ With no output argument, they place binaries under
 `../../native/sidecar-artifacts/` so the native runner lives beside the web UI
 that controls it without colliding with this source tree. They do not copy the
 large `.litertlm` model file. Put the external native model under
-`models/gemma-4-E2B-it.litertlm`, or run with `-model-file`.
+`models/litert/gemma-4-E2B-it.litertlm`, or run with `-model-file`.
 
 `go test ./...` runs a host-side release artifact test for the shell build
 script. It cross-compiles the four targets into a temporary directory, checks

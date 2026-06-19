@@ -258,31 +258,65 @@ function Ensure-LlamaRuntime {
     return
   }
 
-  Write-Host ""
-  Write-Host "llama.cpp runtime needs to be installed downloaded. Choose one option, or all:"
-  foreach ($Definition in $Definitions) {
-    Write-Host "  $($Definition.Key): $($Definition.Label) -> native/llama-runtimes/$($Definition.Folder)"
-    Write-Host "      $($Definition.Url)"
-    if ($Definition.ExtraUrl) {
-      Write-Host "      CUDA DLLs: $($Definition.ExtraUrl)"
-    }
-  }
-  Write-Host "  all: install every option listed above"
-  Write-Host "  skip: I will install llama-server myself and press Enter"
+  $SelectedKeys = [System.Collections.Generic.List[string]]::new()
 
   while ($true) {
-    $DefaultChoice = $Definitions[0].Key
-    $Choice = Read-Host "llama.cpp runtime choice [all/$DefaultChoice/skip]"
-    if ([string]::IsNullOrWhiteSpace($Choice)) {
-      $Choice = $DefaultChoice
+    Write-Host ""
+    Write-Host "llama.cpp runtime needs to be installed downloaded. Select one or more runtimes:"
+    for ($RuntimeIndex = 0; $RuntimeIndex -lt $Definitions.Count; $RuntimeIndex += 1) {
+      $Definition = $Definitions[$RuntimeIndex]
+      $Checked = "[ ]"
+      if ($SelectedKeys.Contains($Definition.Key)) {
+        $Checked = "[x]"
+      }
+      Write-Host ("  {0}) {1} {2}: {3} -> native/llama-runtimes/{4}" -f ($RuntimeIndex + 1), $Checked, $Definition.Key, $Definition.Label, $Definition.Folder)
+      Write-Host "      $($Definition.Url)"
+      if ($Definition.ExtraUrl) {
+        Write-Host "      CUDA DLLs: $($Definition.ExtraUrl)"
+      }
     }
-    if ($Choice -eq "all") {
-      foreach ($Definition in $Definitions) {
-        Install-LlamaRuntime -Definition $Definition
+    Write-Host "  a: toggle all"
+    Write-Host "  c: continue"
+    Write-Host "  s: skip, I will install llama-server myself and press Enter"
+
+    $SelectionText = Read-Host "Toggle numbers, a: toggle all, c: continue, s: skip"
+    if ([string]::IsNullOrWhiteSpace($SelectionText)) {
+      $SelectionText = "c"
+    }
+
+    if ($SelectionText -eq "a") {
+      if ($SelectedKeys.Count -eq $Definitions.Count) {
+        $SelectedKeys.Clear()
+      } else {
+        $SelectedKeys.Clear()
+        foreach ($Definition in $Definitions) {
+          [void]$SelectedKeys.Add($Definition.Key)
+        }
+      }
+      continue
+    }
+
+    if ($SelectionText -eq "c") {
+      if ($SelectedKeys.Count -eq 0) {
+        Write-Host "Select at least one runtime, or use s to skip."
+        continue
+      }
+
+      $PrimaryKey = $SelectedKeys[0]
+      foreach ($SelectedKey in @($SelectedKeys)) {
+        $Selected = $Definitions | Where-Object { $_.Key -eq $SelectedKey } | Select-Object -First 1
+        if ($null -ne $Selected) {
+          Install-LlamaRuntime -Definition $Selected
+        }
+      }
+      $Primary = $Definitions | Where-Object { $_.Key -eq $PrimaryKey } | Select-Object -First 1
+      if ($null -ne $Primary) {
+        Set-Content -Path $LlamaSelectedFile -Value $Primary.Folder
       }
       return
     }
-    if ($Choice -eq "skip") {
+
+    if ($SelectionText -eq "s") {
       Invoke-WaitForUserAction -Label "llama-server" -Check {
         -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
       }
@@ -290,12 +324,20 @@ function Ensure-LlamaRuntime {
       return
     }
 
-    $Selected = $Definitions | Where-Object { $_.Key -eq $Choice } | Select-Object -First 1
-    if ($null -ne $Selected) {
-      Install-LlamaRuntime -Definition $Selected
-      return
+    $Tokens = $SelectionText -split "[,\s]+" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($Token in $Tokens) {
+      [int]$ParsedIndex = 0
+      if (([int]::TryParse($Token, [ref]$ParsedIndex)) -and ($ParsedIndex -ge 1) -and ($ParsedIndex -le $Definitions.Count)) {
+        $SelectedKey = $Definitions[$ParsedIndex - 1].Key
+        if ($SelectedKeys.Contains($SelectedKey)) {
+          [void]$SelectedKeys.Remove($SelectedKey)
+        } else {
+          [void]$SelectedKeys.Add($SelectedKey)
+        }
+      } else {
+        Write-Host "Unknown llama.cpp runtime selection: $Token"
+      }
     }
-    Write-Host "Unknown llama.cpp runtime choice: $Choice"
   }
 }
 

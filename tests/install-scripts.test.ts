@@ -60,6 +60,20 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("uses a checkbox-style llama.cpp runtime selector", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("[ ]");
+      expect(contents).toContain("[x]");
+      expect(contents).toContain("Toggle numbers");
+      expect(contents).toContain("a: toggle all");
+      expect(contents).toContain("c: continue");
+      expect(contents).toContain("s: skip");
+      expect(contents).not.toContain("llama.cpp runtime choice [all/");
+    }
+  });
+
   it("checks known model paths and provides Hugging Face URLs", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

@@ -272,9 +272,12 @@ install_llama_runtime() {
 ensure_llama_runtime() {
   local installed
   local options=()
+  local selected=()
   local option
   local spec folder label url sha256 extra_url extra_sha256
-  local choice
+  local input token index checked found selected_option
+  local new_selected=()
+  local primary_key primary_folder
 
   installed="$(installed_llama_server || true)"
   if [[ -n "$installed" ]]; then
@@ -293,43 +296,89 @@ ensure_llama_runtime() {
     return 0
   fi
 
-  printf '\nllama.cpp runtime needs to be installed downloaded. Choose one option, or all:\n'
-  for option in "${options[@]}"; do
-    spec="$(llama_runtime_spec "$option")"
-    IFS='|' read -r folder label url sha256 extra_url extra_sha256 <<< "$spec"
-    printf '  %s: %s -> native/llama-runtimes/%s\n' "$option" "$label" "$folder"
-    printf '      %s\n' "$url"
-    if [[ -n "$extra_url" ]]; then
-      printf '      CUDA DLLs: %s\n' "$extra_url"
-    fi
-  done
-  printf '  all: install every option listed above\n'
-  printf '  skip: I will install llama-server myself and press Enter\n'
-
   while true; do
-    printf 'llama.cpp runtime choice [all/%s/skip]: ' "${options[0]}"
-    read -r choice
-    choice="${choice:-${options[0]}}"
-    case "$choice" in
-      all)
-        for option in "${options[@]}"; do
+    printf '\nllama.cpp runtime needs to be installed downloaded. Select one or more runtimes:\n'
+    for index in "${!options[@]}"; do
+      option="${options[$index]}"
+      spec="$(llama_runtime_spec "$option")"
+      IFS='|' read -r folder label url sha256 extra_url extra_sha256 <<< "$spec"
+      checked='[ ]'
+      if [[ "${#selected[@]}" -gt 0 ]]; then
+        for selected_option in "${selected[@]}"; do
+          if [[ "$selected_option" == "$option" ]]; then
+            checked='[x]'
+            break
+          fi
+        done
+      fi
+      printf '  %d) %s %s: %s -> native/llama-runtimes/%s\n' "$((index + 1))" "$checked" "$option" "$label" "$folder"
+      printf '      %s\n' "$url"
+      if [[ -n "$extra_url" ]]; then
+        printf '      CUDA DLLs: %s\n' "$extra_url"
+      fi
+    done
+    printf '  a: toggle all\n'
+    printf '  c: continue\n'
+    printf '  s: skip, I will install llama-server myself and press Enter\n'
+
+    printf 'Toggle numbers, a: toggle all, c: continue, s: skip: '
+    read -r input
+    input="${input:-c}"
+
+    case "$input" in
+      a|A)
+        if [[ "${#selected[@]}" -eq "${#options[@]}" ]]; then
+          selected=()
+        else
+          selected=("${options[@]}")
+        fi
+        ;;
+      c|C)
+        if [[ "${#selected[@]}" -eq 0 ]]; then
+          printf 'Select at least one runtime, or use s to skip.\n'
+          continue
+        fi
+        primary_key="${selected[0]}"
+        for option in "${selected[@]}"; do
           install_llama_runtime "$option"
         done
+        spec="$(llama_runtime_spec "$primary_key")"
+        IFS='|' read -r primary_folder _ <<< "$spec"
+        printf '%s\n' "$primary_folder" > "$llama_selected_file"
         return 0
         ;;
-      skip)
+      s|S)
         wait_for_user_action "llama-server" "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\""
         add_summary "OK: llama-server"
         return 0
         ;;
       *)
-        for option in "${options[@]}"; do
-          if [[ "$choice" == "$option" ]]; then
-            install_llama_runtime "$option"
-            return 0
+        input="${input//,/ }"
+        for token in $input; do
+          if [[ "$token" =~ ^[0-9]+$ ]] && [[ "$token" -ge 1 ]] && [[ "$token" -le "${#options[@]}" ]]; then
+            option="${options[$((token - 1))]}"
+            found=0
+            new_selected=()
+            if [[ "${#selected[@]}" -gt 0 ]]; then
+              for selected_option in "${selected[@]}"; do
+                if [[ "$selected_option" == "$option" ]]; then
+                  found=1
+                else
+                  new_selected+=("$selected_option")
+                fi
+              done
+            fi
+            selected=()
+            if [[ "${#new_selected[@]}" -gt 0 ]]; then
+              selected=("${new_selected[@]}")
+            fi
+            if [[ "$found" -eq 0 ]]; then
+              selected+=("$option")
+            fi
+          else
+            printf 'Unknown llama.cpp runtime selection: %s\n' "$token"
           fi
         done
-        printf 'Unknown llama.cpp runtime choice: %s\n' "$choice"
         ;;
     esac
   done

@@ -21,19 +21,21 @@ smoke tests, CI, or any process without a TTY.
 
 The TUI uses the same runtime and runner controller methods as the HTTP routes
 and WebSocket `api.request` bridge. Its dashboard lists runtime specs, route
-authority, and runnable backends. Each configured runner gets its own tab with
-settings, process details, command/capability/error state, `s` start, `x` stop,
-and `r` restart controls. Runner tabs edit settings through the same update
-method behind `PATCH /sidecar/v1/runners/{id}`: `b` backend, `p` port, `h` host,
-`i` model ID, `m` model path, `e` executable, `u` upstream, `l` launch mode, `v`
-verbose, `t` runtime, and `o` role. Typed edits show the current value, accept a
-replacement value, save with Enter, and cancel with Esc. The Settings tab lists
-the matching WebSocket messages and sidecar API paths, and exposes default
-runtime controls with `s` start release, `d` start debug, `x` stop, and `r`
-restart release so terminal controls can be checked against the browser-facing
-API surface. The Models tab can also create catalog-backed llama.cpp runners
-with `m` main, `e` embedding, and `r` rerank by calling the same runner creation
-method behind `POST /sidecar/v1/runners`.
+authority, runnable backends, runtime topology, route maps, and recent activity.
+Each configured runner gets its own tab with health, endpoint, control surface,
+runtime command, capability matrix, settings, process details, and recent log
+panels. Runner controls use `s` start, `x` stop, and `r` restart. Runner tabs
+edit settings through the same update method behind
+`PATCH /sidecar/v1/runners/{id}`: `b` backend, `p` port, `h` host, `i` model ID,
+`m` model path, `e` executable, `u` upstream, `l` launch mode, `v` verbose, `t`
+runtime, and `o` role. Typed edits show the current value, accept a replacement
+value, save with Enter, and cancel with Esc. The Settings tab lists the matching
+WebSocket messages and sidecar API paths, and exposes default runtime controls
+with `s` start release, `d` start debug, `x` stop, and `r` restart release so
+terminal controls can be checked against the browser-facing API surface. The
+Models tab can also create catalog-backed llama.cpp runners with `m` main, `e`
+embedding, and `r` rerank by calling the same runner creation method behind
+`POST /sidecar/v1/runners`.
 
 By default it:
 

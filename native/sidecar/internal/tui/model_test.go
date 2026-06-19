@@ -69,6 +69,39 @@ func TestDashboardRendersSpecsAndRunnableBackends(t *testing.T) {
 	}
 }
 
+func TestDashboardRendersRichOperationalOverview(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "runtime ready")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+	})
+	view := model.View()
+
+	for _, expected := range []string{
+		"System health",
+		"Runtime topology",
+		"Backend matrix",
+		"Route map",
+		"Recent activity",
+		"configured runners",
+		"runnable routes",
+		"Sidecar API",
+		"runtime upstream",
+		"main-litert => http://127.0.0.1:9381",
+		"embed-qwen",
+		"chat=openai-compatible",
+		"runtime ready",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("dashboard overview missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestModelSwitchesTabsWithKeys(t *testing.T) {
 	t.Parallel()
 
@@ -142,6 +175,41 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("runner tab missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestRunnerTabRendersRichOperationalPanels(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "loaded model")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated := next.(Model)
+	view := updated.View()
+
+	for _, expected := range []string{
+		"Runner health",
+		"Endpoint map",
+		"Control surface",
+		"Runtime command",
+		"Capabilities matrix",
+		"Recent runner logs",
+		"PATCH /sidecar/v1/runners/main-litert",
+		"POST /sidecar/v1/runners/main-litert/start",
+		"POST /sidecar/v1/runners/main-litert/restart",
+		"/v1/chat/completions",
+		"/sidecar/v1/runners/main-litert/stop",
+		"chat=openai-compatible",
+		"loaded model",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("runner operational panels missing %q:\n%s", expected, view)
 		}
 	}
 }

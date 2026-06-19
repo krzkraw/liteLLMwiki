@@ -472,6 +472,10 @@ func (m Model) activeRunner() (server.RunnerSnapshot, bool) {
 	if id == m.activeTabID() {
 		return server.RunnerSnapshot{}, false
 	}
+	return m.runnerByID(id)
+}
+
+func (m Model) runnerByID(id string) (server.RunnerSnapshot, bool) {
 	for _, runner := range m.snapshot.Runners {
 		if runner.ID == id {
 			return runner, true
@@ -504,27 +508,12 @@ func (m Model) tabBar() string {
 }
 
 func (m Model) dashboardView() string {
-	specs := []string{
-		formatKV("State", statusBadge(m.runtime.State)),
-		formatKV("Executable", fallback(m.runtime.Executable, "not configured")),
-		formatKV("Version", fallback(m.runtime.Version, "unknown")),
-		formatKV("Model", fallback(m.runtime.ModelID, "unconfigured")),
-		formatKV("Model file", fallback(m.runtime.ModelFile, "not configured")),
-		formatKV("Upstream", fallback(m.runtime.Upstream, "unavailable")),
-		formatKV("Mode", fallback(m.runtime.Mode, "release")),
-		formatKV("Logs", fmt.Sprintf("%d entries", len(m.logEntries))),
-	}
-	if m.runtime.Detail != "" {
-		specs = append(specs, formatKV("Detail", m.runtime.Detail))
-	}
-
-	return strings.Join([]string{
-		renderPanel("Dashboard", []string{
-			"Specs",
-			strings.Join(specs, "\n"),
-		}, "45"),
-		renderPanel("Runnable backends", m.backendLines(), "82"),
-		renderPanel("Routes", m.routeLines(), "214"),
+	return joinPanels(
+		renderPanel("System health / Specs", m.systemHealthLines(), "82"),
+		renderPanel("Runtime topology", m.runtimeTopologyLines(), "45"),
+		renderPanel("Backend matrix / Runnable backends", m.backendMatrixLines(), "214"),
+		renderPanel("Route map / Routes", m.routeMapLines(), "205"),
+		renderPanel("Recent activity", m.recentActivityLines(6), "244"),
 		renderPanel("Hotkeys", []string{
 			"Tab/Right: next tab",
 			"Shift+Tab/Left: previous tab",
@@ -532,10 +521,48 @@ func (m Model) dashboardView() string {
 			"Runner tabs: s Start, x Stop, r Restart",
 			"Esc/Ctrl+C: quit",
 		}, "205"),
-	}, "\n\n")
+	)
 }
 
-func (m Model) backendLines() []string {
+func (m Model) systemHealthLines() []string {
+	configured := len(m.snapshot.Runners)
+	routes := len(m.snapshot.Routes)
+	running := 0
+	for _, runner := range m.snapshot.Runners {
+		if strings.EqualFold(runner.State, "running") {
+			running++
+		}
+	}
+
+	lines := []string{
+		"Specs",
+		formatKV("Runtime", statusBadge(m.runtime.State)),
+		formatKV("Mode", fallback(m.runtime.Mode, "release")),
+		formatKV("Version", fallback(m.runtime.Version, "unknown")),
+		formatKV("Model", fallback(m.runtime.ModelID, "unconfigured")),
+		formatKV("Model file", fallback(m.runtime.ModelFile, "not configured")),
+		formatKV("Health", statusMeter(running, configured)),
+		fmt.Sprintf("configured runners: %d", configured),
+		fmt.Sprintf("runnable routes: %d", routes),
+		formatKV("Logs", fmt.Sprintf("%d entries", len(m.logEntries))),
+	}
+	if m.runtime.Detail != "" {
+		lines = append(lines, formatKV("Detail", m.runtime.Detail))
+	}
+	return lines
+}
+
+func (m Model) runtimeTopologyLines() []string {
+	return []string{
+		formatKV("Sidecar API", "127.0.0.1:9379 /sidecar/v1/*"),
+		formatKV("Control WS", "ws://127.0.0.1:9379/sidecar/v1/ws"),
+		formatKV("runtime upstream", fallback(m.runtime.Upstream, "unavailable")),
+		formatKV("Executable", fallback(m.runtime.Executable, "not configured")),
+		"browser api.request => sidecar controllers => runner supervisor",
+	}
+}
+
+func (m Model) backendMatrixLines() []string {
 	if len(m.snapshot.Runners) == 0 {
 		return []string{"No runners configured."}
 	}
@@ -543,18 +570,20 @@ func (m Model) backendLines() []string {
 	lines := make([]string, 0, len(m.snapshot.Runners))
 	for _, runner := range m.snapshot.Runners {
 		lines = append(lines, fmt.Sprintf(
-			"%s  %s/%s  %s  %s",
+			"%s | %s | %s/%s | backend=%s | %s | %s",
+			runner.ID,
 			statusBadge(runner.State),
 			fallback(runner.Runtime, "runtime"),
 			fallback(runner.Role, "role"),
 			fallback(runner.Backend, "backend"),
-			runner.ID,
+			runnerLaunchMode(runner),
+			capabilitiesLine(runner.Capabilities),
 		))
 	}
 	return lines
 }
 
-func (m Model) routeLines() []string {
+func (m Model) routeMapLines() []string {
 	if len(m.snapshot.Routes) == 0 {
 		return []string{"No route authority configured."}
 	}
@@ -567,7 +596,28 @@ func (m Model) routeLines() []string {
 
 	lines := make([]string, 0, len(keys))
 	for _, key := range keys {
-		lines = append(lines, fmt.Sprintf("%s -> %s", key, m.snapshot.Routes[key]))
+		runnerID := m.snapshot.Routes[key]
+		upstream := "unavailable"
+		if runner, ok := m.runnerByID(runnerID); ok {
+			upstream = fallback(runner.Upstream, "unavailable")
+		}
+		lines = append(lines, fmt.Sprintf("%s -> %s => %s", key, runnerID, upstream))
+	}
+	return lines
+}
+
+func (m Model) recentActivityLines(limit int) []string {
+	if len(m.logEntries) == 0 {
+		return []string{"No runtime output yet."}
+	}
+
+	start := len(m.logEntries) - limit
+	if start < 0 {
+		start = 0
+	}
+	lines := make([]string, 0, len(m.logEntries[start:]))
+	for _, entry := range m.logEntries[start:] {
+		lines = append(lines, formatLogEntry(entry))
 	}
 	return lines
 }
@@ -600,21 +650,110 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		details = append(details, formatKV("Detail", runner.Detail))
 	}
 
-	return strings.Join([]string{
-		renderPanel("Runner "+runner.ID, []string{
-			"Controls",
-			"s Start   x Stop   r Restart",
-			"",
-			"Edit settings",
-			"b Backend CPU/GPU   l Launch managed/external   v Verbose",
-			"t Runtime   o Role",
-			"p Port   h Host   i Model ID",
-			"m Model path   e Executable   u Upstream",
-		}, "39"),
+	return joinPanels(
+		renderPanel("Runner "+runner.ID+" / Runner health", m.runnerHealthLines(runner), "82"),
+		renderPanel("Endpoint map", m.runnerEndpointLines(runner), "45"),
+		renderPanel("Control surface", m.runnerControlLines(runner), "39"),
+		renderPanel("Runtime command", []string{commandLine(runner.Command)}, "214"),
+		renderPanel("Capabilities matrix", runnerCapabilityLines(runner), "205"),
 		m.runnerEditorView(runner),
 		renderPanel("Settings", settings, "45"),
 		renderPanel("Details", details, "214"),
-	}, "\n\n")
+		renderPanel("Recent runner logs", m.runnerLogLines(runner.ID, 6), "244"),
+	)
+}
+
+func (m Model) runnerHealthLines(runner server.RunnerSnapshot) []string {
+	return []string{
+		formatKV("State", statusBadge(runner.State)),
+		formatKV("Runtime", fallback(runner.Runtime, "unknown")),
+		formatKV("Role", fallback(runner.Role, "unknown")),
+		formatKV("Backend", fallback(runner.Backend, "default")),
+		formatKV("Launch", runnerLaunchMode(runner)),
+		formatKV("Verbose", strconv.FormatBool(runner.Verbose)),
+		formatKV("Process", fallbackInt(runner.PID, "not running")),
+		formatKV("Health", runnerHealthMeter(runner)),
+	}
+}
+
+func (m Model) runnerEndpointLines(runner server.RunnerSnapshot) []string {
+	upstream := fallback(runner.Upstream, "unavailable")
+	lines := []string{
+		formatKV("Upstream", upstream),
+		formatKV("Models", endpointPath(upstream, "/v1/models")),
+	}
+	switch runner.Role {
+	case "main":
+		lines = append(lines, formatKV("Chat", "/v1/chat/completions"))
+	case "embedding":
+		lines = append(lines, formatKV("Embeddings", "/v1/embeddings"))
+	case "reranking":
+		lines = append(lines, formatKV("Rerank", "/v1/rerank"))
+	default:
+		lines = append(lines, formatKV("OpenAI", "/v1/*"))
+	}
+	return lines
+}
+
+func (m Model) runnerControlLines(runner server.RunnerSnapshot) []string {
+	basePath := "/sidecar/v1/runners/" + runner.ID
+	return []string{
+		"Controls",
+		"Actions",
+		"s Start   x Stop   r Restart",
+		"POST " + basePath + "/start",
+		"POST " + basePath + "/stop",
+		"POST " + basePath + "/restart",
+		"",
+		"Edit settings",
+		"Settings editor",
+		"b Backend CPU/GPU   l Launch managed/external   v Verbose",
+		"t Runtime   o Role",
+		"p Port   h Host   i Model ID",
+		"m Model path   e Executable   u Upstream",
+		"PATCH " + basePath,
+	}
+}
+
+func runnerCapabilityLines(runner server.RunnerSnapshot) []string {
+	if len(runner.Capabilities) == 0 {
+		return []string{"none advertised"}
+	}
+
+	keys := make([]string, 0, len(runner.Capabilities))
+	for key := range runner.Capabilities {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		lines = append(lines, key+"="+runner.Capabilities[key])
+	}
+	return lines
+}
+
+func (m Model) runnerLogLines(runnerID string, limit int) []string {
+	filtered := make([]server.LogEntry, 0, len(m.logEntries))
+	source := "runner:" + runnerID
+	for _, entry := range m.logEntries {
+		if entry.Source == source {
+			filtered = append(filtered, entry)
+		}
+	}
+	if len(filtered) == 0 {
+		return []string{"No runner logs yet."}
+	}
+
+	start := len(filtered) - limit
+	if start < 0 {
+		start = 0
+	}
+	lines := make([]string, 0, len(filtered[start:]))
+	for _, entry := range filtered[start:] {
+		lines = append(lines, formatLogEntry(entry))
+	}
+	return lines
 }
 
 func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
@@ -1032,6 +1171,17 @@ func renderPanel(title string, lines []string, color string) string {
 		Render(subtitleStyle.Render(title) + "\n" + body)
 }
 
+func joinPanels(panels ...string) string {
+	visible := make([]string, 0, len(panels))
+	for _, panel := range panels {
+		if strings.TrimSpace(panel) == "" {
+			continue
+		}
+		visible = append(visible, panel)
+	}
+	return strings.Join(visible, "\n\n")
+}
+
 func formatKV(label string, value string) string {
 	return fmt.Sprintf("%-14s %s", label+":", value)
 }
@@ -1057,11 +1207,67 @@ func statusBadge(state string) string {
 		Render(state)
 }
 
+func statusMeter(active int, total int) string {
+	if total <= 0 {
+		return "[----------] 0/0 running"
+	}
+
+	width := 10
+	filled := active * width / total
+	if active > 0 && filled == 0 {
+		filled = 1
+	}
+	if filled > width {
+		filled = width
+	}
+	return fmt.Sprintf(
+		"[%s%s] %d/%d running",
+		strings.Repeat("#", filled),
+		strings.Repeat("-", width-filled),
+		active,
+		total,
+	)
+}
+
+func runnerHealthMeter(runner server.RunnerSnapshot) string {
+	switch strings.ToLower(runner.State) {
+	case "running":
+		return "[##########] serving"
+	case "starting":
+		return "[######----] starting"
+	case "created":
+		return "[#####-----] ready to start"
+	case "external":
+		return "[#####-----] external upstream"
+	case "unavailable", "error":
+		return "[##--------] needs attention"
+	default:
+		return "[---.......] idle"
+	}
+}
+
 func runnerLaunchMode(runner server.RunnerSnapshot) string {
 	if !runner.Launch {
 		return "external upstream"
 	}
 	return "managed by sidecar"
+}
+
+func endpointPath(upstream string, path string) string {
+	if strings.TrimSpace(upstream) == "" || upstream == "unavailable" {
+		return "unavailable"
+	}
+	return strings.TrimRight(upstream, "/") + path
+}
+
+func formatLogEntry(entry server.LogEntry) string {
+	return fmt.Sprintf(
+		"#%d %s %s %s",
+		entry.Seq,
+		entry.Source,
+		entry.Stream,
+		entry.Line,
+	)
 }
 
 func commandLine(command []string) string {

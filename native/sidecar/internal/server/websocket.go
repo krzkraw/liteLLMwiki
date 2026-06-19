@@ -269,6 +269,72 @@ func (s *Server) handleWebSocketAPIRequest(
 			http.StatusOK,
 			s.statusResponse(ctx),
 		)
+	case requestPath.Path == "/sidecar/v1/models":
+		if method != http.MethodGet {
+			_ = writer.sendAPITextResponse(
+				message.ID,
+				http.StatusMethodNotAllowed,
+				"method not allowed\n",
+			)
+			return
+		}
+		if s.modelCatalog == nil {
+			_ = writer.sendAPITextResponse(
+				message.ID,
+				http.StatusServiceUnavailable,
+				"model catalog is not configured\n",
+			)
+			return
+		}
+		_ = writer.sendAPIJSONResponse(
+			message.ID,
+			http.StatusOK,
+			struct {
+				Models any `json:"models"`
+			}{
+				Models: s.modelCatalog.Entries(),
+			},
+		)
+	case requestPath.Path == "/sidecar/v1/models/download":
+		if method != http.MethodPost {
+			_ = writer.sendAPITextResponse(
+				message.ID,
+				http.StatusMethodNotAllowed,
+				"method not allowed\n",
+			)
+			return
+		}
+		if s.modelCatalog == nil {
+			_ = writer.sendAPITextResponse(
+				message.ID,
+				http.StatusServiceUnavailable,
+				"model catalog is not configured\n",
+			)
+			return
+		}
+		var request modelDownloadRequest
+		if err := json.Unmarshal(body, &request); err != nil {
+			_ = writer.sendAPITextResponse(
+				message.ID,
+				http.StatusBadRequest,
+				"decode model download request\n",
+			)
+			return
+		}
+		entry, err := s.modelCatalog.Download(ctx, request.ID)
+		if err != nil {
+			_ = writer.sendAPITextResponse(message.ID, http.StatusBadGateway, err.Error()+"\n")
+			return
+		}
+		_ = writer.sendAPIJSONResponse(
+			message.ID,
+			http.StatusOK,
+			struct {
+				Model any `json:"model"`
+			}{
+				Model: entry,
+			},
+		)
 	case requestPath.Path == "/sidecar/v1/multimodal":
 		if method != http.MethodPost {
 			_ = writer.sendAPITextResponse(

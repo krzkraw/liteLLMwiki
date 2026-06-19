@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/platform"
 	"litert-sidecar/internal/proxy"
 )
@@ -165,6 +166,7 @@ type Options struct {
 	StatusEvents      *StatusBroadcaster
 	BackendReporter   BackendReporter
 	MultimodalRunner  MultimodalRunner
+	ModelCatalog      *catalog.Catalog
 }
 
 type Server struct {
@@ -176,6 +178,7 @@ type Server struct {
 	statusEvents      *StatusBroadcaster
 	backendReporter   BackendReporter
 	multimodalRunner  MultimodalRunner
+	modelCatalog      *catalog.Catalog
 }
 
 func New(options Options) *Server {
@@ -210,6 +213,7 @@ func New(options Options) *Server {
 		statusEvents:      statusEvents,
 		backendReporter:   options.BackendReporter,
 		multimodalRunner:  options.MultimodalRunner,
+		modelCatalog:      options.ModelCatalog,
 	}
 }
 
@@ -218,10 +222,32 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/sidecar/v1/status", s.handleStatus)
 	mux.HandleFunc("/sidecar/v1/ws", s.handleWebSocket)
 	mux.HandleFunc("/sidecar/v1/multimodal", s.handleMultimodal)
+	mux.HandleFunc("/sidecar/v1/models/download", s.handleModelDownload)
+	mux.HandleFunc("/sidecar/v1/models", s.handleModels)
 	mux.HandleFunc("/v1/", s.handleProxy)
 	mux.HandleFunc("/v1", s.handleProxy)
 
 	return s.withCORS(mux)
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.modelCatalog == nil {
+		http.Error(w, "model catalog is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(struct {
+		Models []catalog.Entry `json:"models"`
+	}{
+		Models: s.modelCatalog.Entries(),
+	}); err != nil {
+		http.Error(w, "encode model catalog", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -290,6 +316,46 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.proxy.ServeHTTP(w, r)
+}
+
+type modelDownloadRequest struct {
+	ID string `json:"id"`
+}
+
+func (s *Server) handleModelDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.modelCatalog == nil {
+		http.Error(w, "model catalog is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var request modelDownloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "decode model download request", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(request.ID) == "" {
+		http.Error(w, "model id is required", http.StatusBadRequest)
+		return
+	}
+
+	entry, err := s.modelCatalog.Download(r.Context(), request.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(struct {
+		Model catalog.Entry `json:"model"`
+	}{
+		Model: entry,
+	}); err != nil {
+		http.Error(w, "encode model download response", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleMultimodal(w http.ResponseWriter, r *http.Request) {

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/proxy"
 )
 
@@ -250,6 +251,75 @@ func TestStatusReportsMultimodalUnavailableWhenRuntimeUnavailable(t *testing.T) 
 			"multimodal state = %q, want unavailable",
 			body.Capabilities.Multimodal.State,
 		)
+	}
+}
+
+func TestModelsEndpointListsCatalog(t *testing.T) {
+	t.Parallel()
+
+	modelCatalog := catalog.NewDefault(t.TempDir())
+	handler := New(Options{
+		ModelCatalog: modelCatalog,
+	}).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/sidecar/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var body struct {
+		Models []catalog.Entry `json:"models"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode models: %v", err)
+	}
+	if len(body.Models) != 4 {
+		t.Fatalf("models = %d, want 4", len(body.Models))
+	}
+	if body.Models[0].ID == "" || body.Models[0].TargetPath == "" {
+		t.Fatalf("first model is incomplete: %#v", body.Models[0])
+	}
+}
+
+func TestModelDownloadEndpointDownloadsCatalogEntry(t *testing.T) {
+	t.Setenv("HF_TOKEN", "hf_secret")
+
+	var sawAuth string
+	modelHost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, "model-data")
+	}))
+	t.Cleanup(modelHost.Close)
+
+	modelCatalog := catalog.NewDefault(t.TempDir(), catalog.WithBaseURL(modelHost.URL))
+	handler := New(Options{
+		ModelCatalog: modelCatalog,
+	}).Handler()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/sidecar/v1/models/download",
+		strings.NewReader(`{"id":"gemma4-gguf"}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if sawAuth != "Bearer hf_secret" {
+		t.Fatalf("authorization = %q, want bearer token", sawAuth)
+	}
+	var body struct {
+		Model catalog.Entry `json:"model"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode model: %v", err)
+	}
+	if body.Model.ID != "gemma4-gguf" || body.Model.State != catalog.StatePresent {
+		t.Fatalf("model = %#v, want downloaded gemma4-gguf", body.Model)
 	}
 }
 
@@ -675,6 +745,53 @@ func TestWebSocketAPIRequestUsesProxyTargetResolver(t *testing.T) {
 	}
 	if start.Status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", start.Status)
+	}
+}
+
+func TestWebSocketAPIRequestListsModelCatalog(t *testing.T) {
+	t.Parallel()
+
+	modelCatalog := catalog.NewDefault(t.TempDir())
+	handler := New(Options{ModelCatalog: modelCatalog}).Handler()
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	client := dialTestWebSocket(t, httpServer.URL, "/sidecar/v1/ws")
+	defer client.Close()
+
+	client.WriteJSON(t, map[string]any{
+		"type":   "api.request",
+		"id":     "request-1",
+		"method": "GET",
+		"path":   "/sidecar/v1/models",
+	})
+
+	var start struct {
+		Type   string `json:"type"`
+		ID     string `json:"id"`
+		Status int    `json:"status"`
+	}
+	client.ReadJSON(t, &start)
+	if start.Type != "api.response.start" || start.Status != http.StatusOK {
+		t.Fatalf("start envelope = %#v", start)
+	}
+	var chunk struct {
+		Type       string `json:"type"`
+		ID         string `json:"id"`
+		DataBase64 string `json:"dataBase64"`
+	}
+	client.ReadJSON(t, &chunk)
+	body, err := base64.StdEncoding.DecodeString(chunk.DataBase64)
+	if err != nil {
+		t.Fatalf("decode chunk: %v", err)
+	}
+	var response struct {
+		Models []catalog.Entry `json:"models"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatalf("decode models response: %v", err)
+	}
+	if len(response.Models) != 4 {
+		t.Fatalf("models = %d, want 4", len(response.Models))
 	}
 }
 

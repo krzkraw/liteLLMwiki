@@ -125,6 +125,12 @@ including status:
 http://127.0.0.1:9379/sidecar/v1/status
 ```
 
+model catalog state:
+
+```text
+http://127.0.0.1:9379/sidecar/v1/models
+```
+
 and chat completions:
 
 ```text

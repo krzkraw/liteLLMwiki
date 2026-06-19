@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/litert"
 	"litert-sidecar/internal/platform"
 	"litert-sidecar/internal/proxy"
@@ -49,6 +50,7 @@ func main() {
 
 	logs := server.NewLogBroadcaster(512)
 	statusEvents := server.NewStatusBroadcaster()
+	modelCatalog := catalog.NewDefault(catalog.FindModelRoot())
 	runtimeSupervisor := supervisor.New(supervisor.Config{
 		DefaultLiteRT: supervisor.LiteRTConfig{
 			Launch:     *launchRuntime,
@@ -92,6 +94,7 @@ func main() {
 		RuntimeController: runtimeController,
 		Logs:              logs,
 		StatusEvents:      statusEvents,
+		ModelCatalog:      modelCatalog,
 		BackendReporter: func(ctx context.Context) ([]server.BackendStatus, error) {
 			status := runtimeSupervisor.LegacyStatus()
 			return reportBackends(ctx, status.Upstream, status.ModelID)
@@ -127,7 +130,7 @@ func main() {
 	if sidecarMode(*headless) == sidecarModeTUI {
 		tuiErr := make(chan error, 1)
 		go func() {
-			tuiErr <- tui.Run(ctx, runtimeSupervisor, logs)
+			tuiErr <- tui.Run(ctx, runtimeSupervisor, logs, modelCatalog)
 		}()
 		select {
 		case <-ctx.Done():

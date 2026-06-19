@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/server"
 	"litert-sidecar/internal/supervisor"
 )
@@ -34,27 +35,41 @@ type tickMsg time.Time
 type Model struct {
 	supervisor *supervisor.Supervisor
 	logs       *server.LogBroadcaster
+	catalog    *catalog.Catalog
 	active     int
 	width      int
 	height     int
 	snapshot   supervisor.Snapshot
 	runtime    supervisor.RuntimeStatus
 	logEntries []server.LogEntry
+	models     []catalog.Entry
 }
 
-func NewModel(runtimeSupervisor *supervisor.Supervisor, logs *server.LogBroadcaster) Model {
+func NewModel(
+	runtimeSupervisor *supervisor.Supervisor,
+	logs *server.LogBroadcaster,
+	modelCatalog ...*catalog.Catalog,
+) Model {
 	model := Model{
 		supervisor: runtimeSupervisor,
 		logs:       logs,
 		active:     0,
 	}
+	if len(modelCatalog) > 0 {
+		model.catalog = modelCatalog[0]
+	}
 	model.refresh()
 	return model
 }
 
-func Run(ctx context.Context, runtimeSupervisor *supervisor.Supervisor, logs *server.LogBroadcaster) error {
+func Run(
+	ctx context.Context,
+	runtimeSupervisor *supervisor.Supervisor,
+	logs *server.LogBroadcaster,
+	modelCatalog *catalog.Catalog,
+) error {
 	program := tea.NewProgram(
-		NewModel(runtimeSupervisor, logs),
+		NewModel(runtimeSupervisor, logs, modelCatalog),
 		tea.WithContext(ctx),
 	)
 	_, err := program.Run()
@@ -130,6 +145,9 @@ func (m *Model) refresh() {
 	if m.logs != nil {
 		m.logEntries = m.logs.Snapshot()
 	}
+	if m.catalog != nil {
+		m.models = m.catalog.Entries()
+	}
 }
 
 func (m *Model) selectRuneTab(value string) {
@@ -202,7 +220,21 @@ func (m Model) chatView() string {
 }
 
 func (m Model) modelsView() string {
-	return "Models\nCatalog detection and downloads are available from the shared sidecar model catalog.\n"
+	var builder strings.Builder
+	builder.WriteString("Models\n")
+	if len(m.models) == 0 {
+		builder.WriteString("No model catalog configured.\n")
+		return builder.String()
+	}
+	for _, entry := range m.models {
+		builder.WriteString(fmt.Sprintf(
+			"- %s %s %s\n",
+			entry.ID,
+			entry.State,
+			entry.TargetPath,
+		))
+	}
+	return builder.String()
 }
 
 func (m Model) logsView() string {

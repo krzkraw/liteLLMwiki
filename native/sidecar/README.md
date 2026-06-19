@@ -30,6 +30,8 @@ By default it:
 In a fresh clone, provide the native model from the external model host before
 starting the sidecar. The default local path is
 `models/gemma-4-E2B-it.litertlm`; model binaries are ignored by Git.
+The sidecar also exposes a model catalog at `/sidecar/v1/models` and supports
+authenticated Hugging Face downloads through `/sidecar/v1/models/download`.
 
 Useful flags:
 

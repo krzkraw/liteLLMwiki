@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/server"
 	"litert-sidecar/internal/supervisor"
 )
@@ -64,6 +65,20 @@ func TestModelLogsViewShowsRecentEntries(t *testing.T) {
 
 	if !strings.Contains(view, "runtime ready") {
 		t.Fatalf("logs view missing log entry:\n%s", view)
+	}
+}
+
+func TestModelModelsViewShowsCatalogEntries(t *testing.T) {
+	t.Parallel()
+
+	modelCatalog := catalog.NewDefault(t.TempDir())
+	model := NewModel(testSupervisor(), server.NewLogBroadcaster(8), modelCatalog)
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
+	updated := next.(Model)
+	view := updated.View()
+
+	if !strings.Contains(view, "gemma4-gguf") {
+		t.Fatalf("models view missing catalog entry:\n%s", view)
 	}
 }
 

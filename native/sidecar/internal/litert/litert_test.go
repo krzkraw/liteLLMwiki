@@ -40,12 +40,12 @@ func TestBuildServeCommand(t *testing.T) {
 func TestBuildImportCommand(t *testing.T) {
 	t.Parallel()
 
-	cmd := BuildImportCommand("litert-lm", "demo/models/gemma-4-E2B-it.litertlm", "gemma4-e2b")
+	cmd := BuildImportCommand("litert-lm", "models/gemma-4-E2B-it.litertlm", "gemma4-e2b")
 	got := cmd.Args
 	want := []string{
 		"litert-lm",
 		"import",
-		"demo/models/gemma-4-E2B-it.litertlm",
+		"models/gemma-4-E2B-it.litertlm",
 		"gemma4-e2b",
 	}
 
@@ -59,7 +59,7 @@ func TestBuildImportCommandInjectsHuggingFaceTokenEnvironment(t *testing.T) {
 
 	cmd := BuildImportCommandWithHuggingFaceToken(
 		"litert-lm",
-		"demo/models/gemma-4-E2B-it.litertlm",
+		"models/gemma-4-E2B-it.litertlm",
 		"gemma4-e2b",
 		"hf_secret",
 	)

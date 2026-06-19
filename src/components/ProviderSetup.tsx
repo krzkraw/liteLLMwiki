@@ -83,13 +83,11 @@ export interface ProviderSetupProps {
 
 const manualSidecarCommand = [
   "macOS:",
-  "cd demo",
-  "./native/sidecar/litert-sidecar-darwin-arm64/litert-sidecar \\",
+  "./native/sidecar-artifacts/litert-sidecar-darwin-arm64/litert-sidecar \\",
   "  -runtime-exe /path/to/litert-lm",
   "",
   "Windows PowerShell:",
-  "cd demo",
-  ".\\native\\sidecar\\litert-sidecar-windows-amd64\\litert-sidecar.exe `",
+  ".\\native\\sidecar-artifacts\\litert-sidecar-windows-amd64\\litert-sidecar.exe `",
   "  -runtime-exe C:\\path\\to\\litert-lm.exe",
 ].join("\n");
 

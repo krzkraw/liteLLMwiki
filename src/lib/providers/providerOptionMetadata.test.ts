@@ -54,7 +54,7 @@ describe("providerOptionMetadata", () => {
       group: "Sampling",
       type: "select",
       defaultValue: "UNSPECIFIED",
-      source: "demo/node_modules/@litert-lm/core/dist/session_config.d.ts",
+      source: "node_modules/@litert-lm/core/dist/session_config.d.ts",
       choices: [
         { value: "UNSPECIFIED", label: "Unspecified" },
         { value: "CPU", label: "CPU" },
@@ -67,7 +67,7 @@ describe("providerOptionMetadata", () => {
       group: "Sampling",
       type: "text",
       defaultValue: "",
-      source: "demo/node_modules/@litert-lm/core/dist/session_config.d.ts",
+      source: "node_modules/@litert-lm/core/dist/session_config.d.ts",
     });
     expect(getProviderOptionDefinition("web", "startTokenId")).toMatchObject({
       provider: "web",
@@ -76,7 +76,7 @@ describe("providerOptionMetadata", () => {
       defaultValue: 0,
       min: 0,
       step: 1,
-      source: "demo/node_modules/@litert-lm/core/dist/session_config.d.ts",
+      source: "node_modules/@litert-lm/core/dist/session_config.d.ts",
     });
     expect(
       getProviderOptionDefinition("web", "numOutputCandidates"),
@@ -87,7 +87,7 @@ describe("providerOptionMetadata", () => {
       defaultValue: 0,
       min: 0,
       step: 1,
-      source: "demo/node_modules/@litert-lm/core/dist/session_config.d.ts",
+      source: "node_modules/@litert-lm/core/dist/session_config.d.ts",
     });
     expect(
       getProviderOptionDefinition("web", "visionModalityEnabled"),

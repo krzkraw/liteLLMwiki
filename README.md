@@ -1,59 +1,173 @@
-# liteLLMwiki
+# LiteRT Gemma Local Chat
 
-Local Gemma workbench for browser and native LiteRT-LM experiments.
+Text-first local Gemma workbench with two providers:
 
-This repository contains the web UI and the Go sidecar only. Large Gemma
-`.litertlm` model files are intentionally not tracked and are ignored by Git;
-place them under `demo/models/` locally or choose them from disk in the UI.
+- **Web**: loads the Gemma 4 E2B web `.litertlm` model in the browser through
+  LiteRT-LM WASM/WebGPU.
+- **Executable**: connects to a local OpenAI-compatible native sidecar at
+  `http://127.0.0.1:9379/v1`.
 
-## Contents
+The app also indexes a selected folder, summarizes text files with the loaded
+Gemma provider when available, and renders a deterministic knowledge graph.
 
-- `demo/` - React/Vite web UI for local chat, folder summarization, and a
-  knowledge graph.
-- `native/sidecar/` - Go sidecar that exposes an OpenAI-compatible endpoint and
-  WebSocket runtime control for `litert-lm`.
-- `demo/native/sidecar/` - ignored build-output location for webUI-adjacent
-  sidecar release artifacts.
+## Run
 
-Pitch material was moved out of this repo to:
-
-```text
-/Users/krz/Documents/Local-llm-pitch
-```
-
-## Models
-
-Models are external artifacts. The expected local paths are:
-
-```text
-demo/models/gemma-4-E2B-it-web.litertlm
-demo/models/gemma-4-E2B-it.litertlm
-```
-
-The web model can be downloaded when Hugging Face access is available:
+Install dependencies from the repository root:
 
 ```bash
-cd demo
-HF_TOKEN=... npm run download:model
-npm run check:model
-```
-
-Do not commit models, model chunks, or generated sidecar binaries.
-
-## Web UI
-
-```bash
-cd demo
 npm install
+```
+
+`npm install` runs `npm run prepare:wasm`, which copies LiteRT-LM WASM assets to:
+
+```text
+public/vendor/litert-lm/core/wasm
+```
+
+Start the dev server:
+
+```bash
 npm run dev -- --port 5173
 ```
 
-Open `http://127.0.0.1:5173/`.
+Open:
 
-Verification:
+```text
+http://127.0.0.1:5173/
+```
+
+Chrome or another browser with WebGPU enabled is required for browser inference.
+Headless Chromium can render and smoke-test the UI but may not expose a WebGPU
+adapter.
+
+## Web Model
+
+The browser provider expects the web model under the repository-local model
+directory:
+
+```text
+models/gemma-4-E2B-it-web.litertlm
+```
+
+The default URL inside the app is:
+
+```text
+/models/gemma-4-E2B-it-web.litertlm
+```
+
+The Vite dev and preview servers serve `/models/*` from `models/`, so the large
+`.litertlm` files do not need to be copied into `public/`.
+
+The model source is:
+
+```text
+https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
+```
+
+Download it when network/auth is available:
 
 ```bash
-cd demo
+HF_TOKEN=... npm run download:model
+npm run check:model
+npm run smoke:model
+```
+
+You can also choose the `.litertlm` from disk with the `Choose local .litertlm`
+control. Use the `gemma-4-E2B-it-web.litertlm` web model for browser WebGPU.
+
+## Native Model
+
+The native executable model is hosted outside this repository. Place the
+externally hosted file at the path expected by the sidecar:
+
+```text
+models/gemma-4-E2B-it.litertlm
+```
+
+Model binaries, partial downloads, and split model chunks are ignored by Git.
+
+## Executable Provider
+
+The executable provider is wired to an OpenAI-compatible local sidecar. The Go
+source lives in `native/sidecar`, and the built native runner used by this web
+UI is placed under `native/sidecar-artifacts/`.
+
+Build the webUI-local native runner artifacts from the repository root:
+
+```bash
+npm run build:sidecar
+```
+
+Then start the sidecar manually from the same directory tree the web UI uses:
+
+```bash
+./native/sidecar-artifacts/litert-sidecar-darwin-arm64/litert-sidecar \
+  -runtime-exe /path/to/litert-lm
+```
+
+The sidecar searches for `litert-lm`, imports
+`models/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
+`litert-lm serve --host 127.0.0.1 --port 9381`.
+
+The sidecar still exposes HTTP endpoints for manual checks and smoke scripts,
+including status:
+
+```text
+http://127.0.0.1:9379/sidecar/v1/status
+```
+
+and chat completions:
+
+```text
+http://127.0.0.1:9379/v1/chat/completions
+```
+
+In normal web UI use, executable status/control/logs plus text and multimodal
+generation are tunneled through `ws://127.0.0.1:9379/sidecar/v1/ws` with
+`api.request` frames. The sidecar routes those frames to `/v1/chat/completions`
+or `/sidecar/v1/multimodal` underneath. The sidecar probes upstream `/v1/models`
+for backend evidence. The base `gemma4-e2b` model means the default CPU/base
+path is available; advertised `gemma4-e2b,gpu` and `gemma4-e2b,npu` IDs enable
+those UI selections. CUDA is shown as probe-only and is not formatted into
+LiteRT-LM model strings.
+
+The executable sidecar also exposes native multimodal generation at:
+
+```text
+http://127.0.0.1:9379/sidecar/v1/multimodal
+```
+
+That endpoint accepts a prompt plus base64 image/audio attachments and runs
+`litert-lm run` with `--attachment`, `--vision-backend`, and
+`--audio-backend`. The browser provider remains text-only, but the chat
+composer enables image/audio attachments after the executable sidecar connects
+and advertises `capabilities.multimodal.state: "available"`.
+
+## Folder Summary And Graph
+
+Use the right-hand folder panel to choose a folder. Browsers that expose the
+File System Access API show a direct `Choose folder` action; other browsers can
+use the directory-capable file input fallback. The browser:
+
+1. normalizes file paths across macOS/Windows-style separators;
+2. ignores generated, binary, media, and model files;
+3. chunks text files;
+4. summarizes chunks, files, and the folder with the loaded Gemma provider, or
+   uses deterministic preview summaries before a provider is loaded; and
+5. renders a stable SVG knowledge graph from summary entities and topics.
+
+## Multimodal Status
+
+The browser provider is intentionally text-only. Native multimodal support
+routes through the executable sidecar's WebSocket API tunnel to
+`/sidecar/v1/multimodal`. In Executable mode, attached image/audio files are
+encoded in the browser and sent only to the local sidecar; text-only prompts use
+the same tunnel to reach the OpenAI-compatible streaming `/v1/chat/completions`
+path.
+
+## Verify
+
+```bash
 npm test
 npm run build
 ```
@@ -66,34 +180,31 @@ npm run smoke:model
 npm run smoke:executable
 ```
 
-`smoke:model` requires the external web model under `demo/models/`.
+`smoke` covers the UI without requiring the large web model. `smoke:model`
+requires `models/gemma-4-E2B-it-web.litertlm` and checks that `/models/*` serves
+the real binary with `application/octet-stream`.
 
-## Sidecar
-
-Build the sidecar release artifacts into the webUI-adjacent ignored location:
-
-```bash
-cd demo
-npm run build:sidecar
-```
-
-Run the macOS arm64 sidecar manually:
+To verify the production preview server catches the same route:
 
 ```bash
-cd demo
-./native/sidecar/litert-sidecar-darwin-arm64/litert-sidecar \
-  -runtime-exe /path/to/litert-lm
+npm run build
+npm run preview -- --port 5174
+npm run smoke:model -- --url http://127.0.0.1:5174/
 ```
 
-The web UI then controls the sidecar over:
-
-```text
-ws://127.0.0.1:9379/sidecar/v1/ws
-```
-
-Go verification:
+`smoke:executable` uses a fast mock sidecar. To exercise the real native
+runtime, including a tiny PNG attachment through `/sidecar/v1/multimodal`, put
+the external native model under `models/` or pass `MODEL_FILE`, then run from
+`native/sidecar`:
 
 ```bash
-cd native/sidecar
-go test ./...
+LITERT_LM_BIN=/path/to/litert-lm scripts/real-runtime-smoke.sh
+```
+
+Optional real-model generation check:
+
+```bash
+HEADLESS=0 PLAYWRIGHT_CHANNEL=chrome \
+MODEL_PATH=/path/to/gemma-4-E2B-it-web.litertlm \
+npm run e2e:generate
 ```

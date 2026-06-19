@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$(cd "$root/../.." && pwd)"
-out="${1:-"$repo_root/demo/native/sidecar"}"
+out="${1:-"$repo_root/native/sidecar-artifacts"}"
 
 targets=(
   "darwin/arm64"

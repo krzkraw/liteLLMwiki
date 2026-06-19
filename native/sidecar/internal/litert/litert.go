@@ -785,10 +785,10 @@ func executableSearchPaths() []string {
 func defaultModelSearchPaths() []string {
 	name := DefaultModelFileName
 	paths := []string{
-		filepath.Join("demo", "models", name),
 		filepath.Join("models", name),
-		filepath.Join("..", "demo", "models", name),
-		filepath.Join("..", "..", "demo", "models", name),
+		filepath.Join("..", "models", name),
+		filepath.Join("..", "..", "models", name),
+		filepath.Join("..", "..", "..", "models", name),
 	}
 
 	if currentExe, err := os.Executable(); err == nil {
@@ -796,7 +796,8 @@ func defaultModelSearchPaths() []string {
 		paths = append(paths,
 			filepath.Join(dir, "models", name),
 			filepath.Join(dir, "..", "models", name),
-			filepath.Join(dir, "..", "..", "demo", "models", name),
+			filepath.Join(dir, "..", "..", "models", name),
+			filepath.Join(dir, "..", "..", "..", "models", name),
 		)
 	}
 

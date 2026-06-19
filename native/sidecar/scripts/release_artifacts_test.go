@@ -77,15 +77,15 @@ func TestBuildReleaseArtifactsHaveExpectedShape(t *testing.T) {
 	}
 }
 
-func TestShellReleaseScriptDefaultsToDemoNativeSidecar(t *testing.T) {
+func TestShellReleaseScriptDefaultsToNativeSidecarArtifacts(t *testing.T) {
 	t.Parallel()
 
 	content, err := os.ReadFile("build-release.sh")
 	if err != nil {
 		t.Fatalf("read build-release.sh: %v", err)
 	}
-	if !strings.Contains(string(content), `repo_root/demo/native/sidecar`) {
-		t.Fatalf("build-release.sh does not default to demo/native/sidecar")
+	if !strings.Contains(string(content), `repo_root/native/sidecar-artifacts`) {
+		t.Fatalf("build-release.sh does not default to native/sidecar-artifacts")
 	}
 }
 

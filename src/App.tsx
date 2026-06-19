@@ -441,7 +441,7 @@ export function createSidecarRuntimeConfig(
   const modelFile = optionString(
     values,
     "modelFile",
-    "demo/models/gemma-4-E2B-it.litertlm",
+    "models/gemma-4-E2B-it.litertlm",
   );
 
   return {

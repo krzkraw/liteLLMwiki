@@ -2,14 +2,21 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("native runner paths", () => {
-  it("places sidecar release artifacts under the demo web UI tree", async () => {
-    const { resolveNativeRunnerRoot, resolveRepoRoot, resolveSidecarSourceRoot } =
-      await import("./nativeRunnerPaths.mjs");
+  it("places sidecar release artifacts outside the sidecar source tree", async () => {
+    const {
+      resolveAppRoot,
+      resolveNativeRunnerRoot,
+      resolveRepoRoot,
+      resolveSidecarSourceRoot,
+    } = await import("./nativeRunnerPaths.mjs");
 
-    expect(resolveNativeRunnerRoot("/repo/demo")).toBe(
-      resolve("/repo/demo/native/sidecar"),
+    expect(resolveAppRoot("file:///repo/scripts/nativeRunnerPaths.mjs")).toBe(
+      resolve("/repo"),
     );
-    expect(resolveRepoRoot("/repo/demo")).toBe(resolve("/repo"));
+    expect(resolveNativeRunnerRoot("/repo")).toBe(
+      resolve("/repo/native/sidecar-artifacts"),
+    );
+    expect(resolveRepoRoot("/repo")).toBe(resolve("/repo"));
     expect(resolveSidecarSourceRoot("/repo")).toBe(
       resolve("/repo/native/sidecar"),
     );
@@ -19,7 +26,7 @@ describe("native runner paths", () => {
     const { createNativeRunnerBuildCommand } = await import(
       "./build-native-runner.mjs"
     );
-    const outDir = resolve("/repo/demo/native/sidecar");
+    const outDir = resolve("/repo/native/sidecar-artifacts");
     const sidecarRoot = resolve("/repo/native/sidecar");
 
     expect(

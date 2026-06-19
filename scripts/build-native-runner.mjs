@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  resolveDemoRoot,
+  resolveAppRoot,
   resolveNativeRunnerRoot,
   resolveRepoRoot,
   resolveSidecarSourceRoot,
@@ -10,8 +10,8 @@ import {
 
 export function createNativeRunnerBuildCommand({
   platform = process.platform,
-  sidecarRoot = resolveSidecarSourceRoot(resolveRepoRoot(resolveDemoRoot())),
-  outDir = resolveNativeRunnerRoot(resolveDemoRoot()),
+  sidecarRoot = resolveSidecarSourceRoot(resolveRepoRoot(resolveAppRoot())),
+  outDir = resolveNativeRunnerRoot(resolveRepoRoot(resolveAppRoot())),
   powershell = process.env.PWSH || "powershell",
 } = {}) {
   if (platform === "win32") {
@@ -38,7 +38,7 @@ export function createNativeRunnerBuildCommand({
 export async function buildNativeRunner({
   outDir = process.argv[2]
     ? resolve(process.cwd(), process.argv[2])
-    : resolveNativeRunnerRoot(resolveDemoRoot()),
+    : resolveNativeRunnerRoot(resolveRepoRoot(resolveAppRoot())),
 } = {}) {
   const command = createNativeRunnerBuildCommand({ outDir });
   const child = spawn(command.command, command.args, {

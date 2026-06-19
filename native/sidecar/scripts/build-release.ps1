@@ -8,7 +8,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Resolve-Path (Join-Path $ScriptDir "..")
 if ($OutDir -eq "") {
   $RepoRoot = Resolve-Path (Join-Path $Root "..\..")
-  $OutDir = Join-Path $RepoRoot "demo\native\sidecar"
+  $OutDir = Join-Path $RepoRoot "native\sidecar-artifacts"
 }
 
 $Targets = @(

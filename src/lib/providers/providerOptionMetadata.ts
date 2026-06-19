@@ -66,18 +66,18 @@ const cacheChoices: ProviderOptionChoice[] = [
 ];
 
 const webEngineSource =
-  "demo/node_modules/@litert-lm/core/dist/engine_settings.d.ts";
+  "node_modules/@litert-lm/core/dist/engine_settings.d.ts";
 const webSessionSource =
-  "demo/node_modules/@litert-lm/core/dist/session_config.d.ts";
+  "node_modules/@litert-lm/core/dist/session_config.d.ts";
 const webConversationSource =
-  "demo/node_modules/@litert-lm/core/dist/conversation_config.d.ts";
+  "node_modules/@litert-lm/core/dist/conversation_config.d.ts";
 const wasmBindingSource =
-  "demo/node_modules/@litert-lm/core/dist/wasm_binding_types.d.ts";
-const executableProviderSource = "demo/src/lib/providers/executableProvider.ts";
-const endpointSource = "demo/src/lib/providers/endpoint.ts";
+  "node_modules/@litert-lm/core/dist/wasm_binding_types.d.ts";
+const executableProviderSource = "src/lib/providers/executableProvider.ts";
+const endpointSource = "src/lib/providers/endpoint.ts";
 const sidecarSource = "native/sidecar/cmd/litert-sidecar/main.go";
 const litertSource = "native/sidecar/internal/litert/litert.go";
-const nativeDocsSource = "docs/litert-lm-native-provider.md";
+const nativeDocsSource = "native/sidecar/README.md";
 
 export const providerOptionMetadata: ProviderOptionDefinition[] = [
   {
@@ -88,7 +88,7 @@ export const providerOptionMetadata: ProviderOptionDefinition[] = [
     label: "WASM path",
     defaultValue: "/vendor/litert-lm/core/wasm",
     tooltip: "LiteRT-LM WASM asset directory loaded before creating the web engine.",
-    source: "demo/src/lib/modelConfig.ts and demo/src/App.tsx",
+    source: "src/lib/modelConfig.ts and src/App.tsx",
     requiresReload: true,
   },
   {
@@ -186,7 +186,7 @@ export const providerOptionMetadata: ProviderOptionDefinition[] = [
     label: "Temperature",
     defaultValue: 0.7,
     tooltip: "Sampling temperature; lower values make output more deterministic.",
-    source: `${webSessionSource}; demo/src/App.tsx`,
+    source: `${webSessionSource}; src/App.tsx`,
     min: 0,
     max: 2,
     step: 0.05,
@@ -463,7 +463,7 @@ export const providerOptionMetadata: ProviderOptionDefinition[] = [
     group: "Sidecar",
     type: "text",
     label: "Model file",
-    defaultValue: "demo/models/gemma-4-E2B-it.litertlm",
+    defaultValue: "models/gemma-4-E2B-it.litertlm",
     tooltip: "Local .litertlm model file imported before serving when needed.",
     source: `${sidecarSource}; ${litertSource}; ${nativeDocsSource}`,
     requiresReload: true,

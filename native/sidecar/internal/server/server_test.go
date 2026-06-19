@@ -395,7 +395,7 @@ func TestWebSocketRuntimeControlForwardsConfig(t *testing.T) {
 			"runtimeExe":       "/opt/litert-lm",
 			"runtimeHost":      "127.0.0.1",
 			"runtimePort":      9481,
-			"modelFile":        "demo/models/gemma-4-E2B-it.litertlm",
+			"modelFile":        "models/gemma-4-E2B-it.litertlm",
 			"modelId":          "gemma4-e2b",
 			"huggingfaceToken": "hf_secret",
 			"importModel":      false,
@@ -417,7 +417,7 @@ func TestWebSocketRuntimeControlForwardsConfig(t *testing.T) {
 	if got.RuntimeHost != "127.0.0.1" || got.RuntimePort != 9481 {
 		t.Fatalf("runtime address = %s:%d", got.RuntimeHost, got.RuntimePort)
 	}
-	if got.ModelFile != "demo/models/gemma-4-E2B-it.litertlm" {
+	if got.ModelFile != "models/gemma-4-E2B-it.litertlm" {
 		t.Fatalf("model file = %q", got.ModelFile)
 	}
 	if got.ModelID != "gemma4-e2b" {

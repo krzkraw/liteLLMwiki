@@ -12,22 +12,22 @@ describe("folderAccess", () => {
   });
 
   it("removes leading relative and absolute path prefixes", () => {
-    expect(normalizeRelativePath("./demo\\src/App.tsx")).toBe(
-      "demo/src/App.tsx",
+    expect(normalizeRelativePath("./workspace\\src/App.tsx")).toBe(
+      "workspace/src/App.tsx",
     );
-    expect(normalizeRelativePath("/demo/src/App.tsx")).toBe(
-      "demo/src/App.tsx",
+    expect(normalizeRelativePath("/workspace/src/App.tsx")).toBe(
+      "workspace/src/App.tsx",
     );
   });
 
   it("collects webkitRelativePath values from file inputs", () => {
     const file = new File(["hello"], "App.tsx", { type: "text/plain" });
     Object.defineProperty(file, "webkitRelativePath", {
-      value: "demo/src/App.tsx",
+      value: "workspace/src/App.tsx",
     });
 
     expect(collectFilesFromFileList([file])).toEqual([
-      { path: "demo/src/App.tsx", file, sourceKind: "file-list" },
+      { path: "workspace/src/App.tsx", file, sourceKind: "file-list" },
     ]);
   });
 
@@ -67,7 +67,7 @@ describe("folderAccess", () => {
     } as unknown as FileSystemDirectoryHandle;
     const rootHandle = {
       kind: "directory",
-      name: "demo",
+      name: "workspace",
       async *entries() {
         yield ["src", srcHandle];
         yield [
@@ -82,8 +82,16 @@ describe("folderAccess", () => {
     } as unknown as FileSystemDirectoryHandle;
 
     await expect(collectFilesFromDirectory(rootHandle)).resolves.toEqual([
-      { path: "demo/src/main.ts", file: mainFile, sourceKind: "directory-handle" },
-      { path: "demo/README.md", file: readmeFile, sourceKind: "directory-handle" },
+      {
+        path: "workspace/src/main.ts",
+        file: mainFile,
+        sourceKind: "directory-handle",
+      },
+      {
+        path: "workspace/README.md",
+        file: readmeFile,
+        sourceKind: "directory-handle",
+      },
     ]);
   });
 });

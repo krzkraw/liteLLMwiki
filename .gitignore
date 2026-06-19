@@ -1,21 +1,22 @@
 .DS_Store
 
 # JavaScript dependencies and build output
-demo/node_modules/
-demo/dist/
-demo/coverage/
-demo/.vite/
-demo/public/vendor/
+node_modules/
+dist/
+coverage/
+.vite/
+public/vendor/
 
 # Local model binaries are hosted separately, never in this repo.
-demo/models/*
-!demo/models/README.md
+models/*
+!models/README.md
 *.litertlm
 *.litertlm.partial
 *.litertlm.parts/
 
 # Native sidecar release/debug artifacts
-demo/native/sidecar/litert-sidecar-*/
+native/sidecar-artifacts/*
+!native/sidecar-artifacts/README.md
 native/sidecar/dist/
 native/sidecar/bin/
 native/sidecar/litert-sidecar

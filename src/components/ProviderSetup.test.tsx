@@ -186,12 +186,11 @@ describe("ProviderSetup", () => {
     expect(onRestartRuntime).toHaveBeenCalledWith("debug");
     expect(onStopRuntime).toHaveBeenCalledOnce();
     const manualCommand = getByTestId("manual-sidecar-command").textContent ?? "";
-    expect(manualCommand).toContain("cd demo");
     expect(manualCommand).toContain(
-      "./native/sidecar/litert-sidecar-darwin-arm64/litert-sidecar",
+      "./native/sidecar-artifacts/litert-sidecar-darwin-arm64/litert-sidecar",
     );
     expect(manualCommand).toContain(
-      ".\\native\\sidecar\\litert-sidecar-windows-amd64\\litert-sidecar.exe",
+      ".\\native\\sidecar-artifacts\\litert-sidecar-windows-amd64\\litert-sidecar.exe",
     );
     expect(getByTestId("runtime-log-output").textContent).toContain(
       "runtime stdout runtime ready",

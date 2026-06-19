@@ -43,7 +43,6 @@ launcher_env_assignments() {
     SIDECAR_LAUNCH_RUNTIME \
     SIDECAR_IMPORT_MODEL \
     SIDECAR_RUNTIME_VERBOSE \
-    SIDECAR_HEADLESS \
     LLAMA_RUNTIME \
     LLAMA_SERVER_BIN
   do
@@ -59,7 +58,7 @@ launch_terminal() {
   shift
   local command
 
-  command="cd $(shell_join "$repo_root") && $(launcher_env_assignments)LITERT_LAUNCH_INLINE=1 $(shell_join "$@")"
+  command="cd $(shell_join "$repo_root") && $(launcher_env_assignments)LITERT_SIDECAR_TUI=1 LITERT_LAUNCH_INLINE=1 $(shell_join "$@")"
 
   if [[ "$(uname -s)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
     osascript <<OSA
@@ -203,9 +202,11 @@ exec_sidecar() {
   exec "$executable" "$@"
 }
 
-case "${SIDECAR_HEADLESS:-}" in
-  1|true|TRUE|yes|YES) sidecar_args+=("--headless") ;;
-esac
+if [[ "${LITERT_SIDECAR_TUI:-}" != "1" ]]; then
+  case "${SIDECAR_HEADLESS:-}" in
+    1|true|TRUE|yes|YES) sidecar_args+=("--headless") ;;
+  esac
+fi
 
 prepend_llama_runtime_path
 

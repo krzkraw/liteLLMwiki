@@ -62,10 +62,12 @@ window and starts the interactive sidecar TUI from
 `native/sidecar-artifacts/` when a matching binary exists and falls back to
 `go run ./cmd/litert-sidecar` from `native/sidecar`. It accepts sidecar flags
 after the script name and reads common overrides such as `SIDECAR_BIN`,
-`LITERT_LM_BIN`, `MODEL_FILE`, `MODEL_ID`, and `SIDECAR_HEADLESS=1`.
+`LITERT_LM_BIN`, `MODEL_FILE`, and `MODEL_ID`.
 `launch-all` opens two separate terminal windows: one for the web UI and one
-for the sidecar TUI. Use `SIDECAR_HEADLESS=1` only for explicit non-interactive
-sidecar launches.
+for the sidecar TUI. It forces the sidecar launcher onto the TUI path even if a
+headless environment variable was left behind by smoke testing. For explicit
+non-interactive sidecar launches, pass `--headless` to `launch-sidecar.sh` or
+`-Headless` to `launch-sidecar.ps1`.
 
 For a guided first-time setup, run the interactive installer:
 

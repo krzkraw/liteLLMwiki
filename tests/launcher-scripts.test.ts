@@ -111,12 +111,14 @@ describe("root launcher scripts", () => {
     const shellLauncher = readRootScript("launch-all.sh");
     expect(shellLauncher).toContain("launch-webui");
     expect(shellLauncher).toContain("launch-sidecar");
+    expect(shellLauncher).toContain("LITERT_SIDECAR_TUI=1");
     expect(shellLauncher).not.toContain("SIDECAR_HEADLESS");
     expect(shellLauncher).not.toContain("cleanup");
 
     const powershellLauncher = readRootScript("launch-all.ps1");
     expect(powershellLauncher).toContain("launch-webui");
     expect(powershellLauncher).toContain("launch-sidecar");
+    expect(powershellLauncher).toContain("-Tui");
     expect(powershellLauncher).not.toContain("SIDECAR_HEADLESS");
     expect(powershellLauncher).not.toContain("-Headless");
     expect(powershellLauncher).not.toContain("cleanup");
@@ -132,5 +134,16 @@ describe("root launcher scripts", () => {
       expect(contents).not.toContain("SIDECAR_HEADLESS");
       expect(contents).not.toContain("-Headless");
     }
+  });
+
+  it("forces terminal-launched sidecars to stay interactive unless headless is explicit", () => {
+    const shellLauncher = readRootScript("launch-sidecar.sh");
+    expect(shellLauncher).toContain("LITERT_SIDECAR_TUI=1");
+    expect(shellLauncher).toContain('${LITERT_SIDECAR_TUI:-}');
+
+    const powershellLauncher = readRootScript("launch-sidecar.ps1");
+    expect(powershellLauncher).toContain("[switch]$Tui");
+    expect(powershellLauncher).toContain('"-Tui"');
+    expect(powershellLauncher).toContain("-not $Tui");
   });
 });

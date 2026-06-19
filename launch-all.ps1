@@ -10,7 +10,7 @@ $RepoRoot = $PSScriptRoot
 $SidecarScript = Join-Path $RepoRoot "launch-sidecar.ps1"
 $WebUiScript = Join-Path $RepoRoot "launch-webui.ps1"
 
-& $SidecarScript @SidecarArgs
+& $SidecarScript -Tui @SidecarArgs
 & $WebUiScript
 
 Write-Host "Opened LiteRT Sidecar TUI in a separate terminal."

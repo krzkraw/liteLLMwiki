@@ -1,6 +1,7 @@
 param(
   [switch]$Inline,
   [switch]$Headless,
+  [switch]$Tui,
   [string]$SidecarBin = "",
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$ExtraArgs = @()
@@ -135,6 +136,10 @@ function Start-LiteRTTerminal {
 }
 
 if (-not $Inline) {
+  if ($Headless -and $Tui) {
+    throw "Use either -Headless or -Tui, not both."
+  }
+
   $ProcessArgs = @(
     "-NoExit",
     "-NoProfile",
@@ -146,6 +151,8 @@ if (-not $Inline) {
   )
   if ($Headless) {
     $ProcessArgs += "-Headless"
+  } else {
+    $ProcessArgs += "-Tui"
   }
   if (-not [string]::IsNullOrWhiteSpace($SidecarBin)) {
     $ProcessArgs += @("-SidecarBin", $SidecarBin)
@@ -270,7 +277,7 @@ if ($SidecarBin -eq "") {
   $SidecarBin = if ($env:SIDECAR_BIN) { $env:SIDECAR_BIN } else { Get-DefaultSidecarBin }
 }
 
-if ($Headless -or ($env:SIDECAR_HEADLESS -match "^(1|true|yes)$")) {
+if ((-not $Tui) -and ($Headless -or ($env:SIDECAR_HEADLESS -match "^(1|true|yes)$"))) {
   $SidecarArgs += "--headless"
 }
 

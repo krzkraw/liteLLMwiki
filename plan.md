@@ -4,14 +4,23 @@
 
 Build the Go sidecar into a Bubble Tea TUI that defaults to an interactive
 dashboard, with `--headless` preserving current browser and CI behavior. The
-first implementation should be a server-runner supervisor: it manages
-long-lived LiteRT-LM and llama.cpp processes, preserves the existing local
-HTTP/WebSocket API, and adds model downloads, backend detection, runner
-creation, logs, and a TUI chat tab.
+implementation should replace the current single LiteRT manager with a
+first-class multi-runner supervisor: it manages long-lived LiteRT-LM and
+llama.cpp processes, preserves the existing local HTTP/WebSocket API at the
+server boundary, and adds model downloads, backend detection, runner creation,
+logs, and a TUI chat tab.
 
 This is doable on macOS, Linux, and Windows Terminal, but the right v1 is a
-sidecar supervisor/TUI rather than a simple wrapper around the current single
-`litert-lm serve` process.
+sidecar supervisor/TUI rather than an additive wrapper around the current single
+`litert-lm serve` process. The selected implementation direction is Approach B:
+replace the internal runtime authority with the supervisor while preserving
+compatibility at the HTTP/WebSocket contract boundary.
+
+Authoritative design spec:
+
+```text
+docs/superpowers/specs/2026-06-19-sidecar-tui-multi-runner-design.md
+```
 
 ## Key Changes
 
@@ -189,6 +198,11 @@ runner logs.
 Implement /Users/krz/Dev/liteLLMwiki/plan.md end to end.
 
 Critical requirements:
+- Read and follow the authoritative Approach B design spec:
+  docs/superpowers/specs/2026-06-19-sidecar-tui-multi-runner-design.md
+- Replace the current single LiteRT manager as the internal runtime authority
+  with a first-class multi-runner supervisor; preserve compatibility at the
+  existing HTTP/WebSocket server boundary.
 - Preserve existing sidecar HTTP/WebSocket API compatibility.
 - Make Bubble Tea TUI the default sidecar mode, with --headless preserving
   current automation/browser behavior.

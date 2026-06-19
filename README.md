@@ -56,14 +56,16 @@ Windows PowerShell equivalents:
 .\launch-all.ps1
 ```
 
-`launch-webui` starts the Vite web UI with `WEBUI_HOST` and `WEBUI_PORT`
-overrides. `launch-sidecar` starts the sidecar from
+`launch-webui` opens a new terminal window and starts the Vite web UI with
+`WEBUI_HOST` and `WEBUI_PORT` overrides. `launch-sidecar` opens a new terminal
+window and starts the interactive sidecar TUI from
 `native/sidecar-artifacts/` when a matching binary exists and falls back to
 `go run ./cmd/litert-sidecar` from `native/sidecar`. It accepts sidecar flags
 after the script name and reads common overrides such as `SIDECAR_BIN`,
 `LITERT_LM_BIN`, `MODEL_FILE`, `MODEL_ID`, and `SIDECAR_HEADLESS=1`.
-`launch-all` starts the web UI plus a headless sidecar and stops both when one
-process exits.
+`launch-all` opens two separate terminal windows: one for the web UI and one
+for the sidecar TUI. Use `SIDECAR_HEADLESS=1` only for explicit non-interactive
+sidecar launches.
 
 For a guided first-time setup, run the interactive installer:
 

@@ -82,14 +82,36 @@ describe("root launcher scripts", () => {
     }
   });
 
-  it("launches web UI and headless sidecar together with cleanup", () => {
+  it("opens individual launchers in separate terminal windows", () => {
+    for (const scriptName of ["launch-webui.sh", "launch-sidecar.sh"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("launch_terminal");
+      expect(contents).toContain("LITERT_LAUNCH_INLINE");
+      expect(contents).toContain("osascript");
+      expect(contents).toContain("gnome-terminal");
+      expect(contents).toContain("xterm");
+    }
+
+    for (const scriptName of ["launch-webui.ps1", "launch-sidecar.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("[switch]$Inline");
+      expect(contents).toContain("Start-Process");
+      expect(contents).toContain("-NoExit");
+      expect(contents).toContain("-Inline");
+    }
+  });
+
+  it("launches web UI and sidecar TUI in separate terminals", () => {
     for (const scriptName of ["launch-all.sh", "launch-all.ps1"]) {
       const contents = readRootScript(scriptName);
 
       expect(contents).toContain("launch-webui");
       expect(contents).toContain("launch-sidecar");
-      expect(contents).toContain("SIDECAR_HEADLESS");
-      expect(contents).toContain("cleanup");
+      expect(contents).not.toContain("SIDECAR_HEADLESS");
+      expect(contents).not.toContain("-Headless");
+      expect(contents).not.toContain("cleanup");
     }
   });
 });

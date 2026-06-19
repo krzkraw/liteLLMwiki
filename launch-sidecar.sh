@@ -7,6 +7,94 @@ llama_selected_file="$llama_runtime_root/.selected"
 
 sidecar_args=()
 
+shell_join() {
+  local arg
+  local quoted
+  local result=""
+
+  for arg in "$@"; do
+    printf -v quoted "%q" "$arg"
+    result+="$quoted "
+  done
+
+  printf '%s' "${result% }"
+}
+
+escape_applescript() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+launcher_env_assignments() {
+  local name
+  local value
+
+  for name in \
+    SIDECAR_BIN \
+    SIDECAR_ADDR \
+    SIDECAR_UPSTREAM \
+    LITERT_LM_BIN \
+    SIDECAR_RUNTIME_HOST \
+    SIDECAR_RUNTIME_PORT \
+    MODEL_FILE \
+    MODEL_ID \
+    SIDECAR_LAUNCH_RUNTIME \
+    SIDECAR_IMPORT_MODEL \
+    SIDECAR_RUNTIME_VERBOSE \
+    SIDECAR_HEADLESS \
+    LLAMA_RUNTIME \
+    LLAMA_SERVER_BIN
+  do
+    value="${!name:-}"
+    if [[ -n "$value" ]]; then
+      printf '%s=%s ' "$name" "$(shell_join "$value")"
+    fi
+  done
+}
+
+launch_terminal() {
+  local title="$1"
+  shift
+  local command
+
+  command="cd $(shell_join "$repo_root") && $(launcher_env_assignments)LITERT_LAUNCH_INLINE=1 $(shell_join "$@")"
+
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
+    osascript <<OSA
+tell application "Terminal"
+  activate
+  do script "$(escape_applescript "$command")"
+end tell
+OSA
+    return 0
+  fi
+
+  if command -v gnome-terminal >/dev/null 2>&1; then
+    gnome-terminal --title="$title" -- bash -lc "$command; exec bash" >/dev/null 2>&1 &
+    return 0
+  fi
+
+  if command -v konsole >/dev/null 2>&1; then
+    konsole --new-tab -p "tabtitle=$title" -e bash -lc "$command; exec bash" >/dev/null 2>&1 &
+    return 0
+  fi
+
+  if command -v xterm >/dev/null 2>&1; then
+    xterm -T "$title" -e bash -lc "$command; exec bash" >/dev/null 2>&1 &
+    return 0
+  fi
+
+  printf 'No supported terminal launcher found. Run this command manually:\n%s\n' "$command" >&2
+  return 1
+}
+
+if [[ "${LITERT_LAUNCH_INLINE:-}" != "1" ]]; then
+  launch_terminal "LiteRT Sidecar TUI" "$repo_root/launch-sidecar.sh" "$@"
+  exit 0
+fi
+
 add_value_flag() {
   local env_name="$1"
   local flag_name="$2"

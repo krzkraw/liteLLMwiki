@@ -13,60 +13,31 @@ $PowerShellExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) {
   (Get-Command powershell).Source
 }
 
-if (-not $env:SIDECAR_HEADLESS) {
-  $env:SIDECAR_HEADLESS = "1"
-}
-
-$WebUiProcess = $null
-$SidecarProcess = $null
-
-function cleanup {
-  foreach ($Process in @($script:WebUiProcess, $script:SidecarProcess)) {
-    if (($null -ne $Process) -and (-not $Process.HasExited)) {
-      Stop-Process -Id $Process.Id -ErrorAction SilentlyContinue
-      $Process.WaitForExit()
-    }
-  }
-}
-
 $SidecarScript = Join-Path $RepoRoot "launch-sidecar.ps1"
 $WebUiScript = Join-Path $RepoRoot "launch-webui.ps1"
 
 $SidecarProcessArgs = @(
+  "-NoExit",
   "-NoProfile",
   "-ExecutionPolicy",
   "Bypass",
   "-File",
   $SidecarScript,
-  "-Headless"
+  "-Inline"
 ) + $SidecarArgs
 
 $WebUiProcessArgs = @(
+  "-NoExit",
   "-NoProfile",
   "-ExecutionPolicy",
   "Bypass",
   "-File",
-  $WebUiScript
+  $WebUiScript,
+  "-Inline"
 )
 
-try {
-  $SidecarProcess = Start-Process -FilePath $PowerShellExe -ArgumentList $SidecarProcessArgs -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
-  $WebUiProcess = Start-Process -FilePath $PowerShellExe -ArgumentList $WebUiProcessArgs -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
+Start-Process -FilePath $PowerShellExe -ArgumentList $SidecarProcessArgs -WorkingDirectory $RepoRoot | Out-Null
+Start-Process -FilePath $PowerShellExe -ArgumentList $WebUiProcessArgs -WorkingDirectory $RepoRoot | Out-Null
 
-  Write-Host "Sidecar started with PID $($SidecarProcess.Id)"
-  Write-Host "Web UI started with PID $($WebUiProcess.Id)"
-
-  while ((-not $SidecarProcess.HasExited) -and (-not $WebUiProcess.HasExited)) {
-    Start-Sleep -Seconds 1
-    $SidecarProcess.Refresh()
-    $WebUiProcess.Refresh()
-  }
-
-  if ($SidecarProcess.HasExited) {
-    exit $SidecarProcess.ExitCode
-  }
-
-  exit $WebUiProcess.ExitCode
-} finally {
-  cleanup
-}
+Write-Host "Opened LiteRT Sidecar TUI in a separate terminal."
+Write-Host "Opened LiteRT Web UI in a separate terminal."

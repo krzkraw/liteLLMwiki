@@ -1,4 +1,5 @@
 param(
+  [switch]$Inline,
   [switch]$Headless,
   [string]$SidecarBin = "",
   [Parameter(ValueFromRemainingArguments = $true)]
@@ -12,6 +13,36 @@ $RepoRoot = $PSScriptRoot
 $LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
 $LlamaSelectedFile = Join-Path $LlamaRuntimeRoot ".selected"
 $SidecarArgs = @()
+
+function Get-PowerShellExe {
+  if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+    return (Get-Command pwsh).Source
+  }
+
+  return (Get-Command powershell).Source
+}
+
+if (-not $Inline) {
+  $ProcessArgs = @(
+    "-NoExit",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    $PSCommandPath,
+    "-Inline"
+  )
+  if ($Headless) {
+    $ProcessArgs += "-Headless"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($SidecarBin)) {
+    $ProcessArgs += @("-SidecarBin", $SidecarBin)
+  }
+  $ProcessArgs += $ExtraArgs
+
+  Start-Process -FilePath (Get-PowerShellExe) -ArgumentList $ProcessArgs -WorkingDirectory $RepoRoot | Out-Null
+  Write-Host "Opened LiteRT Sidecar TUI in a separate terminal."
+  exit 0
+}
 
 function Get-EnvValue {
   param([string]$Name)

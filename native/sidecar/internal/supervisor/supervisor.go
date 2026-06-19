@@ -979,6 +979,12 @@ func buildLlamaServerCommand(ctx context.Context, exe string, snapshot RunnerSna
 	if usesGPUBackend(snapshot.Backend) {
 		args = append(args, "--n-gpu-layers", "999")
 	}
+	switch snapshot.Role {
+	case RoleEmbedding:
+		args = append(args, "--embedding")
+	case RoleReranking:
+		args = append(args, "--embedding", "--pooling", "rank", "--reranking")
+	}
 
 	return exec.CommandContext(ctx, exe, args...)
 }

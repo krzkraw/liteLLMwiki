@@ -33,7 +33,9 @@ starting the sidecar. The default local path is
 The sidecar also exposes a model catalog at `/sidecar/v1/models` and supports
 authenticated Hugging Face downloads through `/sidecar/v1/models/download`.
 The supervisor can also start a `llama-server` main runner against a GGUF model
-and route OpenAI-compatible chat requests to that runner.
+and route OpenAI-compatible chat requests to that runner. llama.cpp embedding
+runners use `--embedding`; rerank probes use `--embedding --pooling rank
+--reranking` and route `/v1/rerank` when healthy.
 
 Useful flags:
 

@@ -214,6 +214,107 @@ func TestSupervisorStartsLlamaCPPMainRunner(t *testing.T) {
 	}
 }
 
+func TestSupervisorStartsLlamaCPPEmbeddingRunner(t *testing.T) {
+	t.Parallel()
+
+	exe, argsFile := writeLlamaHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "embedding.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	var childOutput bytes.Buffer
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{Launch: false, Host: "127.0.0.1", Port: 9381},
+		StdoutTee:     &childOutput,
+		StderrTee:     &childOutput,
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:         "embedding-llamacpp",
+		Runtime:    RuntimeLlamaCPP,
+		Role:       RoleEmbedding,
+		Backend:    BackendCPU,
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "qwen3-embedding",
+		Host:       "127.0.0.1",
+		Port:       9492,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create embedding runner: %v", err)
+	}
+
+	if err := supervisor.StartRunner(context.Background(), runnerID); err != nil {
+		t.Fatalf("start embedding runner: %v", err)
+	}
+	args := readHelperArgs(t, argsFile, &childOutput, 1)
+	if got, ok := supervisor.UpstreamForPath("/v1/embeddings"); !ok || got != "http://127.0.0.1:9492" {
+		t.Fatalf("embedding upstream = %q/%v, want embedding runner", got, ok)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := supervisor.StopRunner(stopCtx, runnerID); err != nil {
+		t.Fatalf("stop embedding runner: %v", err)
+	}
+
+	if !strings.Contains(args, "--embedding") {
+		t.Fatalf("embedding args = %q, want --embedding", args)
+	}
+	if strings.Contains(args, "--reranking") {
+		t.Fatalf("embedding args = %q, should not include reranking", args)
+	}
+}
+
+func TestSupervisorStartsLlamaCPPRerankRunner(t *testing.T) {
+	t.Parallel()
+
+	exe, argsFile := writeLlamaHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "rerank.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	var childOutput bytes.Buffer
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{Launch: false, Host: "127.0.0.1", Port: 9381},
+		StdoutTee:     &childOutput,
+		StderrTee:     &childOutput,
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:         "rerank-llamacpp",
+		Runtime:    RuntimeLlamaCPP,
+		Role:       RoleReranking,
+		Backend:    BackendCPU,
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "qwen3-rerank-probe",
+		Host:       "127.0.0.1",
+		Port:       9493,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create rerank runner: %v", err)
+	}
+
+	if err := supervisor.StartRunner(context.Background(), runnerID); err != nil {
+		t.Fatalf("start rerank runner: %v", err)
+	}
+	args := readHelperArgs(t, argsFile, &childOutput, 1)
+	if got, ok := supervisor.UpstreamForPath("/v1/rerank"); !ok || got != "http://127.0.0.1:9493" {
+		t.Fatalf("rerank upstream = %q/%v, want rerank runner", got, ok)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := supervisor.StopRunner(stopCtx, runnerID); err != nil {
+		t.Fatalf("stop rerank runner: %v", err)
+	}
+
+	for _, want := range []string{"--embedding", "--pooling rank", "--reranking"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("rerank args = %q, want %q", args, want)
+		}
+	}
+}
+
 func TestSupervisorStartsDefaultLiteRTWithControlPatch(t *testing.T) {
 	t.Parallel()
 

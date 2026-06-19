@@ -43,6 +43,19 @@ type runtimeActionMsg struct {
 	err    error
 }
 
+type runnerCreateMsg struct {
+	label  string
+	runner server.RunnerSnapshot
+	err    error
+}
+
+type runnerPreset struct {
+	id      string
+	role    string
+	modelID string
+	port    int
+}
+
 type Model struct {
 	runtimeController server.RuntimeController
 	runnerController  server.RunnerController
@@ -154,6 +167,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case runtimeActionMsg:
 		m.refresh()
 		m.notice = m.runtimeActionNotice(msg)
+	case runnerCreateMsg:
+		m.refresh()
+		m.setActiveTab("models")
+		m.notice = m.runnerCreateNotice(msg)
 	}
 
 	return m, nil
@@ -184,6 +201,16 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.runtimeActionCmd("stop", "")
 			case "r":
 				return m, m.runtimeActionCmd("restart", server.RuntimeModeRelease)
+			}
+		}
+		if m.activeTabID() == "models" {
+			switch strings.ToLower(value) {
+			case "m":
+				return m, m.runnerCreateCmd("main")
+			case "e":
+				return m, m.runnerCreateCmd("embedding")
+			case "r":
+				return m, m.runnerCreateCmd("reranking")
 			}
 		}
 		if runner, ok := m.activeRunner(); ok {
@@ -310,6 +337,15 @@ func (m Model) activeRunner() (server.RunnerSnapshot, bool) {
 	return server.RunnerSnapshot{}, false
 }
 
+func (m *Model) setActiveTab(id string) {
+	for index, item := range m.tabs() {
+		if item.id == id {
+			m.active = index
+			return
+		}
+	}
+}
+
 func (m Model) tabBar() string {
 	tabs := m.tabs()
 	parts := make([]string, 0, len(tabs))
@@ -431,7 +467,11 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 }
 
 func (m Model) modelsView() string {
-	lines := []string{}
+	lines := []string{
+		"Create runners",
+		"m Main llama.cpp   e Embedding llama.cpp   r Rerank llama.cpp",
+		"",
+	}
 	if len(m.models) == 0 {
 		lines = append(lines, "No model catalog configured.")
 	} else {
@@ -574,6 +614,35 @@ func (m Model) runtimeActionCmd(action string, mode server.RuntimeMode) tea.Cmd 
 	}
 }
 
+func (m Model) runnerCreateCmd(role string) tea.Cmd {
+	return func() tea.Msg {
+		if m.runnerController == nil {
+			return runnerCreateMsg{
+				label: role,
+				err:   fmt.Errorf("runner controller is not configured"),
+			}
+		}
+
+		spec, label, err := m.runnerSpecForRole(role)
+		if err != nil {
+			return runnerCreateMsg{
+				label: label,
+				err:   err,
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+
+		runner, err := m.runnerController.CreateRunner(ctx, spec)
+		return runnerCreateMsg{
+			label:  label,
+			runner: runner,
+			err:    err,
+		}
+	}
+}
+
 func (m Model) actionNotice(message runnerActionMsg) string {
 	if message.err != nil {
 		return fmt.Sprintf("%s %s failed: %v", message.action, message.id, message.err)
@@ -590,6 +659,13 @@ func (m Model) actionNotice(message runnerActionMsg) string {
 	}
 }
 
+func (m Model) runnerCreateNotice(message runnerCreateMsg) string {
+	if message.err != nil {
+		return fmt.Sprintf("create %s runner failed: %v", message.label, message.err)
+	}
+	return "created runner " + message.runner.ID
+}
+
 func (m Model) runtimeActionNotice(message runtimeActionMsg) string {
 	if message.err != nil {
 		return fmt.Sprintf("%s runtime failed: %v", message.action, message.err)
@@ -603,6 +679,69 @@ func (m Model) runtimeActionNotice(message runtimeActionMsg) string {
 		return "restarted runtime " + string(message.mode)
 	default:
 		return message.action + " runtime"
+	}
+}
+
+func (m Model) runnerSpecForRole(role string) (server.RunnerSpec, string, error) {
+	switch role {
+	case "main":
+		entry, ok := m.catalogEntry("gemma4-gguf")
+		if !ok {
+			return server.RunnerSpec{}, role, fmt.Errorf("catalog entry gemma4-gguf is not available")
+		}
+		return catalogRunnerSpec(entry, runnerPreset{
+			id:      "main-llamacpp",
+			role:    "main",
+			modelID: "gemma4-gguf",
+			port:    9482,
+		}), role, nil
+	case "embedding":
+		entry, ok := m.catalogEntry("qwen3-embedding-gguf")
+		if !ok {
+			return server.RunnerSpec{}, role, fmt.Errorf("catalog entry qwen3-embedding-gguf is not available")
+		}
+		return catalogRunnerSpec(entry, runnerPreset{
+			id:      "embedding-llamacpp",
+			role:    "embedding",
+			modelID: "qwen3-embedding",
+			port:    9483,
+		}), role, nil
+	case "reranking":
+		entry, ok := m.catalogEntry("qwen3-embedding-gguf")
+		if !ok {
+			return server.RunnerSpec{}, role, fmt.Errorf("catalog entry qwen3-embedding-gguf is not available")
+		}
+		return catalogRunnerSpec(entry, runnerPreset{
+			id:      "rerank-llamacpp",
+			role:    "reranking",
+			modelID: "qwen3-rerank-probe",
+			port:    9484,
+		}), role, nil
+	default:
+		return server.RunnerSpec{}, role, fmt.Errorf("unknown runner role %q", role)
+	}
+}
+
+func (m Model) catalogEntry(id string) (catalog.Entry, bool) {
+	for _, entry := range m.models {
+		if entry.ID == id {
+			return entry, true
+		}
+	}
+	return catalog.Entry{}, false
+}
+
+func catalogRunnerSpec(entry catalog.Entry, preset runnerPreset) server.RunnerSpec {
+	return server.RunnerSpec{
+		ID:        preset.id,
+		Runtime:   entry.Runtime,
+		Role:      preset.role,
+		Backend:   "cpu",
+		ModelPath: entry.TargetPath,
+		ModelID:   preset.modelID,
+		Host:      "127.0.0.1",
+		Port:      preset.port,
+		Launch:    true,
 	}
 }
 

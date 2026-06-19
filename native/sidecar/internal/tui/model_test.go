@@ -210,6 +210,73 @@ func TestModelModelsViewShowsCatalogEntries(t *testing.T) {
 	if !strings.Contains(view, "gemma4-gguf") {
 		t.Fatalf("models view missing catalog entry:\n%s", view)
 	}
+	if !strings.Contains(view, "Create runners") {
+		t.Fatalf("models view missing create controls:\n%s", view)
+	}
+}
+
+func TestModelsTabCreatesRunnersFromCatalogThroughSharedController(t *testing.T) {
+	t.Parallel()
+
+	runners := testRunnerController()
+	modelCatalog := catalog.NewDefault(t.TempDir())
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           modelCatalog,
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	updated := next.(Model)
+
+	for _, tc := range []struct {
+		key       string
+		wantCall  string
+		wantToast string
+		wantTab   string
+	}{
+		{
+			key:       "m",
+			wantCall:  "create:main-llamacpp:llamacpp:main:gemma4-gguf",
+			wantToast: "created runner main-llamacpp",
+			wantTab:   "main-llamacpp",
+		},
+		{
+			key:       "e",
+			wantCall:  "create:embedding-llamacpp:llamacpp:embedding:qwen3-embedding",
+			wantToast: "created runner embedding-llamacpp",
+			wantTab:   "embedding-llamacpp",
+		},
+		{
+			key:       "r",
+			wantCall:  "create:rerank-llamacpp:llamacpp:reranking:qwen3-rerank-probe",
+			wantToast: "created runner rerank-llamacpp",
+			wantTab:   "rerank-llamacpp",
+		},
+	} {
+		nextModel, cmd := updated.Update(tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune(tc.key),
+		})
+		if cmd == nil {
+			t.Fatalf("key %q returned no command", tc.key)
+		}
+
+		message := cmd()
+		afterAction, _ := nextModel.(Model).Update(message)
+		updated = afterAction.(Model)
+
+		if got := runners.lastCall(); got != tc.wantCall {
+			t.Fatalf("last call = %q, want %q", got, tc.wantCall)
+		}
+		view := updated.View()
+		if !strings.Contains(view, tc.wantToast) {
+			t.Fatalf("view missing action result %q:\n%s", tc.wantToast, view)
+		}
+		if !strings.Contains(view, tc.wantTab) {
+			t.Fatalf("view missing created runner tab %q:\n%s", tc.wantTab, view)
+		}
+	}
 }
 
 func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
@@ -342,7 +409,8 @@ func (c *fakeRuntimeController) lastCall() string {
 }
 
 type fakeRunnerController struct {
-	calls []string
+	calls   []string
+	created []server.RunnerSnapshot
 }
 
 func testRunnerController() *fakeRunnerController {
@@ -350,56 +418,58 @@ func testRunnerController() *fakeRunnerController {
 }
 
 func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
-	return server.RunnerSnapshotResponse{
-		Runners: []server.RunnerSnapshot{
-			{
-				ID:         "main-litert",
-				Runtime:    "litert",
-				Role:       "main",
-				Backend:    "cpu",
-				Executable: "/opt/litert-lm",
-				Version:    "litert-lm 0.13.1",
-				ModelPath:  "/models/litert/gemma-4-E2B-it.litertlm",
-				ModelID:    "gemma4-e2b",
-				Host:       "127.0.0.1",
-				Port:       9381,
-				State:      "running",
-				PID:        1234,
-				Upstream:   "http://127.0.0.1:9381",
-				Command: []string{
-					"/opt/litert-lm",
-					"serve",
-					"--host",
-					"127.0.0.1",
-					"--port",
-					"9381",
-				},
-				Capabilities: map[string]string{
-					"chat":       "openai-compatible",
-					"multimodal": "litert-run",
-				},
-				LogSequence: 41,
-				Detail:      "LiteRT-LM server process is running.",
+	runners := []server.RunnerSnapshot{
+		{
+			ID:         "main-litert",
+			Runtime:    "litert",
+			Role:       "main",
+			Backend:    "cpu",
+			Executable: "/opt/litert-lm",
+			Version:    "litert-lm 0.13.1",
+			ModelPath:  "/models/litert/gemma-4-E2B-it.litertlm",
+			ModelID:    "gemma4-e2b",
+			Host:       "127.0.0.1",
+			Port:       9381,
+			State:      "running",
+			PID:        1234,
+			Upstream:   "http://127.0.0.1:9381",
+			Command: []string{
+				"/opt/litert-lm",
+				"serve",
+				"--host",
+				"127.0.0.1",
+				"--port",
+				"9381",
 			},
-			{
-				ID:         "embed-qwen",
-				Runtime:    "llamacpp",
-				Role:       "embedding",
-				Backend:    "gpu",
-				Executable: "/opt/llama-server",
-				ModelPath:  "/models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
-				ModelID:    "qwen3-embedding",
-				Host:       "127.0.0.1",
-				Port:       9382,
-				State:      "created",
-				Upstream:   "http://127.0.0.1:9382",
-				Capabilities: map[string]string{
-					"embeddings": "openai-compatible",
-				},
-				LastError: "not started",
-				Detail:    "llama.cpp embedding runner is configured.",
+			Capabilities: map[string]string{
+				"chat":       "openai-compatible",
+				"multimodal": "litert-run",
 			},
+			LogSequence: 41,
+			Detail:      "LiteRT-LM server process is running.",
 		},
+		{
+			ID:         "embed-qwen",
+			Runtime:    "llamacpp",
+			Role:       "embedding",
+			Backend:    "gpu",
+			Executable: "/opt/llama-server",
+			ModelPath:  "/models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+			ModelID:    "qwen3-embedding",
+			Host:       "127.0.0.1",
+			Port:       9382,
+			State:      "created",
+			Upstream:   "http://127.0.0.1:9382",
+			Capabilities: map[string]string{
+				"embeddings": "openai-compatible",
+			},
+			LastError: "not started",
+			Detail:    "llama.cpp embedding runner is configured.",
+		},
+	}
+	runners = append(runners, c.created...)
+	return server.RunnerSnapshotResponse{
+		Runners: runners,
 		Routes: map[string]string{
 			"main":      "main-litert",
 			"embedding": "embed-qwen",
@@ -408,10 +478,31 @@ func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
 }
 
 func (c *fakeRunnerController) CreateRunner(
-	context.Context,
-	server.RunnerSpec,
+	_ context.Context,
+	spec server.RunnerSpec,
 ) (server.RunnerSnapshot, error) {
-	return server.RunnerSnapshot{}, nil
+	c.calls = append(c.calls, strings.Join([]string{
+		"create",
+		spec.ID,
+		spec.Runtime,
+		spec.Role,
+		spec.ModelID,
+	}, ":"))
+	runner := server.RunnerSnapshot{
+		ID:        spec.ID,
+		Runtime:   spec.Runtime,
+		Role:      spec.Role,
+		Backend:   spec.Backend,
+		ModelPath: spec.ModelPath,
+		ModelID:   spec.ModelID,
+		Host:      spec.Host,
+		Port:      spec.Port,
+		State:     "created",
+		Upstream:  spec.Upstream,
+		Detail:    "Runner has not been started yet.",
+	}
+	c.created = append(c.created, runner)
+	return runner, nil
 }
 
 func (c *fakeRunnerController) StartRunner(

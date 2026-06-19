@@ -26,7 +26,10 @@ settings, process details, command/capability/error state, and `s` start, `x`
 stop, and `r` restart controls. The Settings tab lists the matching WebSocket
 messages and sidecar API paths, and exposes default runtime controls with `s`
 start release, `d` start debug, `x` stop, and `r` restart release so terminal
-controls can be checked against the browser-facing API surface.
+controls can be checked against the browser-facing API surface. The Models tab
+can also create catalog-backed llama.cpp runners with `m` main, `e` embedding,
+and `r` rerank by calling the same runner creation method behind
+`POST /sidecar/v1/runners`.
 
 By default it:
 

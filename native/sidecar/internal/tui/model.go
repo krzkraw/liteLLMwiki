@@ -875,6 +875,7 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		renderPanel("Runtime command", []string{commandLine(runner.Command)}, "214"),
 		renderPanel("Capabilities matrix", runnerCapabilityLines(runner), "205"),
 		m.runnerEditorView(runner),
+		renderPanel("Settings matrix", runnerSettingsMatrixLines(runner), "39"),
 		renderPanel("Settings", settings, "45"),
 		renderPanel("Details", details, "214"),
 		renderPanel("Recent runner logs", m.runnerLogLines(runner.ID, 6), "244"),
@@ -943,6 +944,100 @@ func runnerOperationLines(runner server.RunnerSnapshot) []string {
 		"POST " + basePath + "/restart",
 		"PATCH " + basePath,
 	}
+}
+
+func runnerSettingsMatrixLines(runner server.RunnerSnapshot) []string {
+	return []string{
+		"Key  Setting       Current                         Patch/API",
+		runnerSettingsMatrixLine(
+			"b",
+			"Backend",
+			fallback(runner.Backend, "default"),
+			"backend",
+		),
+		runnerSettingsMatrixLine(
+			"p",
+			"Port",
+			fallbackInt(runner.Port, "auto"),
+			"port",
+		),
+		runnerSettingsMatrixLine(
+			"h",
+			"Host",
+			fallback(runner.Host, "127.0.0.1"),
+			"host",
+		),
+		runnerSettingsMatrixLine(
+			"i",
+			"Model ID",
+			fallback(runner.ModelID, "not configured"),
+			"modelId",
+		),
+		runnerSettingsMatrixLine(
+			"m",
+			"Model path",
+			fallback(runner.ModelPath, "not configured"),
+			"modelPath",
+		),
+		runnerSettingsMatrixLine(
+			"e",
+			"Executable",
+			fallback(runner.Executable, "auto-discover"),
+			"executable",
+		),
+		runnerSettingsMatrixLine(
+			"u",
+			"Upstream",
+			fallback(runner.Upstream, "unavailable"),
+			"upstream",
+		),
+		runnerSettingsMatrixLine(
+			"f",
+			"HF token",
+			"not shown",
+			"huggingFaceToken",
+		),
+		runnerSettingsMatrixLine(
+			"l",
+			"Launch",
+			runnerLaunchMode(runner),
+			"launch",
+		),
+		runnerSettingsMatrixLine(
+			"v",
+			"Verbose",
+			strconv.FormatBool(runner.Verbose),
+			"verbose",
+		),
+		runnerSettingsMatrixLine(
+			"t",
+			"Runtime",
+			fallback(runner.Runtime, "unknown"),
+			"runtime",
+		),
+		runnerSettingsMatrixLine(
+			"o",
+			"Role",
+			fallback(runner.Role, "unknown"),
+			"role",
+		),
+		"PATCH /sidecar/v1/runners/" + runner.ID,
+	}
+}
+
+func runnerSettingsMatrixLine(
+	key string,
+	setting string,
+	current string,
+	patchField string,
+) string {
+	return fmt.Sprintf(
+		"%-4s %-13s %-31s %s -> RunnerController.UpdateRunner",
+		key,
+		setting,
+		current,
+		patchField,
+	)
 }
 
 func (m Model) runnerControlLines(runner server.RunnerSnapshot) []string {

@@ -351,6 +351,41 @@ func TestRunnerTabShowsOperationFlowAndSharedMethodParity(t *testing.T) {
 	}
 }
 
+func TestRunnerTabShowsSettingsMatrixWithPatchFields(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated := next.(Model)
+	view := updated.View()
+
+	for _, expected := range []string{
+		"Settings matrix",
+		"Key  Setting       Current                         Patch/API",
+		"b    Backend       cpu                             backend -> RunnerController.UpdateRunner",
+		"p    Port          9381                            port -> RunnerController.UpdateRunner",
+		"h    Host          127.0.0.1                       host -> RunnerController.UpdateRunner",
+		"i    Model ID      gemma4-e2b                      modelId -> RunnerController.UpdateRunner",
+		"m    Model path    /models/litert/gemma-4-E2B-it.litertlm modelPath -> RunnerController.UpdateRunner",
+		"e    Executable    /opt/litert-lm                  executable -> RunnerController.UpdateRunner",
+		"u    Upstream      http://127.0.0.1:9381           upstream -> RunnerController.UpdateRunner",
+		"f    HF token      not shown                       huggingFaceToken -> RunnerController.UpdateRunner",
+		"l    Launch        managed by sidecar              launch -> RunnerController.UpdateRunner",
+		"v    Verbose       false                           verbose -> RunnerController.UpdateRunner",
+		"t    Runtime       litert                          runtime -> RunnerController.UpdateRunner",
+		"o    Role          main                            role -> RunnerController.UpdateRunner",
+		"PATCH /sidecar/v1/runners/main-litert",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("runner settings matrix missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestRunnerTabEditsPortThroughSharedRunnerController(t *testing.T) {
 	t.Parallel()
 

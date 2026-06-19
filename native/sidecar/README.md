@@ -29,7 +29,9 @@ operation flow, runtime command, capability matrix, settings, process details,
 and recent log panels. The operation flow shows the runner state, model file,
 runtime/backend, upstream, role route, controller methods, and matching
 WebSocket `api.request` paths. Runner controls use `s` start, `x` stop, and
-`r` restart. Runner tabs edit settings through the same update method behind
+`r` restart. Runner tabs include a settings matrix that lists each edit key,
+current value, `PATCH` field, and `RunnerController.UpdateRunner` method.
+They edit settings through the same update method behind
 `PATCH /sidecar/v1/runners/{id}`: `b` backend, `p` port, `h` host, `i` model ID,
 `m` model path, `e` executable, `u` upstream, `f` Hugging Face token, `l`
 launch mode, `v` verbose, `t` runtime, and `o` role. Typed edits show the

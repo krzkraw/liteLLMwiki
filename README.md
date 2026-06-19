@@ -65,6 +65,27 @@ after the script name and reads common overrides such as `SIDECAR_BIN`,
 `launch-all` starts the web UI plus a headless sidecar and stops both when one
 process exits.
 
+For a guided first-time setup, run the interactive installer:
+
+```bash
+./install.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\install.ps1
+```
+
+The installer checks local tools, npm dependencies, sidecar artifacts, and known
+model paths. For every missing system dependency or model download it prints the
+command or browser URL plus destination path first, then asks whether it should
+run the action. Answer `y` to let the script run it, or `n` to do it yourself;
+the installer waits until you press Enter and re-checks the dependency or file.
+If an attempted install or download fails, it prints the command or URL again
+and waits for you to complete it. Hugging Face tokens are prompted only for
+downloads that may need one and are kept in the current process environment.
+
 ## Web Model
 
 The browser provider expects the web model under the repository-local model

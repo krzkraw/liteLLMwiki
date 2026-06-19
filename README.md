@@ -40,6 +40,31 @@ Chrome or another browser with WebGPU enabled is required for browser inference.
 Headless Chromium can render and smoke-test the UI but may not expose a WebGPU
 adapter.
 
+Root launcher scripts are available for local development:
+
+```bash
+./launch-webui.sh
+./launch-sidecar.sh
+./launch-all.sh
+```
+
+Windows PowerShell equivalents:
+
+```powershell
+.\launch-webui.ps1
+.\launch-sidecar.ps1
+.\launch-all.ps1
+```
+
+`launch-webui` starts the Vite web UI with `WEBUI_HOST` and `WEBUI_PORT`
+overrides. `launch-sidecar` starts the sidecar from
+`native/sidecar-artifacts/` when a matching binary exists and falls back to
+`go run ./cmd/litert-sidecar` from `native/sidecar`. It accepts sidecar flags
+after the script name and reads common overrides such as `SIDECAR_BIN`,
+`LITERT_LM_BIN`, `MODEL_FILE`, `MODEL_ID`, and `SIDECAR_HEADLESS=1`.
+`launch-all` starts the web UI plus a headless sidecar and stops both when one
+process exits.
+
 ## Web Model
 
 The browser provider expects the web model under the repository-local model

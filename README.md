@@ -105,14 +105,15 @@ with a green checkmark when terminal color is available. It then shows checkbox
 selectors for llama.cpp runtime folders and model downloads. The default model
 selection is `gemma4-litert`, `gemma4-web-litert`,
 `embeddinggemma-litert`, and `qwen3-reranker-q4km`; optional llama.cpp main and
-embedding models can be toggled on from the same list. For every missing system
-dependency or selected model download it prints a boxed task prompt with the
-command or browser URL, the expected result, and `Y`/`N`/`M` choices. Answer `Y`
-to let the script run the action, `M` to do it manually while the installer
-waits and re-checks, or `N` to stop. If an attempted install or download fails,
-it prints the command or URL again and waits for you to complete it. Hugging Face
-tokens are prompted only for downloads that may need one and are kept in the
-current process environment.
+embedding models can be toggled on from the same list. Checkbox selections are
+treated as consent: selected runtimes and models download as a batch without a
+second prompt per item. Missing non-checkbox dependencies still use a boxed task
+prompt with the command or browser URL, the expected result, and `Y`/`N`/`M`
+choices. Answer `Y` to let the script run the action, `M` to do it manually
+while the installer waits and re-checks, or `N` to stop. If an attempted install
+or download fails, it prints the command or URL again and waits for you to
+complete it. Hugging Face tokens are prompted only for downloads that may need
+one and are kept in the current process environment.
 The installer also offers selectable llama.cpp runtime downloads for the
 current platform. Runtime archives are verified by SHA256 and extracted under
 `native/llama-runtimes/` into folders such as `llama-win-cpu-x64`,

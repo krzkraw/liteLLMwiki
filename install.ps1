@@ -272,7 +272,7 @@ function Expand-LlamaArchive {
   )
 
   if ($Archive.EndsWith(".zip")) {
-    Expand-Archive -Path $Archive -DestinationPath $TargetDir -Force
+    Expand-Archive -Path $Archive -DestinationPath $TargetDir -Force -ErrorAction Stop
     return
   }
 
@@ -296,10 +296,13 @@ function Install-LlamaAsset {
 
   $ArchiveName = Split-Path -Leaf $Url
   $Archive = Join-Path ([System.IO.Path]::GetTempPath()) "$([Guid]::NewGuid().ToString('N'))-$ArchiveName"
-  Invoke-WebRequest -Uri $Url -OutFile $Archive
-  Assert-ArchiveSha256 -Path $Archive -ExpectedSha256 $Sha256
-  Expand-LlamaArchive -Archive $Archive -TargetDir $TargetDir
-  Remove-Item -Force $Archive
+  try {
+    Invoke-WebRequest -Uri $Url -OutFile $Archive -ErrorAction Stop
+    Assert-ArchiveSha256 -Path $Archive -ExpectedSha256 $Sha256
+    Expand-LlamaArchive -Archive $Archive -TargetDir $TargetDir
+  } finally {
+    Remove-Item -Force -ErrorAction SilentlyContinue $Archive
+  }
 }
 
 function Install-LlamaRuntime {
@@ -307,6 +310,29 @@ function Install-LlamaRuntime {
 
   $TargetDir = Join-Path $LlamaRuntimeRoot $Definition.Folder
   $TempDir = "$TargetDir.tmp"
+
+  Write-LlamaRuntimeAction -Definition $Definition
+
+  try {
+    New-Item -ItemType Directory -Force -Path $LlamaRuntimeRoot -ErrorAction Stop | Out-Null
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TempDir
+    New-Item -ItemType Directory -Force -Path $TempDir -ErrorAction Stop | Out-Null
+    Install-LlamaAsset -Url $Definition.Url -Sha256 $Definition.Sha256 -TargetDir $TempDir
+    if ($Definition.ExtraUrl) {
+      Install-LlamaAsset -Url $Definition.ExtraUrl -Sha256 $Definition.ExtraSha256 -TargetDir $TempDir
+    }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TargetDir
+    Move-Item -Force $TempDir $TargetDir -ErrorAction Stop
+    Set-Content -Path $LlamaSelectedFile -Value $Definition.Folder -ErrorAction Stop
+  } catch {
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TempDir
+    throw
+  }
+  Add-Summary "OK: llama.cpp runtime $($Definition.Folder)"
+}
+
+function Write-LlamaRuntimeAction {
+  param([object]$Definition)
 
   Write-Host ""
   Write-Host "llama.cpp runtime needs to be installed downloaded, here is the command or URL I would use:"
@@ -318,18 +344,6 @@ function Install-LlamaRuntime {
     Write-Host "CUDA DLL URL: $($Definition.ExtraUrl)"
     Write-Host "sha256: $($Definition.ExtraSha256.Replace('sha256:', ''))"
   }
-
-  New-Item -ItemType Directory -Force -Path $LlamaRuntimeRoot | Out-Null
-  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TempDir
-  New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
-  Install-LlamaAsset -Url $Definition.Url -Sha256 $Definition.Sha256 -TargetDir $TempDir
-  if ($Definition.ExtraUrl) {
-    Install-LlamaAsset -Url $Definition.ExtraUrl -Sha256 $Definition.ExtraSha256 -TargetDir $TempDir
-  }
-  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TargetDir
-  Move-Item -Force $TempDir $TargetDir
-  Set-Content -Path $LlamaSelectedFile -Value $Definition.Folder
-  Add-Summary "OK: llama.cpp runtime $($Definition.Folder)"
 }
 
 function Ensure-LlamaRuntime {
@@ -353,22 +367,6 @@ function Ensure-LlamaRuntime {
   }
 
   $SelectedKeys = [System.Collections.Generic.List[string]]::new()
-  $RuntimeCommandText = "Source: $LlamaReleaseBase`nDestination: native/llama-runtimes`nThe installer will show platform runtime choices and download selected archives."
-  $RuntimeChoice = Read-TaskChoice `
-    -Label "llama.cpp runtime" `
-    -Description "Download one or more local llama.cpp runtime folders, or install llama-server manually." `
-    -CommandText $RuntimeCommandText `
-    -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes"
-  if ($RuntimeChoice -eq "no") {
-    throw "Installer stopped before llama.cpp runtime."
-  }
-  if ($RuntimeChoice -eq "manual") {
-    Invoke-WaitForUserAction -Label "llama-server" -Check {
-      -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
-    } -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes"
-    Add-Summary "OK: llama-server"
-    return
-  }
 
   while ($true) {
     Write-Host ""
@@ -413,10 +411,24 @@ function Ensure-LlamaRuntime {
       }
 
       $PrimaryKey = $SelectedKeys[0]
+      Write-Host "Selected runtimes will be downloaded now."
       foreach ($SelectedKey in @($SelectedKeys)) {
         $Selected = $Definitions | Where-Object { $_.Key -eq $SelectedKey } | Select-Object -First 1
         if ($null -ne $Selected) {
-          Install-LlamaRuntime -Definition $Selected
+          try {
+            Install-LlamaRuntime -Definition $Selected
+          } catch {
+            Write-Host "The task failed. Here is the command or URL again:"
+            Write-LlamaRuntimeAction -Definition $Selected
+            $ExpectedPath = Join-Path $LlamaRuntimeRoot $Selected.Folder
+            Invoke-WaitForUserAction -Label "llama.cpp runtime $($Selected.Key)" -Check {
+              if (-not (Test-Path $ExpectedPath)) {
+                return $false
+              }
+              $Match = Get-ChildItem -Path $ExpectedPath -Filter "llama-server*" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              return $null -ne $Match
+            } -ExpectedResult "llama-server exists under native/llama-runtimes/$($Selected.Folder)"
+          }
         }
       }
       $Primary = $Definitions | Where-Object { $_.Key -eq $PrimaryKey } | Select-Object -First 1
@@ -571,7 +583,7 @@ function Download-Model {
 
   $Directory = Split-Path -Parent $Target
   $Partial = "$Target.partial"
-  New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+  New-Item -ItemType Directory -Force -Path $Directory -ErrorAction Stop | Out-Null
   Remove-Item -Force -ErrorAction SilentlyContinue $Partial
 
   $Headers = @{}
@@ -585,8 +597,13 @@ function Download-Model {
     }
   }
 
-  Invoke-WebRequest -Uri $Url -OutFile $Partial -Headers $Headers
-  Move-Item -Force $Partial $Target
+  try {
+    Invoke-WebRequest -Uri $Url -OutFile $Partial -Headers $Headers -ErrorAction Stop
+    Move-Item -Force $Partial $Target -ErrorAction Stop
+  } catch {
+    Remove-Item -Force -ErrorAction SilentlyContinue $Partial
+    throw
+  }
 }
 
 function Ensure-Model {
@@ -623,32 +640,28 @@ function Ensure-Model {
     return
   }
 
-  while ((-not (Test-Path $Target)) -or ((Get-Item $Target -ErrorAction SilentlyContinue).Length -eq 0)) {
-    $Choice = Read-TaskChoice `
-      -Label $Label `
-      -Description "Download the model file or place it manually in the expected local path." `
-      -CommandText $CommandText `
-      -ExpectedResult $ExpectedResult
-    if ($Choice -eq "yes") {
-      if ($NeedsToken) {
-        Prompt-HfTokenIfNeeded
-      }
-      try {
-        Download-Model -Url $DownloadUrl -Target $Target -AuthKind $DownloadAuthKind -AuthToken $DownloadAuthToken
-      } catch {
-        Write-Host "The task failed. Here is the command or URL again:"
-        Write-Host $CommandText
-        Invoke-WaitForUserAction -Label $Label -Check {
-          (Test-Path $Target) -and ((Get-Item $Target -ErrorAction SilentlyContinue).Length -gt 0)
-        } -ExpectedResult $ExpectedResult
-      }
-    } elseif ($Choice -eq "manual") {
-      Invoke-WaitForUserAction -Label $Label -Check {
-        (Test-Path $Target) -and ((Get-Item $Target -ErrorAction SilentlyContinue).Length -gt 0)
-      } -ExpectedResult $ExpectedResult
-    } else {
-      throw "Installer stopped before $Label."
-    }
+  Write-Host ""
+  Write-Host "$Label selected from checkbox; downloading now."
+  Write-Host "Selected from checkbox; downloading now."
+  Write-Host "Command or URL I would use:"
+  Write-Host $CommandText
+  if ($NeedsToken) {
+    Prompt-HfTokenIfNeeded
+  }
+  try {
+    Download-Model -Url $DownloadUrl -Target $Target -AuthKind $DownloadAuthKind -AuthToken $DownloadAuthToken
+  } catch {
+    Write-Host "The task failed. Here is the command or URL again:"
+    Write-Host $CommandText
+    Invoke-WaitForUserAction -Label $Label -Check {
+      (Test-Path $Target) -and ((Get-Item $Target -ErrorAction SilentlyContinue).Length -gt 0)
+    } -ExpectedResult $ExpectedResult
+  }
+
+  if ((-not (Test-Path $Target)) -or ((Get-Item $Target -ErrorAction SilentlyContinue).Length -eq 0)) {
+    Invoke-WaitForUserAction -Label $Label -Check {
+      (Test-Path $Target) -and ((Get-Item $Target -ErrorAction SilentlyContinue).Length -gt 0)
+    } -ExpectedResult $ExpectedResult
   }
 
   Write-GreenCheck "$Label at $RelativePath - done"

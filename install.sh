@@ -285,10 +285,21 @@ install_llama_asset() {
   local archive_name="${url##*/}"
   local archive_path
 
-  archive_path="$(mktemp "${TMPDIR:-/tmp}/${archive_name}.XXXXXX")"
-  curl -L --fail --output "$archive_path" "$url"
-  verify_sha256 "$archive_path" "$sha256"
-  extract_llama_archive "$archive_path" "$target_dir" "$archive_name"
+  if ! archive_path="$(mktemp "${TMPDIR:-/tmp}/${archive_name}.XXXXXX")"; then
+    return 1
+  fi
+  if ! curl -L --fail --output "$archive_path" "$url"; then
+    rm -f "$archive_path"
+    return 1
+  fi
+  if ! verify_sha256 "$archive_path" "$sha256"; then
+    rm -f "$archive_path"
+    return 1
+  fi
+  if ! extract_llama_archive "$archive_path" "$target_dir" "$archive_name"; then
+    rm -f "$archive_path"
+    return 1
+  fi
   rm -f "$archive_path"
 }
 
@@ -298,6 +309,20 @@ find_llama_server_in_dir() {
 
   executable_name="$(llama_executable_name)"
   find "$dir" -type f -name "$executable_name" -print -quit
+}
+
+print_llama_runtime_action() {
+  local key="$1"
+  local spec folder label url sha256 extra_url extra_sha256
+
+  spec="$(llama_runtime_spec "$key")"
+  IFS='|' read -r folder label url sha256 extra_url extra_sha256 <<< "$spec"
+
+  printf '\nllama.cpp runtime needs to be installed downloaded, here is the command or URL I would use:\n'
+  printf 'Runtime: %s\nFolder: native/llama-runtimes/%s\nURL: %s\nsha256: %s\n' "$label" "$folder" "$url" "${sha256#sha256:}"
+  if [[ -n "$extra_url" ]]; then
+    printf 'CUDA DLL URL: %s\nsha256: %s\n' "$extra_url" "${extra_sha256#sha256:}"
+  fi
 }
 
 installed_llama_server() {
@@ -333,23 +358,39 @@ install_llama_runtime() {
   target_dir="$llama_runtime_root/$folder"
   tmp_dir="${target_dir}.tmp"
 
-  printf '\nllama.cpp runtime needs to be installed downloaded, here is the command or URL I would use:\n'
-  printf 'Runtime: %s\nFolder: native/llama-runtimes/%s\nURL: %s\nsha256: %s\n' "$label" "$folder" "$url" "${sha256#sha256:}"
-  if [[ -n "$extra_url" ]]; then
-    printf 'CUDA DLL URL: %s\nsha256: %s\n' "$extra_url" "${extra_sha256#sha256:}"
-  fi
+  print_llama_runtime_action "$key"
 
-  mkdir -p "$llama_runtime_root"
-  rm -rf "$tmp_dir"
-  mkdir -p "$tmp_dir"
-  install_llama_asset "$url" "$sha256" "$tmp_dir"
+  if ! mkdir -p "$llama_runtime_root"; then
+    return 1
+  fi
+  if ! rm -rf "$tmp_dir"; then
+    return 1
+  fi
+  if ! mkdir -p "$tmp_dir"; then
+    return 1
+  fi
+  if ! install_llama_asset "$url" "$sha256" "$tmp_dir"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
   if [[ -n "$extra_url" ]]; then
-    install_llama_asset "$extra_url" "$extra_sha256" "$tmp_dir"
+    if ! install_llama_asset "$extra_url" "$extra_sha256" "$tmp_dir"; then
+      rm -rf "$tmp_dir"
+      return 1
+    fi
   fi
   find "$tmp_dir" -type f -name 'llama-server*' -exec chmod +x {} + 2>/dev/null || true
-  rm -rf "$target_dir"
-  mv "$tmp_dir" "$target_dir"
-  printf '%s\n' "$folder" > "$llama_selected_file"
+  if ! rm -rf "$target_dir"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! mv "$tmp_dir" "$target_dir"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! printf '%s\n' "$folder" > "$llama_selected_file"; then
+    return 1
+  fi
   add_summary "OK: llama.cpp runtime $folder"
 }
 
@@ -362,8 +403,6 @@ ensure_llama_runtime() {
   local input token index checked found selected_option
   local new_selected=()
   local primary_key primary_folder
-  local choice
-  local runtime_command_text
 
   installed="$(installed_llama_server || true)"
   if [[ -n "$installed" ]]; then
@@ -382,32 +421,6 @@ ensure_llama_runtime() {
       "manual_url_action 'https://github.com/ggml-org/llama.cpp/releases'; false"
     return 0
   fi
-
-  runtime_command_text="Source: $llama_release_base
-Destination: native/llama-runtimes
-The installer will show platform runtime choices and download selected archives."
-  if prompt_task_choice "llama.cpp runtime" \
-    "Download one or more local llama.cpp runtime folders, or install llama-server manually." \
-    "$runtime_command_text" \
-    "llama-server is available on PATH or under native/llama-runtimes"; then
-    choice=0
-  else
-    choice=$?
-  fi
-  case "$choice" in
-    0) ;;
-    1)
-      printf 'Installer stopped before llama.cpp runtime.\n'
-      exit 1
-      ;;
-    2)
-      wait_for_user_action "llama-server" \
-        "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\"" \
-        "llama-server is available on PATH or under native/llama-runtimes"
-      add_summary "OK: llama-server"
-      return 0
-      ;;
-  esac
 
   while true; do
     printf '\nllama.cpp runtime needs to be installed downloaded. Select one or more runtimes:\n'
@@ -452,8 +465,19 @@ The installer will show platform runtime choices and download selected archives.
           continue
         fi
         primary_key="${selected[0]}"
+        printf 'Selected runtimes will be downloaded now.\n'
         for option in "${selected[@]}"; do
-          install_llama_runtime "$option"
+          spec="$(llama_runtime_spec "$option")"
+          IFS='|' read -r folder _ <<< "$spec"
+          if install_llama_runtime "$option"; then
+            :
+          else
+            printf 'The task failed. Here is the command or URL again:\n'
+            print_llama_runtime_action "$option"
+            wait_for_user_action "llama.cpp runtime $option" \
+              "test -n \"\$(find_llama_server_in_dir '$llama_runtime_root/$folder' || true)\"" \
+              "llama-server exists under native/llama-runtimes/$folder"
+          fi
         done
         spec="$(llama_runtime_spec "$primary_key")"
         IFS='|' read -r primary_folder _ <<< "$spec"
@@ -754,8 +778,12 @@ download_model() {
   local partial="${target}.partial"
   local curl_args=(-L --fail --output "$partial")
 
-  mkdir -p "$(dirname "$target")"
-  rm -f "$partial"
+  if ! mkdir -p "$(dirname "$target")"; then
+    return 1
+  fi
+  if ! rm -f "$partial"; then
+    return 1
+  fi
 
   case "$auth_kind" in
     nextcloud)
@@ -768,8 +796,14 @@ download_model() {
       ;;
   esac
 
-  curl "${curl_args[@]}" "$url"
-  mv "$partial" "$target"
+  if ! curl "${curl_args[@]}" "$url"; then
+    rm -f "$partial"
+    return 1
+  fi
+  if ! mv "$partial" "$target"; then
+    rm -f "$partial"
+    return 1
+  fi
 }
 
 ensure_model() {
@@ -783,7 +817,6 @@ ensure_model() {
   local auth_token=""
   local command_text
   local expected_result
-  local choice
 
   if [[ -n "$models_nextcloud_base" ]]; then
     download_url="$(nextcloud_model_url "$relative_path")"
@@ -810,35 +843,18 @@ Command: curl -L --fail -o '$relative_path' '$download_url'"
     return 0
   fi
 
-  while [[ ! -s "$target" ]]; do
-    if prompt_task_choice "$label" \
-      "Download the model file or place it manually in the expected local path." \
-      "$command_text" "$expected_result"; then
-      choice=0
-    else
-      choice=$?
-    fi
-    case "$choice" in
-      0)
-        if [[ "$may_need_token" == "true" ]]; then
-          prompt_hf_token_if_needed
-        fi
-        if download_model "$download_url" "$target" "$auth_kind" "$auth_token"; then
-          :
-        else
-          printf 'The task failed. Here is the command or URL again:\n%s\n' "$command_text"
-          wait_for_user_action "$label" "test -s '$target'" "$expected_result"
-        fi
-        ;;
-      1)
-        printf 'Installer stopped before %s.\n' "$label"
-        exit 1
-        ;;
-      2)
-        wait_for_user_action "$label" "test -s '$target'" "$expected_result"
-        ;;
-    esac
-  done
+  printf '\n%s selected from checkbox; downloading now.\n' "$label"
+  printf 'Selected from checkbox; downloading now.\n'
+  printf 'Command or URL I would use:\n%s\n' "$command_text"
+  if [[ "$may_need_token" == "true" ]]; then
+    prompt_hf_token_if_needed
+  fi
+  if download_model "$download_url" "$target" "$auth_kind" "$auth_token"; then
+    :
+  else
+    printf 'The task failed. Here is the command or URL again:\n%s\n' "$command_text"
+    wait_for_user_action "$label" "test -s '$target'" "$expected_result"
+  fi
 
   print_green_check "$label at $relative_path - done"
   add_summary "OK: $label at $relative_path"

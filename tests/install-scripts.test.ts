@@ -163,6 +163,25 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("runs selected checkbox downloads without per-item confirmation prompts", () => {
+    const shell = readRootScript("install.sh");
+    const powershell = readRootScript("install.ps1");
+
+    expect(shell).toContain("Selected from checkbox; downloading now.");
+    expect(shell).toContain("Selected runtimes will be downloaded now.");
+    expect(shell).not.toContain('prompt_task_choice "llama.cpp runtime"');
+    expect(shell).not.toContain(
+      '"Download the model file or place it manually in the expected local path."',
+    );
+
+    expect(powershell).toContain("Selected from checkbox; downloading now.");
+    expect(powershell).toContain("Selected runtimes will be downloaded now.");
+    expect(powershell).not.toContain("$RuntimeChoice = Read-TaskChoice");
+    expect(powershell).not.toContain(
+      '-Description "Download the model file or place it manually in the expected local path."',
+    );
+  });
+
   it("can override model downloads with a Nextcloud public share parameter", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

@@ -185,4 +185,18 @@ describe("interactive installer scripts", () => {
     expect(contents).toContain("-ArgumentList $NpmArguments");
     expect(contents).not.toContain('Start-Process -FilePath "npm"');
   });
+
+  it("isolates the PowerShell smoke dev server from the interactive console", () => {
+    const contents = readRootScript("install.ps1");
+
+    expect(contents).toContain("Stop-ProcessTree");
+    expect(contents).toContain("taskkill.exe");
+    expect(contents).toContain("/T");
+    expect(contents).toContain("/F");
+    expect(contents).toContain("$DevServerStdinPath");
+    expect(contents).toContain("$StdinPath");
+    expect(contents).toContain("-RedirectStandardInput $StdinPath");
+    expect(contents).toContain("$script:DevServerProcess = $null");
+    expect(contents).not.toContain("-NoNewWindow");
+  });
 });

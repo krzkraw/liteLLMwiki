@@ -10,6 +10,7 @@ $SmokePort = if ($env:INSTALL_SMOKE_PORT) { [int]$env:INSTALL_SMOKE_PORT } else 
 $SmokeUrl = "http://127.0.0.1:$SmokePort/"
 $Summary = [System.Collections.Generic.List[string]]::new()
 $DevServerProcess = $null
+$DevServerStdinPath = $null
 $ModelsNextcloudBase = $null
 $ModelsNextcloudToken = $null
 $LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
@@ -26,6 +27,12 @@ function Add-Summary {
 function Test-Command {
   param([string]$Name)
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Test-IsWindows {
+  return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows
+  )
 }
 
 function Write-GreenCheck {
@@ -759,16 +766,53 @@ function Wait-ForUrl {
 }
 
 function Stop-DevServer {
-  if (($null -ne $script:DevServerProcess) -and (-not $script:DevServerProcess.HasExited)) {
-    Stop-Process -Id $script:DevServerProcess.Id -ErrorAction SilentlyContinue
-    $script:DevServerProcess.WaitForExit()
+  if ($null -ne $script:DevServerProcess) {
+    Stop-ProcessTree -Process $script:DevServerProcess
+    $script:DevServerProcess = $null
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($script:DevServerStdinPath)) {
+    Remove-Item -Force -ErrorAction SilentlyContinue $script:DevServerStdinPath
+    $script:DevServerStdinPath = $null
+  }
+}
+
+function Stop-ProcessTree {
+  param([System.Diagnostics.Process]$Process)
+
+  if ($null -eq $Process) {
+    return
+  }
+
+  $ProcessId = $Process.Id
+  try {
+    if ($Process.HasExited) {
+      return
+    }
+  } catch {
+    return
+  }
+
+  if ((Test-IsWindows) -and (Test-Command "taskkill.exe")) {
+    & taskkill.exe /PID $ProcessId /T /F *> $null
+    try {
+      [void]$Process.WaitForExit(5000)
+    } catch {
+      # Process may already be gone after taskkill.
+    }
+    return
+  }
+
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  try {
+    [void]$Process.WaitForExit(5000)
+  } catch {
+    # Process may already be gone.
   }
 }
 
 function Get-NpmStartProcessSpec {
-  $RunningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
-    [System.Runtime.InteropServices.OSPlatform]::Windows
-  )
+  $RunningOnWindows = Test-IsWindows
 
   if ($RunningOnWindows) {
     foreach ($Name in @("npm.cmd", "npm.exe")) {
@@ -812,7 +856,10 @@ function Run-SmokeTests {
 
   $StdoutLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stdout.log"
   $StderrLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stderr.log"
+  $StdinPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stdin.txt"
   Remove-Item -Force -ErrorAction SilentlyContinue $StdoutLogPath, $StderrLogPath
+  Set-Content -Path $StdinPath -Value "" -NoNewline
+  $script:DevServerStdinPath = $StdinPath
   $NpmSpec = Get-NpmStartProcessSpec
   $NpmArguments = @($NpmSpec.PrefixArgs) + @(
     "run",
@@ -826,7 +873,7 @@ function Run-SmokeTests {
   )
   $script:DevServerProcess = Start-Process -FilePath $NpmSpec.FilePath -ArgumentList $NpmArguments `
     -WorkingDirectory $RepoRoot `
-    -NoNewWindow `
+    -RedirectStandardInput $StdinPath `
     -RedirectStandardOutput $StdoutLogPath `
     -RedirectStandardError $StderrLogPath `
     -PassThru

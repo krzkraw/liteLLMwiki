@@ -1508,25 +1508,131 @@ func (m Model) modelCatalogCardLines() []string {
 }
 
 func (m Model) logsView() string {
-	if len(m.logEntries) == 0 {
-		return renderPanel("Logs", []string{"No logs yet."}, "244")
+	signal := renderPanel("Log signal / Live cache", m.logSignalLines(), "82")
+	sources := renderPanel("Source activity / Streams", m.logSourceActivityLines(), "45")
+	recent := renderPanel("Recent log events", m.recentLogEventLines(16), "244")
+
+	if m.width >= 150 {
+		return joinPanels(
+			joinPanelRow(signal, sources),
+			recent,
+		)
 	}
 
+	return joinPanels(
+		signal,
+		sources,
+		recent,
+	)
+}
+
+func (m Model) logSignalLines() []string {
+	sourceCount, streamCount := m.logSourceAndStreamCounts()
+	latest := "none"
+	if len(m.logEntries) > 0 {
+		entry := m.logEntries[len(m.logEntries)-1]
+		latest = fmt.Sprintf("#%d %s/%s", entry.Seq, entry.Source, entry.Stream)
+	}
+
+	return []string{
+		formatSignalLine(
+			"Entries",
+			logSignalGlyph(len(m.logEntries)),
+			fmt.Sprintf("%d cached", len(m.logEntries)),
+			"latest: "+m.latestLogSource(),
+		),
+		formatSignalLine(
+			"Sources",
+			logSignalGlyph(sourceCount),
+			fmt.Sprintf("%d sources", sourceCount),
+			"LogBroadcaster.Snapshot",
+		),
+		formatSignalLine(
+			"Streams",
+			logSignalGlyph(streamCount),
+			fmt.Sprintf("%d channels", streamCount),
+			"logs.subscribe parity",
+		),
+		fmt.Sprintf("%-11s %s", "Latest", latest),
+		"Legend      ● active  ◐ empty  ! attention",
+	}
+}
+
+func (m Model) logSourceAndStreamCounts() (int, int) {
+	sources := map[string]struct{}{}
+	streams := map[string]struct{}{}
+	for _, entry := range m.logEntries {
+		sources[entry.Source] = struct{}{}
+		streams[entry.Source+"/"+entry.Stream] = struct{}{}
+	}
+	return len(sources), len(streams)
+}
+
+type logSourceStat struct {
+	source string
+	stream string
+	count  int
+	latest uint64
+}
+
+func (m Model) logSourceActivityLines() []string {
+	if len(m.logEntries) == 0 {
+		return []string{"No logs yet."}
+	}
+
+	stats := map[string]logSourceStat{}
+	for _, entry := range m.logEntries {
+		key := entry.Source + "\x00" + entry.Stream
+		stat := stats[key]
+		stat.source = entry.Source
+		stat.stream = entry.Stream
+		stat.count++
+		stat.latest = entry.Seq
+		stats[key] = stat
+	}
+
+	keys := make([]string, 0, len(stats))
+	for key := range stats {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		stat := stats[key]
+		lines = append(lines, fmt.Sprintf(
+			"%s %s %s %d entries latest #%d",
+			logSignalGlyph(stat.count),
+			stat.source,
+			stat.stream,
+			stat.count,
+			stat.latest,
+		))
+	}
+	lines = append(lines, "", "WebSocket logs.subscribe -> LogBroadcaster.Subscribe")
+	return lines
+}
+
+func (m Model) recentLogEventLines(limit int) []string {
+	if len(m.logEntries) == 0 {
+		return []string{"No logs yet."}
+	}
 	start := len(m.logEntries) - 16
 	if start < 0 {
 		start = 0
 	}
+	if limit > 0 {
+		start = len(m.logEntries) - limit
+		if start < 0 {
+			start = 0
+		}
+	}
 	lines := make([]string, 0, len(m.logEntries[start:]))
 	for _, entry := range m.logEntries[start:] {
-		lines = append(lines, fmt.Sprintf(
-			"#%d %s %s %s",
-			entry.Seq,
-			entry.Source,
-			entry.Stream,
-			entry.Line,
-		))
+		lines = append(lines, formatLogEntry(entry))
 	}
-	return renderPanel("Logs", lines, "244")
+	lines = append(lines, "", "WebSocket logs.subscribe -> LogBroadcaster.Subscribe")
+	return lines
 }
 
 func (m Model) settingsView() string {

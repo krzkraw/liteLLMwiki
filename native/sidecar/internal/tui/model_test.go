@@ -904,6 +904,48 @@ func TestModelLogsViewShowsRecentEntries(t *testing.T) {
 	}
 }
 
+func TestLogsTabRendersDiagnosticsPanels(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "runtime ready")
+	logs.Publish("runner:main-litert", "stderr", "warning: slow prompt")
+	logs.Publish("runner:embed-qwen", "stdout", "embedding model ready")
+	logs.Publish("sidecar", "stdout", "route map refreshed")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+	})
+	model.width = 180
+	model.height = 48
+	model.setActiveTab("logs")
+	view := model.View()
+
+	for _, expected := range []string{
+		"Log signal / Live cache",
+		"Entries     ● 4 cached    latest: sidecar/stdout",
+		"Sources     ● 3 sources   LogBroadcaster.Snapshot",
+		"Streams     ● 4 channels  logs.subscribe parity",
+		"Latest      #4 sidecar/stdout",
+		"Source activity / Streams",
+		"● runner:main-litert stderr 1 entries latest #2",
+		"● runner:main-litert stdout 1 entries latest #1",
+		"● runner:embed-qwen stdout 1 entries latest #3",
+		"● sidecar stdout 1 entries latest #4",
+		"Recent log events",
+		"#4 sidecar stdout route map refreshed",
+		"WebSocket logs.subscribe -> LogBroadcaster.Subscribe",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("logs view missing diagnostics content %q:\n%s", expected, view)
+		}
+	}
+	if !viewLineContainsAll(view, "Log signal / Live cache", "Source activity / Streams") {
+		t.Fatalf("wide logs tab did not place signal beside source activity:\n%s", view)
+	}
+}
+
 func TestModelModelsViewShowsCatalogEntries(t *testing.T) {
 	t.Parallel()
 

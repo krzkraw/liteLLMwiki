@@ -76,6 +76,10 @@ readiness panel for required artifacts, a runner creation/action parity panel,
 and catalog cards that show runtime, role, target file, progress, and any
 download error for each artifact. On wide terminals it pairs readiness beside
 actions so download state and runnable presets stay visible together.
+The Logs tab turns the `LogBroadcaster` cache into a live diagnostics view with
+cache health, source/stream activity, recent events, and the matching
+WebSocket `logs.subscribe` path. On wide terminals it pairs log signal state
+beside source activity so noisy runtime output stays scannable.
 
 By default it:
 

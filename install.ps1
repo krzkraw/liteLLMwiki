@@ -1,4 +1,6 @@
-param()
+param(
+  [string]$modelsNextcloud = $env:MODELS_NEXTCLOUD
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -8,6 +10,8 @@ $SmokePort = if ($env:INSTALL_SMOKE_PORT) { [int]$env:INSTALL_SMOKE_PORT } else 
 $SmokeUrl = "http://127.0.0.1:$SmokePort/"
 $Summary = [System.Collections.Generic.List[string]]::new()
 $DevServerProcess = $null
+$ModelsNextcloudBase = $null
+$ModelsNextcloudToken = $null
 
 Set-Location $RepoRoot
 
@@ -34,6 +38,36 @@ function Invoke-RunLogged {
     throw "$Label failed with exit code $LASTEXITCODE"
   }
   Add-Summary "PASS: $Label"
+}
+
+function Initialize-ModelsNextcloud {
+  param([string]$Share)
+
+  if ([string]::IsNullOrWhiteSpace($Share)) {
+    return
+  }
+
+  $Trimmed = $Share.TrimEnd("/")
+  if ($Trimmed -match "^(https?://[^/]+)/s/([^/?#]+)") {
+    $script:ModelsNextcloudBase = $Matches[1]
+    $script:ModelsNextcloudToken = $Matches[2]
+    return
+  }
+
+  throw "modelsNextcloud must be a Nextcloud public share URL like https://nextcloud.example/s/share-token"
+}
+
+function Get-NextcloudModelUrl {
+  param([string]$RelativePath)
+
+  return "$script:ModelsNextcloudBase/public.php/webdav/$RelativePath"
+}
+
+function Get-BasicAuthorizationHeader {
+  param([string]$Token)
+
+  $Bytes = [Text.Encoding]::ASCII.GetBytes("${Token}:")
+  return "Basic $([Convert]::ToBase64String($Bytes))"
 }
 
 function Get-PackageInstallCommand {
@@ -141,7 +175,9 @@ function Prompt-HfTokenIfNeeded {
 function Download-Model {
   param(
     [string]$Url,
-    [string]$Target
+    [string]$Target,
+    [string]$AuthKind = "huggingface",
+    [string]$AuthToken = ""
   )
 
   $Directory = Split-Path -Parent $Target
@@ -150,10 +186,14 @@ function Download-Model {
   Remove-Item -Force -ErrorAction SilentlyContinue $Partial
 
   $Headers = @{}
-  if ($env:HF_TOKEN) {
-    $Headers["Authorization"] = "Bearer $($env:HF_TOKEN)"
-  } elseif ($env:HUGGING_FACE_HUB_TOKEN) {
-    $Headers["Authorization"] = "Bearer $($env:HUGGING_FACE_HUB_TOKEN)"
+  if ($AuthKind -eq "nextcloud") {
+    $Headers["Authorization"] = Get-BasicAuthorizationHeader -Token $AuthToken
+  } else {
+    if ($env:HF_TOKEN) {
+      $Headers["Authorization"] = "Bearer $($env:HF_TOKEN)"
+    } elseif ($env:HUGGING_FACE_HUB_TOKEN) {
+      $Headers["Authorization"] = "Bearer $($env:HUGGING_FACE_HUB_TOKEN)"
+    }
   }
 
   Invoke-WebRequest -Uri $Url -OutFile $Partial -Headers $Headers
@@ -169,7 +209,23 @@ function Ensure-Model {
   )
 
   $Target = Join-Path $RepoRoot $RelativePath
-  $CommandText = "URL: $Url`nPath: $RelativePath`nCommand: Invoke-WebRequest -Uri '$Url' -OutFile '$RelativePath'"
+  $DownloadUrl = $Url
+  $DownloadAuthKind = "huggingface"
+  $DownloadAuthToken = ""
+  $NeedsToken = $MayNeedToken
+
+  if ($script:ModelsNextcloudBase) {
+    $DownloadUrl = Get-NextcloudModelUrl -RelativePath $RelativePath
+    $DownloadAuthKind = "nextcloud"
+    $DownloadAuthToken = $script:ModelsNextcloudToken
+    $NeedsToken = $false
+  }
+
+  if ($DownloadAuthKind -eq "nextcloud") {
+    $CommandText = "URL: $DownloadUrl`nPath: $RelativePath`nCommand: Invoke-WebRequest -Uri '$DownloadUrl' -Headers @{ Authorization = 'Basic <modelsNextcloud-token>' } -OutFile '$RelativePath'"
+  } else {
+    $CommandText = "URL: $DownloadUrl`nPath: $RelativePath`nCommand: Invoke-WebRequest -Uri '$DownloadUrl' -OutFile '$RelativePath'"
+  }
 
   if ((Test-Path $Target) -and ((Get-Item $Target).Length -gt 0)) {
     Add-Summary "OK: $Label at $RelativePath"
@@ -183,11 +239,11 @@ function Ensure-Model {
   while ((-not (Test-Path $Target)) -or ((Get-Item $Target -ErrorAction SilentlyContinue).Length -eq 0)) {
     $Answer = Read-Host "Do you want me to do it? [y/N]"
     if ($Answer -match "^(y|yes)$") {
-      if ($MayNeedToken) {
+      if ($NeedsToken) {
         Prompt-HfTokenIfNeeded
       }
       try {
-        Download-Model -Url $Url -Target $Target
+        Download-Model -Url $DownloadUrl -Target $Target -AuthKind $DownloadAuthKind -AuthToken $DownloadAuthToken
       } catch {
         Write-Host "The task failed. Here is the command or URL again:"
         Write-Host $CommandText
@@ -204,6 +260,8 @@ function Ensure-Model {
 
   Add-Summary "OK: $Label at $RelativePath"
 }
+
+Initialize-ModelsNextcloud -Share $modelsNextcloud
 
 function Ensure-NpmDependencies {
   Invoke-ConfirmOrWait -Label "npm dependencies" -CommandText "npm install" -Check {

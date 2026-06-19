@@ -58,6 +58,17 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("can override model downloads with a Nextcloud public share parameter", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("modelsNextcloud");
+      expect(contents).toContain("public.php/webdav");
+      expect(contents).toContain("Authorization");
+      expect(contents).toContain("nextcloud.example");
+    }
+  });
+
   it("installs npm dependencies, builds artifacts, runs smoke checks, and prints a summary", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

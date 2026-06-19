@@ -5,6 +5,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 smoke_port="${INSTALL_SMOKE_PORT:-5177}"
 smoke_url="http://127.0.0.1:${smoke_port}/"
 dev_server_pid=""
+models_nextcloud="${MODELS_NEXTCLOUD:-}"
+models_nextcloud_base=""
+models_nextcloud_token=""
 summary=()
 
 cd "$repo_root"
@@ -24,6 +27,74 @@ run_logged() {
   printf '\n==> %s\n' "$label"
   "$@"
   add_summary "PASS: $label"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: ./install.sh [modelsNextcloud=<public-share-url>]
+
+Options:
+  modelsNextcloud    Optional Nextcloud public share URL for model downloads.
+                     Example: modelsNextcloud=https://nextcloud.example/s/share-token
+
+Environment:
+  MODELS_NEXTCLOUD   Same as modelsNextcloud.
+USAGE
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      modelsNextcloud=*)
+        models_nextcloud="${1#modelsNextcloud=}"
+        ;;
+      --modelsNextcloud=*)
+        models_nextcloud="${1#--modelsNextcloud=}"
+        ;;
+      modelsNextcloud|--modelsNextcloud)
+        shift
+        if [[ $# -eq 0 ]]; then
+          printf 'modelsNextcloud requires a public share URL.\n' >&2
+          usage >&2
+          exit 2
+        fi
+        models_nextcloud="$1"
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        printf 'Unknown argument: %s\n' "$1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+    shift
+  done
+}
+
+configure_models_nextcloud() {
+  local share="${models_nextcloud%/}"
+
+  if [[ -z "$share" ]]; then
+    return 0
+  fi
+
+  if [[ "$share" =~ ^(https?://[^/]+)/s/([^/?#]+) ]]; then
+    models_nextcloud_base="${BASH_REMATCH[1]}"
+    models_nextcloud_token="${BASH_REMATCH[2]}"
+    return 0
+  fi
+
+  printf 'modelsNextcloud must be a Nextcloud public share URL like https://nextcloud.example/s/share-token\n' >&2
+  exit 2
+}
+
+nextcloud_model_url() {
+  local relative_path="$1"
+
+  printf '%s/public.php/webdav/%s\n' "$models_nextcloud_base" "$relative_path"
 }
 
 package_install_command() {
@@ -277,15 +348,24 @@ prompt_hf_token_if_needed() {
 download_model() {
   local url="$1"
   local target="$2"
+  local auth_kind="${3:-huggingface}"
+  local auth_token="${4:-}"
   local partial="${target}.partial"
   local curl_args=(-L --fail --output "$partial")
 
   mkdir -p "$(dirname "$target")"
   rm -f "$partial"
 
-  if [[ -n "${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}" ]]; then
-    curl_args+=(-H "Authorization: Bearer ${HF_TOKEN:-$HUGGING_FACE_HUB_TOKEN}")
-  fi
+  case "$auth_kind" in
+    nextcloud)
+      curl_args+=(-u "${auth_token}:")
+      ;;
+    huggingface|*)
+      if [[ -n "${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}" ]]; then
+        curl_args+=(-H "Authorization: Bearer ${HF_TOKEN:-$HUGGING_FACE_HUB_TOKEN}")
+      fi
+      ;;
+  esac
 
   curl "${curl_args[@]}" "$url"
   mv "$partial" "$target"
@@ -297,11 +377,28 @@ ensure_model() {
   local url="$3"
   local may_need_token="${4:-false}"
   local target="$repo_root/$relative_path"
+  local download_url="$url"
+  local auth_kind="huggingface"
+  local auth_token=""
   local command_text
 
-  command_text="URL: $url
+  if [[ -n "$models_nextcloud_base" ]]; then
+    download_url="$(nextcloud_model_url "$relative_path")"
+    auth_kind="nextcloud"
+    auth_token="$models_nextcloud_token"
+    may_need_token="false"
+  fi
+
+  if [[ "$auth_kind" == "nextcloud" ]]; then
+    command_text="URL: $download_url
 Path: $relative_path
-Command: curl -L --fail -o '$relative_path' '$url'"
+Command: curl -L --fail -u '<modelsNextcloud-token>:' -o '$relative_path' '$download_url'
+Header: Authorization: Basic <modelsNextcloud-token>"
+  else
+    command_text="URL: $download_url
+Path: $relative_path
+Command: curl -L --fail -o '$relative_path' '$download_url'"
+  fi
 
   if [[ -s "$target" ]]; then
     add_summary "OK: $label at $relative_path"
@@ -319,7 +416,7 @@ Command: curl -L --fail -o '$relative_path' '$url'"
         if [[ "$may_need_token" == "true" ]]; then
           prompt_hf_token_if_needed
         fi
-        if download_model "$url" "$target"; then
+        if download_model "$download_url" "$target" "$auth_kind" "$auth_token"; then
           :
         else
           printf 'The task failed. Here is the command or URL again:\n%s\n' "$command_text"
@@ -451,4 +548,6 @@ main() {
   print_summary
 }
 
-main "$@"
+parse_args "$@"
+configure_models_nextcloud
+main

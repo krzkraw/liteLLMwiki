@@ -77,6 +77,17 @@ Windows PowerShell:
 .\install.ps1
 ```
 
+To use a Nextcloud public share as the model download source instead of the
+default Hugging Face URLs, pass the share URL at install time:
+
+```bash
+./install.sh modelsNextcloud=https://nextcloud.example/s/share-token
+```
+
+```powershell
+.\install.ps1 -modelsNextcloud "https://nextcloud.example/s/share-token"
+```
+
 The installer checks local tools, npm dependencies, sidecar artifacts, and known
 model paths. For every missing system dependency or model download it prints the
 command or browser URL plus destination path first, then asks whether it should

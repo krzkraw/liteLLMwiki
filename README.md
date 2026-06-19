@@ -105,6 +105,15 @@ Then start the sidecar manually from the same directory tree the web UI uses:
   -runtime-exe /path/to/litert-lm
 ```
 
+The sidecar opens an interactive terminal dashboard by default. Use
+`--headless` for browser automation, scripts, CI, or any non-interactive launch:
+
+```bash
+./native/sidecar-artifacts/litert-sidecar-darwin-arm64/litert-sidecar \
+  --headless \
+  -runtime-exe /path/to/litert-lm
+```
+
 The sidecar searches for `litert-lm`, imports
 `models/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
 `litert-lm serve --host 127.0.0.1 --port 9381`.

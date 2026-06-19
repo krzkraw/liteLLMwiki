@@ -82,6 +82,13 @@ func (b *LogBroadcaster) Subscribe() ([]LogEntry, <-chan LogEntry, func()) {
 	return snapshot, ch, unsubscribe
 }
 
+func (b *LogBroadcaster) Snapshot() []LogEntry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return append([]LogEntry(nil), b.ring...)
+}
+
 func (b *LogBroadcaster) LatestSeq() uint64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()

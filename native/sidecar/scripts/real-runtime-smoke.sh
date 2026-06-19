@@ -103,6 +103,7 @@ printf 'Building sidecar...\n'
 )
 
 sidecar_args=(
+  --headless
   -addr "$sidecar_addr"
   -upstream "$upstream_url"
   -runtime-exe "$runtime_exe"

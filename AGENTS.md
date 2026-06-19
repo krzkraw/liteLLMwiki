@@ -31,6 +31,9 @@ selected from disk in the UI.
   only `README.md` tracked.
 - `native/sidecar/cmd/` - Go sidecar entry point.
 - `native/sidecar/internal/` - Go sidecar runtime, proxy, server, WebSocket logic.
+- `native/sidecar/internal/supervisor/` - multi-runner process supervisor and
+  route authority.
+- `native/sidecar/internal/tui/` - Bubble Tea terminal dashboard.
 - `native/sidecar/scripts/` - release and real-runtime smoke helpers.
 
 ## Verification Commands

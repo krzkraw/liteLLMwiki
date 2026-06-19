@@ -15,6 +15,10 @@ go build -o litert-sidecar ./cmd/litert-sidecar
 ./litert-sidecar
 ```
 
+`./litert-sidecar` starts the HTTP/WebSocket sidecar and opens the interactive
+terminal dashboard. Use `./litert-sidecar --headless` for browser automation,
+smoke tests, CI, or any process without a TTY.
+
 By default it:
 
 - searches for `litert-lm` on `PATH` or beside the sidecar binary;

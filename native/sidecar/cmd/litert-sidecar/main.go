@@ -20,6 +20,14 @@ import (
 	"litert-sidecar/internal/proxy"
 	"litert-sidecar/internal/server"
 	"litert-sidecar/internal/supervisor"
+	"litert-sidecar/internal/tui"
+)
+
+type launchMode string
+
+const (
+	sidecarModeTUI      launchMode = "tui"
+	sidecarModeHeadless launchMode = "headless"
 )
 
 func main() {
@@ -35,7 +43,6 @@ func main() {
 	runtimeVerbose := flag.Bool("runtime-verbose", false, "pass --verbose to litert-lm serve")
 	headless := flag.Bool("headless", false, "run without the interactive terminal UI")
 	flag.Parse()
-	_ = headless
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -117,11 +124,29 @@ func main() {
 		serverErr <- httpServer.ListenAndServe()
 	}()
 
-	select {
-	case <-ctx.Done():
-	case err := <-serverErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("serve sidecar: %v", err)
+	if sidecarMode(*headless) == sidecarModeTUI {
+		tuiErr := make(chan error, 1)
+		go func() {
+			tuiErr <- tui.Run(ctx, runtimeSupervisor, logs)
+		}()
+		select {
+		case <-ctx.Done():
+		case err := <-serverErr:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("serve sidecar: %v", err)
+			}
+		case err := <-tuiErr:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("run sidecar TUI: %v", err)
+			}
+		}
+	} else {
+		select {
+		case <-ctx.Done():
+		case err := <-serverErr:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("serve sidecar: %v", err)
+			}
 		}
 	}
 
@@ -133,6 +158,13 @@ func main() {
 	if err := runtimeSupervisor.StopRunner(shutdownCtx, supervisor.DefaultMainRunnerID); err != nil && !errors.Is(err, context.Canceled) {
 		log.Printf("stop litert-lm runtime: %v", err)
 	}
+}
+
+func sidecarMode(headless bool) launchMode {
+	if headless {
+		return sidecarModeHeadless
+	}
+	return sidecarModeTUI
 }
 
 type supervisorRuntimeController struct {

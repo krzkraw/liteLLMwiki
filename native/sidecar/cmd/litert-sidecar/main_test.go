@@ -52,6 +52,17 @@ func TestModelsEndpointHandlesBaseAndV1Upstreams(t *testing.T) {
 	}
 }
 
+func TestSidecarModeDefaultsToTUI(t *testing.T) {
+	t.Parallel()
+
+	if got := sidecarMode(false); got != sidecarModeTUI {
+		t.Fatalf("default mode = %q, want TUI", got)
+	}
+	if got := sidecarMode(true); got != sidecarModeHeadless {
+		t.Fatalf("headless mode = %q, want headless", got)
+	}
+}
+
 func TestSupervisorRuntimeControllerMapsLegacyExternalConfig(t *testing.T) {
 	t.Parallel()
 

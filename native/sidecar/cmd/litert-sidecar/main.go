@@ -134,7 +134,7 @@ func main() {
 	if sidecarMode(*headless) == sidecarModeTUI {
 		tuiErr := make(chan error, 1)
 		go func() {
-			tuiErr <- tui.Run(ctx, runtimeSupervisor, logs, modelCatalog)
+			tuiErr <- tui.Run(ctx, runtimeController, runnerController, logs, modelCatalog)
 		}()
 		select {
 		case <-ctx.Done():

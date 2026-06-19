@@ -3,14 +3,15 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/server"
-	"litert-sidecar/internal/supervisor"
 )
 
 const refreshInterval = time.Second
@@ -20,43 +21,93 @@ type tab struct {
 	label string
 }
 
-var tabs = []tab{
-	{id: "dashboard", label: "Dashboard"},
-	{id: "runners", label: "Runners"},
-	{id: "launch", label: "Launch Wizard"},
-	{id: "chat", label: "Chat"},
-	{id: "models", label: "Models"},
-	{id: "logs", label: "Logs"},
-	{id: "settings", label: "Settings"},
+type ModelOptions struct {
+	RuntimeController server.RuntimeController
+	RunnerController  server.RunnerController
+	Logs              *server.LogBroadcaster
+	Catalog           *catalog.Catalog
+	Context           context.Context
 }
 
 type tickMsg time.Time
 
+type runnerActionMsg struct {
+	action string
+	id     string
+	err    error
+}
+
+type runtimeActionMsg struct {
+	action string
+	mode   server.RuntimeMode
+	err    error
+}
+
 type Model struct {
-	supervisor *supervisor.Supervisor
-	logs       *server.LogBroadcaster
-	catalog    *catalog.Catalog
+	runtimeController server.RuntimeController
+	runnerController  server.RunnerController
+	logs              *server.LogBroadcaster
+	catalog           *catalog.Catalog
+	ctx               context.Context
+
 	active     int
 	width      int
 	height     int
-	snapshot   supervisor.Snapshot
-	runtime    supervisor.RuntimeStatus
+	snapshot   server.RunnerSnapshotResponse
+	runtime    server.RuntimeStatus
 	logEntries []server.LogEntry
 	models     []catalog.Entry
+	notice     string
 }
 
-func NewModel(
-	runtimeSupervisor *supervisor.Supervisor,
-	logs *server.LogBroadcaster,
-	modelCatalog ...*catalog.Catalog,
-) Model {
-	model := Model{
-		supervisor: runtimeSupervisor,
-		logs:       logs,
-		active:     0,
+var asciiBorder = lipgloss.Border{
+	Top:         "-",
+	Bottom:      "-",
+	Left:        "|",
+	Right:       "|",
+	TopLeft:     "+",
+	TopRight:    "+",
+	BottomLeft:  "+",
+	BottomRight: "+",
+}
+
+var (
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("45"))
+	subtitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("205"))
+	tabStyle = lipgloss.NewStyle().
+			Padding(0, 1).
+			Foreground(lipgloss.Color("250")).
+			Background(lipgloss.Color("236"))
+	activeTabStyle = lipgloss.NewStyle().
+			Bold(true).
+			Padding(0, 1).
+			Foreground(lipgloss.Color("16")).
+			Background(lipgloss.Color("39"))
+	noticeStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("16")).
+			Background(lipgloss.Color("82")).
+			Padding(0, 1)
+	mutedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244"))
+)
+
+func NewModel(options ModelOptions) Model {
+	ctx := options.Context
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if len(modelCatalog) > 0 {
-		model.catalog = modelCatalog[0]
+	model := Model{
+		runtimeController: options.RuntimeController,
+		runnerController:  options.RunnerController,
+		logs:              options.Logs,
+		catalog:           options.Catalog,
+		ctx:               ctx,
+		active:            0,
 	}
 	model.refresh()
 	return model
@@ -64,12 +115,19 @@ func NewModel(
 
 func Run(
 	ctx context.Context,
-	runtimeSupervisor *supervisor.Supervisor,
+	runtimeController server.RuntimeController,
+	runnerController server.RunnerController,
 	logs *server.LogBroadcaster,
 	modelCatalog *catalog.Catalog,
 ) error {
 	program := tea.NewProgram(
-		NewModel(runtimeSupervisor, logs, modelCatalog),
+		NewModel(ModelOptions{
+			RuntimeController: runtimeController,
+			RunnerController:  runnerController,
+			Logs:              logs,
+			Catalog:           modelCatalog,
+			Context:           ctx,
+		}),
 		tea.WithContext(ctx),
 	)
 	_, err := program.Run()
@@ -86,19 +144,58 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
-			return m, tea.Quit
-		case tea.KeyRight, tea.KeyTab:
-			m.active = (m.active + 1) % len(tabs)
-		case tea.KeyLeft, tea.KeyShiftTab:
-			m.active = (m.active + len(tabs) - 1) % len(tabs)
-		case tea.KeyRunes:
-			m.selectRuneTab(msg.String())
-		}
+		return m.updateKey(msg)
 	case tickMsg:
 		m.refresh()
 		return m, tick()
+	case runnerActionMsg:
+		m.refresh()
+		m.notice = m.actionNotice(msg)
+	case runtimeActionMsg:
+		m.refresh()
+		m.notice = m.runtimeActionNotice(msg)
+	}
+
+	return m, nil
+}
+
+func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC, tea.KeyEsc:
+		return m, tea.Quit
+	case tea.KeyRight, tea.KeyTab:
+		m.active = (m.active + 1) % len(m.tabs())
+		return m, nil
+	case tea.KeyLeft, tea.KeyShiftTab:
+		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+		return m, nil
+	case tea.KeyRunes:
+		value := msg.String()
+		if m.selectRuneTab(value) {
+			return m, nil
+		}
+		if m.activeTabID() == "settings" {
+			switch strings.ToLower(value) {
+			case "s":
+				return m, m.runtimeActionCmd("start", server.RuntimeModeRelease)
+			case "d":
+				return m, m.runtimeActionCmd("start", server.RuntimeModeDebug)
+			case "x":
+				return m, m.runtimeActionCmd("stop", "")
+			case "r":
+				return m, m.runtimeActionCmd("restart", server.RuntimeModeRelease)
+			}
+		}
+		if runner, ok := m.activeRunner(); ok {
+			switch strings.ToLower(value) {
+			case "s":
+				return m, m.runnerActionCmd("start", runner.ID)
+			case "x":
+				return m, m.runnerActionCmd("stop", runner.ID)
+			case "r":
+				return m, m.runnerActionCmd("restart", runner.ID)
+			}
+		}
 	}
 
 	return m, nil
@@ -106,41 +203,76 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	var builder strings.Builder
-	builder.WriteString("LiteRT sidecar\n")
+	builder.WriteString(titleStyle.Render("LiteRT sidecar"))
+	if m.width > 0 || m.height > 0 {
+		builder.WriteString(mutedStyle.Render(fmt.Sprintf("  %dx%d", m.width, m.height)))
+	}
+	builder.WriteString("\n")
 	builder.WriteString(m.tabBar())
 	builder.WriteString("\n\n")
+	if strings.TrimSpace(m.notice) != "" {
+		builder.WriteString(noticeStyle.Render(m.notice))
+		builder.WriteString("\n\n")
+	}
 
 	switch m.activeTabID() {
 	case "dashboard":
 		builder.WriteString(m.dashboardView())
-	case "runners":
-		builder.WriteString(m.runnersView())
-	case "launch":
-		builder.WriteString(m.launchView())
-	case "chat":
-		builder.WriteString(m.chatView())
 	case "models":
 		builder.WriteString(m.modelsView())
 	case "logs":
 		builder.WriteString(m.logsView())
 	case "settings":
 		builder.WriteString(m.settingsView())
+	default:
+		if runner, ok := m.activeRunner(); ok {
+			builder.WriteString(m.runnerView(runner))
+		} else {
+			builder.WriteString(renderPanel("Runner", []string{"No runner selected."}, "196"))
+		}
 	}
 
 	return builder.String()
 }
 
 func (m Model) activeTabID() string {
+	tabs := m.tabs()
+	if len(tabs) == 0 {
+		return "dashboard"
+	}
 	if m.active < 0 || m.active >= len(tabs) {
 		return tabs[0].id
 	}
 	return tabs[m.active].id
 }
 
+func (m Model) tabs() []tab {
+	result := []tab{{id: "dashboard", label: "Dashboard"}}
+	for _, runner := range m.snapshot.Runners {
+		label := runner.ID
+		if len(label) > 18 {
+			label = label[:17] + "."
+		}
+		result = append(result, tab{
+			id:    "runner:" + runner.ID,
+			label: label,
+		})
+	}
+	result = append(
+		result,
+		tab{id: "models", label: "Models"},
+		tab{id: "logs", label: "Logs"},
+		tab{id: "settings", label: "Settings"},
+	)
+	return result
+}
+
 func (m *Model) refresh() {
-	if m.supervisor != nil {
-		m.snapshot = m.supervisor.Snapshot()
-		m.runtime = m.supervisor.LegacyStatus()
+	if m.runtimeController != nil {
+		m.runtime = m.runtimeController.Status()
+	}
+	if m.runnerController != nil {
+		m.snapshot = m.runnerController.Snapshot()
 	}
 	if m.logs != nil {
 		m.logEntries = m.logs.Snapshot()
@@ -148,121 +280,330 @@ func (m *Model) refresh() {
 	if m.catalog != nil {
 		m.models = m.catalog.Entries()
 	}
-}
-
-func (m *Model) selectRuneTab(value string) {
-	switch value {
-	case "1":
+	if m.active >= len(m.tabs()) {
 		m.active = 0
-	case "2":
-		m.active = 1
-	case "3":
-		m.active = 2
-	case "4":
-		m.active = 3
-	case "5":
-		m.active = 4
-	case "6":
-		m.active = 5
-	case "7":
-		m.active = 6
 	}
 }
 
+func (m *Model) selectRuneTab(value string) bool {
+	if len(value) != 1 {
+		return false
+	}
+	index := int(value[0] - '1')
+	if index < 0 || index >= len(m.tabs()) {
+		return false
+	}
+	m.active = index
+	return true
+}
+
+func (m Model) activeRunner() (server.RunnerSnapshot, bool) {
+	id := strings.TrimPrefix(m.activeTabID(), "runner:")
+	if id == m.activeTabID() {
+		return server.RunnerSnapshot{}, false
+	}
+	for _, runner := range m.snapshot.Runners {
+		if runner.ID == id {
+			return runner, true
+		}
+	}
+	return server.RunnerSnapshot{}, false
+}
+
 func (m Model) tabBar() string {
+	tabs := m.tabs()
 	parts := make([]string, 0, len(tabs))
 	for index, item := range tabs {
 		label := fmt.Sprintf("%d %s", index+1, item.label)
 		if index == m.active {
-			label = "[" + label + "]"
+			parts = append(parts, activeTabStyle.Render(label))
+			continue
 		}
-		parts = append(parts, label)
+		parts = append(parts, tabStyle.Render(label))
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, " ")
 }
 
 func (m Model) dashboardView() string {
-	var builder strings.Builder
-	builder.WriteString("Dashboard\n")
-	builder.WriteString(fmt.Sprintf("Runtime: %s\n", fallback(m.runtime.State, "unknown")))
-	builder.WriteString(fmt.Sprintf("Model: %s\n", fallback(m.runtime.ModelID, "unconfigured")))
-	builder.WriteString(fmt.Sprintf("Upstream: %s\n", fallback(m.runtime.Upstream, "unavailable")))
-	builder.WriteString(fmt.Sprintf("Logs: %d entries\n", len(m.logEntries)))
-	return builder.String()
+	specs := []string{
+		formatKV("State", statusBadge(m.runtime.State)),
+		formatKV("Executable", fallback(m.runtime.Executable, "not configured")),
+		formatKV("Version", fallback(m.runtime.Version, "unknown")),
+		formatKV("Model", fallback(m.runtime.ModelID, "unconfigured")),
+		formatKV("Model file", fallback(m.runtime.ModelFile, "not configured")),
+		formatKV("Upstream", fallback(m.runtime.Upstream, "unavailable")),
+		formatKV("Mode", fallback(m.runtime.Mode, "release")),
+		formatKV("Logs", fmt.Sprintf("%d entries", len(m.logEntries))),
+	}
+	if m.runtime.Detail != "" {
+		specs = append(specs, formatKV("Detail", m.runtime.Detail))
+	}
+
+	return strings.Join([]string{
+		renderPanel("Dashboard", []string{
+			"Specs",
+			strings.Join(specs, "\n"),
+		}, "45"),
+		renderPanel("Runnable backends", m.backendLines(), "82"),
+		renderPanel("Routes", m.routeLines(), "214"),
+		renderPanel("Hotkeys", []string{
+			"Tab/Right: next tab",
+			"Shift+Tab/Left: previous tab",
+			"Number keys: jump tabs",
+			"Runner tabs: s Start, x Stop, r Restart",
+			"Esc/Ctrl+C: quit",
+		}, "205"),
+	}, "\n\n")
 }
 
-func (m Model) runnersView() string {
-	var builder strings.Builder
-	builder.WriteString("Runners\n")
+func (m Model) backendLines() []string {
 	if len(m.snapshot.Runners) == 0 {
-		builder.WriteString("No runners configured.\n")
-		return builder.String()
+		return []string{"No runners configured."}
 	}
+
+	lines := make([]string, 0, len(m.snapshot.Runners))
 	for _, runner := range m.snapshot.Runners {
-		builder.WriteString(fmt.Sprintf(
-			"- %s %s/%s %s %s\n",
+		lines = append(lines, fmt.Sprintf(
+			"%s  %s/%s  %s  %s",
+			statusBadge(runner.State),
+			fallback(runner.Runtime, "runtime"),
+			fallback(runner.Role, "role"),
+			fallback(runner.Backend, "backend"),
 			runner.ID,
-			runner.Runtime,
-			runner.Role,
-			runner.State,
-			fallback(runner.Upstream, "no upstream"),
 		))
 	}
-	return builder.String()
+	return lines
 }
 
-func (m Model) launchView() string {
-	return "Launch Wizard\nRole, runtime, backend, model, port, and advanced arguments will be launched through the supervisor.\n"
+func (m Model) routeLines() []string {
+	if len(m.snapshot.Routes) == 0 {
+		return []string{"No route authority configured."}
+	}
+
+	keys := make([]string, 0, len(m.snapshot.Routes))
+	for key := range m.snapshot.Routes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		lines = append(lines, fmt.Sprintf("%s -> %s", key, m.snapshot.Routes[key]))
+	}
+	return lines
 }
 
-func (m Model) chatView() string {
-	return "Chat\nSelect a running main runner to send OpenAI-compatible chat requests.\n"
+func (m Model) runnerView(runner server.RunnerSnapshot) string {
+	settings := []string{
+		formatKV("Runtime", fallback(runner.Runtime, "unknown")),
+		formatKV("Role", fallback(runner.Role, "unknown")),
+		formatKV("Backend", fallback(runner.Backend, "default")),
+		formatKV("Executable", fallback(runner.Executable, "auto-discover")),
+		formatKV("Version", fallback(runner.Version, "unknown")),
+		formatKV("Model path", fallback(runner.ModelPath, "not configured")),
+		formatKV("Model ID", fallback(runner.ModelID, "not configured")),
+		formatKV("Host", fallback(runner.Host, "127.0.0.1")),
+		formatKV("Port", fallbackInt(runner.Port, "auto")),
+		formatKV("Launch", runnerLaunchMode(runner)),
+		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
+	}
+
+	details := []string{
+		formatKV("State", statusBadge(runner.State)),
+		formatKV("PID", fallbackInt(runner.PID, "not running")),
+		formatKV("Command", commandLine(runner.Command)),
+		formatKV("Capabilities", capabilitiesLine(runner.Capabilities)),
+		formatKV("Last error", fallback(runner.LastError, "none")),
+		formatKV("Log sequence", fallbackUint(runner.LogSequence, "none")),
+	}
+	if runner.Detail != "" {
+		details = append(details, formatKV("Detail", runner.Detail))
+	}
+
+	return strings.Join([]string{
+		renderPanel("Runner "+runner.ID, []string{
+			"Controls",
+			"s Start   x Stop   r Restart",
+		}, "39"),
+		renderPanel("Settings", settings, "45"),
+		renderPanel("Details", details, "214"),
+	}, "\n\n")
 }
 
 func (m Model) modelsView() string {
-	var builder strings.Builder
-	builder.WriteString("Models\n")
+	lines := []string{}
 	if len(m.models) == 0 {
-		builder.WriteString("No model catalog configured.\n")
-		return builder.String()
+		lines = append(lines, "No model catalog configured.")
+	} else {
+		for _, entry := range m.models {
+			lines = append(lines, fmt.Sprintf(
+				"%s  %s  %s",
+				statusBadge(string(entry.State)),
+				entry.ID,
+				fallback(entry.TargetPath, "no target path"),
+			))
+		}
 	}
-	for _, entry := range m.models {
-		builder.WriteString(fmt.Sprintf(
-			"- %s %s %s\n",
-			entry.ID,
-			entry.State,
-			entry.TargetPath,
-		))
-	}
-	return builder.String()
+	lines = append(lines, "", "Download actions use POST /sidecar/v1/models/download through api.request.")
+	return renderPanel("Models", lines, "82")
 }
 
 func (m Model) logsView() string {
-	var builder strings.Builder
-	builder.WriteString("Logs\n")
 	if len(m.logEntries) == 0 {
-		builder.WriteString("No logs yet.\n")
-		return builder.String()
+		return renderPanel("Logs", []string{"No logs yet."}, "244")
 	}
 
-	start := len(m.logEntries) - 12
+	start := len(m.logEntries) - 16
 	if start < 0 {
 		start = 0
 	}
+	lines := make([]string, 0, len(m.logEntries[start:]))
 	for _, entry := range m.logEntries[start:] {
-		builder.WriteString(fmt.Sprintf(
-			"#%d %s %s %s\n",
+		lines = append(lines, fmt.Sprintf(
+			"#%d %s %s %s",
 			entry.Seq,
 			entry.Source,
 			entry.Stream,
 			entry.Line,
 		))
 	}
-	return builder.String()
+	return renderPanel("Logs", lines, "244")
 }
 
 func (m Model) settingsView() string {
-	return "Settings\nUse --headless to run only the HTTP/WebSocket sidecar for browser automation.\n"
+	runtimeState := "not configured"
+	if m.runtimeController != nil {
+		runtimeState = "RuntimeController connected"
+	}
+	runnerState := "not configured"
+	if m.runnerController != nil {
+		runnerState = "RunnerController connected"
+	}
+
+	return strings.Join([]string{
+		renderPanel("Settings", []string{
+			"Controls",
+			"s Start release   d Start debug   r Restart release   x Stop runtime",
+			"",
+			formatKV("Runtime controller", runtimeState),
+			formatKV("Runner controller", runnerState),
+			formatKV("HTTP listen", "configured by -addr"),
+			formatKV("Default upstream", fallback(m.runtime.Upstream, "unavailable")),
+			formatKV("Runtime mode", fallback(m.runtime.Mode, "release")),
+			formatKV("Log entries", fmt.Sprintf("%d cached", len(m.logEntries))),
+		}, "45"),
+		renderPanel("WebSocket API parity", []string{
+			"status.get",
+			"runtime.start",
+			"runtime.stop",
+			"runtime.restart",
+			"api.request GET /sidecar/v1/status",
+			"api.request GET /sidecar/v1/models",
+			"api.request POST /sidecar/v1/models/download",
+			"api.request GET /sidecar/v1/runners",
+			"api.request POST /sidecar/v1/runners",
+			"api.request POST /sidecar/v1/runners/{id}/start",
+			"api.request POST /sidecar/v1/runners/{id}/stop",
+			"api.request POST /sidecar/v1/runners/{id}/restart",
+			"TUI controls call the same methods underneath: RuntimeController and RunnerController.",
+		}, "205"),
+	}, "\n\n")
+}
+
+func (m Model) runnerActionCmd(action string, id string) tea.Cmd {
+	return func() tea.Msg {
+		if m.runnerController == nil {
+			return runnerActionMsg{
+				action: action,
+				id:     id,
+				err:    fmt.Errorf("runner controller is not configured"),
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+
+		var err error
+		switch action {
+		case "start":
+			_, err = m.runnerController.StartRunner(ctx, id)
+		case "stop":
+			_, err = m.runnerController.StopRunner(ctx, id)
+		case "restart":
+			_, err = m.runnerController.RestartRunner(ctx, id)
+		default:
+			err = fmt.Errorf("unknown runner action %q", action)
+		}
+		return runnerActionMsg{
+			action: action,
+			id:     id,
+			err:    err,
+		}
+	}
+}
+
+func (m Model) runtimeActionCmd(action string, mode server.RuntimeMode) tea.Cmd {
+	return func() tea.Msg {
+		if m.runtimeController == nil {
+			return runtimeActionMsg{
+				action: action,
+				mode:   mode,
+				err:    fmt.Errorf("runtime controller is not configured"),
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+
+		var err error
+		switch action {
+		case "start":
+			err = m.runtimeController.Start(ctx, mode, server.RuntimeControlConfig{})
+		case "stop":
+			err = m.runtimeController.Stop(ctx)
+		case "restart":
+			err = m.runtimeController.Restart(ctx, mode, server.RuntimeControlConfig{})
+		default:
+			err = fmt.Errorf("unknown runtime action %q", action)
+		}
+		return runtimeActionMsg{
+			action: action,
+			mode:   mode,
+			err:    err,
+		}
+	}
+}
+
+func (m Model) actionNotice(message runnerActionMsg) string {
+	if message.err != nil {
+		return fmt.Sprintf("%s %s failed: %v", message.action, message.id, message.err)
+	}
+	switch message.action {
+	case "start":
+		return "started " + message.id
+	case "stop":
+		return "stopped " + message.id
+	case "restart":
+		return "restarted " + message.id
+	default:
+		return message.action + " " + message.id
+	}
+}
+
+func (m Model) runtimeActionNotice(message runtimeActionMsg) string {
+	if message.err != nil {
+		return fmt.Sprintf("%s runtime failed: %v", message.action, message.err)
+	}
+	switch message.action {
+	case "start":
+		return "started runtime " + string(message.mode)
+	case "stop":
+		return "stopped runtime"
+	case "restart":
+		return "restarted runtime " + string(message.mode)
+	default:
+		return message.action + " runtime"
+	}
 }
 
 func tick() tea.Cmd {
@@ -271,9 +612,94 @@ func tick() tea.Cmd {
 	})
 }
 
+func renderPanel(title string, lines []string, color string) string {
+	body := strings.Join(lines, "\n")
+	if strings.TrimSpace(body) == "" {
+		body = "No data."
+	}
+	return lipgloss.NewStyle().
+		Border(asciiBorder).
+		BorderForeground(lipgloss.Color(color)).
+		Padding(0, 1).
+		Render(subtitleStyle.Render(title) + "\n" + body)
+}
+
+func formatKV(label string, value string) string {
+	return fmt.Sprintf("%-14s %s", label+":", value)
+}
+
+func statusBadge(state string) string {
+	state = fallback(state, "unknown")
+	color := "244"
+	switch strings.ToLower(state) {
+	case "running", "available", "ready":
+		color = "82"
+	case "starting", "created":
+		color = "214"
+	case "external":
+		color = "45"
+	case "stopped", "exited":
+		color = "244"
+	case "unavailable", "error", "missing":
+		color = "196"
+	}
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(color)).
+		Render(state)
+}
+
+func runnerLaunchMode(runner server.RunnerSnapshot) string {
+	switch strings.ToLower(runner.State) {
+	case "external":
+		return "external upstream"
+	default:
+		return "managed or ready"
+	}
+}
+
+func commandLine(command []string) string {
+	if len(command) == 0 {
+		return "not started"
+	}
+	return strings.Join(command, " ")
+}
+
+func capabilitiesLine(capabilities map[string]string) string {
+	if len(capabilities) == 0 {
+		return "none advertised"
+	}
+
+	keys := make([]string, 0, len(capabilities))
+	for key := range capabilities {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+capabilities[key])
+	}
+	return strings.Join(parts, ", ")
+}
+
 func fallback(value string, fallbackValue string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallbackValue
 	}
 	return value
+}
+
+func fallbackInt(value int, fallbackValue string) string {
+	if value == 0 {
+		return fallbackValue
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func fallbackUint(value uint64, fallbackValue string) string {
+	if value == 0 {
+		return fallbackValue
+	}
+	return fmt.Sprintf("%d", value)
 }

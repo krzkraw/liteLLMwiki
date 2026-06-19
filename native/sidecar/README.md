@@ -19,6 +19,15 @@ go build -o litert-sidecar ./cmd/litert-sidecar
 terminal dashboard. Use `./litert-sidecar --headless` for browser automation,
 smoke tests, CI, or any process without a TTY.
 
+The TUI uses the same runtime and runner controller methods as the HTTP routes
+and WebSocket `api.request` bridge. Its dashboard lists runtime specs, route
+authority, and runnable backends. Each configured runner gets its own tab with
+settings, process details, command/capability/error state, and `s` start, `x`
+stop, and `r` restart controls. The Settings tab lists the matching WebSocket
+messages and sidecar API paths, and exposes default runtime controls with `s`
+start release, `d` start debug, `x` stop, and `r` restart release so terminal
+controls can be checked against the browser-facing API surface.
+
 By default it:
 
 - searches for `litert-lm` on `PATH` or beside the sidecar binary;

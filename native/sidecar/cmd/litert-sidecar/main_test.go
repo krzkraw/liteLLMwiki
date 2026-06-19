@@ -67,6 +67,24 @@ func TestSidecarModeDefaultsToTUI(t *testing.T) {
 	}
 }
 
+func TestTerminalLogTeesAreDisabledInTUIMode(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr := terminalLogTees(sidecarModeTUI)
+	if stdout != nil || stderr != nil {
+		t.Fatalf("TUI log tees = %v/%v, want nil writers so child logs stay inside the TUI", stdout, stderr)
+	}
+}
+
+func TestTerminalLogTeesRemainEnabledInHeadlessMode(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr := terminalLogTees(sidecarModeHeadless)
+	if stdout != os.Stdout || stderr != os.Stderr {
+		t.Fatalf("headless log tees = %v/%v, want stdout/stderr", stdout, stderr)
+	}
+}
+
 func TestSupervisorRuntimeControllerMapsLegacyExternalConfig(t *testing.T) {
 	t.Parallel()
 

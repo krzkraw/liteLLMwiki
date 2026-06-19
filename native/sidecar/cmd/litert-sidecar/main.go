@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -51,6 +52,8 @@ func main() {
 	logs := server.NewLogBroadcaster(512)
 	statusEvents := server.NewStatusBroadcaster()
 	modelCatalog := catalog.NewDefault(catalog.FindModelRoot())
+	mode := sidecarMode(*headless)
+	stdoutTee, stderrTee := terminalLogTees(mode)
 	runtimeSupervisor := supervisor.New(supervisor.Config{
 		DefaultLiteRT: supervisor.LiteRTConfig{
 			Launch:     *launchRuntime,
@@ -63,8 +66,8 @@ func main() {
 			Verbose:    *runtimeVerbose,
 		},
 		Logs:        logs,
-		StdoutTee:   os.Stdout,
-		StderrTee:   os.Stderr,
+		StdoutTee:   stdoutTee,
+		StderrTee:   stderrTee,
 		ImportModel: *importModel,
 		OnStatusChange: func(supervisor.Snapshot) {
 			statusEvents.Publish()
@@ -131,7 +134,7 @@ func main() {
 		serverErr <- httpServer.ListenAndServe()
 	}()
 
-	if sidecarMode(*headless) == sidecarModeTUI {
+	if mode == sidecarModeTUI {
 		tuiErr := make(chan error, 1)
 		go func() {
 			tuiErr <- tui.Run(ctx, runtimeController, runnerController, logs, modelCatalog)
@@ -172,6 +175,13 @@ func sidecarMode(headless bool) launchMode {
 		return sidecarModeHeadless
 	}
 	return sidecarModeTUI
+}
+
+func terminalLogTees(mode launchMode) (io.Writer, io.Writer) {
+	if mode == sidecarModeHeadless {
+		return os.Stdout, os.Stderr
+	}
+	return nil, nil
 }
 
 type supervisorRuntimeController struct {

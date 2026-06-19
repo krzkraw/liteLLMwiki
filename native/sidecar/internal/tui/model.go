@@ -715,6 +715,7 @@ func (m Model) commandRailLines() []string {
 
 func (m Model) dashboardView() string {
 	health := renderPanel("System health / Specs", m.systemHealthLines(), "82")
+	signalBoard := renderPanel("Signal board / Readiness", m.signalBoardLines(), "82")
 	runtimeTopology := renderPanel("Runtime topology", m.runtimeTopologyLines(), "45")
 	topologyGraph := renderPanel("Topology graph / Visual route authority", m.topologyGraphLines(), "39")
 	backendMatrix := renderPanel("Backend matrix / Runnable backends", m.backendMatrixLines(), "214")
@@ -731,6 +732,7 @@ func (m Model) dashboardView() string {
 	if m.width >= 150 {
 		return joinPanels(
 			joinPanelRow(health, topologyGraph),
+			signalBoard,
 			joinPanelRow(runtimeTopology, backendMatrix),
 			joinPanelRow(routeMap, recentActivity),
 			hotkeys,
@@ -739,6 +741,7 @@ func (m Model) dashboardView() string {
 
 	return joinPanels(
 		health,
+		signalBoard,
 		runtimeTopology,
 		topologyGraph,
 		backendMatrix,
@@ -746,6 +749,95 @@ func (m Model) dashboardView() string {
 		recentActivity,
 		hotkeys,
 	)
+}
+
+func (m Model) signalBoardLines() []string {
+	runningRunners := m.runningRunnerCount()
+	totalRunners := len(m.snapshot.Runners)
+	routedCount := len(m.snapshot.Routes)
+	requiredModels, presentModels := m.requiredModelCounts()
+
+	return []string{
+		formatSignalLine(
+			"Runtime",
+			runtimeSignalGlyph(m.runtime.State),
+			fallback(m.runtime.State, "unknown"),
+			runtimeSignalMeter(m.runtime.State),
+		),
+		formatSignalLine(
+			"Runners",
+			runnerSignalGlyph(runningRunners, totalRunners),
+			fmt.Sprintf("%d/%d active", runningRunners, totalRunners),
+			statusMeter(runningRunners, totalRunners),
+		),
+		formatSignalLine(
+			"Routes",
+			routeSignalGlyph(routedCount),
+			fmt.Sprintf("%d wired", routedCount),
+			routeSignalMeter(routedCount, totalRunners),
+		),
+		formatSignalLine(
+			"Models",
+			modelSignalGlyph(presentModels, requiredModels),
+			fmt.Sprintf("%d/%d present", presentModels, requiredModels),
+			modelSignalMeter(presentModels, requiredModels),
+		),
+		formatSignalLine(
+			"Logs",
+			logSignalGlyph(len(m.logEntries)),
+			fmt.Sprintf("%d cached", len(m.logEntries)),
+			"latest: "+m.latestLogSource(),
+		),
+		"Next action  " + m.dashboardNextAction(),
+		"Legend      ● ready  ◐ partial  ! attention",
+	}
+}
+
+func (m Model) runningRunnerCount() int {
+	running := 0
+	for _, runner := range m.snapshot.Runners {
+		if strings.EqualFold(runner.State, "running") {
+			running++
+		}
+	}
+	return running
+}
+
+func (m Model) requiredModelCounts() (int, int) {
+	required := 0
+	present := 0
+	for _, entry := range m.models {
+		if !entry.Required {
+			continue
+		}
+		required++
+		if entry.State == catalog.StatePresent {
+			present++
+		}
+	}
+	return required, present
+}
+
+func (m Model) latestLogSource() string {
+	if len(m.logEntries) == 0 {
+		return "none"
+	}
+	latest := m.logEntries[len(m.logEntries)-1]
+	return latest.Source + "/" + latest.Stream
+}
+
+func (m Model) dashboardNextAction() string {
+	for index, runner := range m.snapshot.Runners {
+		if strings.EqualFold(runner.State, "running") {
+			return fmt.Sprintf("open runner tab %d %s or Models for downloads", index+2, runner.ID)
+		}
+	}
+	for index, runner := range m.snapshot.Runners {
+		if strings.TrimSpace(runner.ID) != "" {
+			return fmt.Sprintf("open runner tab %d %s and press s to start", index+2, runner.ID)
+		}
+	}
+	return "open Models and create a runner"
 }
 
 func (m Model) systemHealthLines() []string {
@@ -1930,6 +2022,112 @@ func statusMeter(active int, total int) string {
 		active,
 		total,
 	)
+}
+
+func formatSignalLine(label string, glyph string, state string, detail string) string {
+	return fmt.Sprintf("%-11s %s %-11s %s", label, glyph, state, detail)
+}
+
+func runtimeSignalGlyph(state string) string {
+	switch strings.ToLower(state) {
+	case "running", "available", "ready":
+		return "●"
+	case "unavailable", "error", "missing":
+		return "!"
+	default:
+		return "◐"
+	}
+}
+
+func runtimeSignalMeter(state string) string {
+	switch strings.ToLower(state) {
+	case "running", "available", "ready":
+		return "[##########] serving"
+	case "starting":
+		return "[######----] starting"
+	case "unavailable", "error", "missing":
+		return "[##--------] needs attention"
+	default:
+		return "[#####-----] waiting"
+	}
+}
+
+func runnerSignalGlyph(active int, total int) string {
+	if active > 0 {
+		return "●"
+	}
+	if total > 0 {
+		return "◐"
+	}
+	return "!"
+}
+
+func routeSignalGlyph(routes int) string {
+	if routes > 0 {
+		return "●"
+	}
+	return "!"
+}
+
+func routeSignalMeter(routes int, runners int) string {
+	total := runners
+	if total < routes {
+		total = routes
+	}
+	if total <= 0 {
+		return "[----------] 0/0 routed"
+	}
+
+	filled := routes * 10 / total
+	if routes > 0 && filled == 0 {
+		filled = 1
+	}
+	if filled > 10 {
+		filled = 10
+	}
+	return fmt.Sprintf(
+		"[%s%s] %d/%d routed",
+		strings.Repeat("#", filled),
+		strings.Repeat("-", 10-filled),
+		routes,
+		total,
+	)
+}
+
+func modelSignalGlyph(present int, required int) string {
+	if required > 0 && present == required {
+		return "●"
+	}
+	if present > 0 {
+		return "◐"
+	}
+	return "!"
+}
+
+func modelSignalMeter(present int, required int) string {
+	if required <= 0 {
+		return "[----------] no required models"
+	}
+
+	filled := present * 10 / required
+	if present > 0 && filled == 0 {
+		filled = 1
+	}
+	if filled > 10 {
+		filled = 10
+	}
+	return fmt.Sprintf(
+		"[%s%s] required ready",
+		strings.Repeat("#", filled),
+		strings.Repeat("-", 10-filled),
+	)
+}
+
+func logSignalGlyph(count int) string {
+	if count > 0 {
+		return "●"
+	}
+	return "◐"
 }
 
 func runnerHealthMeter(runner server.RunnerSnapshot) string {

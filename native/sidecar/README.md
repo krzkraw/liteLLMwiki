@@ -27,7 +27,9 @@ Every tab ends with a context command rail that keeps global navigation,
 tab-specific actions, and the matching controller or WebSocket/API path visible
 without switching pages.
 Its dashboard lists runtime specs, a visual topology graph, route authority,
-runnable backend cards, runtime topology, route maps, and recent activity.
+runnable backend cards, runtime topology, route maps, recent activity, and a
+signal board with readiness meters for runtime, runners, routes, required model
+artifacts, and logs.
 Each configured runner gets its own tab with health, endpoint, control surface,
 operation flow, runtime command, capability matrix, settings, process details,
 and recent log panels. The operation flow shows the runner state, model file,

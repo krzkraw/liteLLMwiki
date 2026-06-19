@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -213,6 +215,35 @@ func TestDashboardRendersRichOperationalOverview(t *testing.T) {
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("dashboard overview missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestDashboardRendersSignalBoardWithReadinessMeters(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "runtime ready")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+		Catalog:           testCatalog(t),
+	})
+	view := model.View()
+
+	for _, expected := range []string{
+		"Signal board / Readiness",
+		"Runtime     ● running     [##########] serving",
+		"Runners     ● 1/2 active  [#####-----] 1/2 running",
+		"Routes      ● 2 wired     [##########] 2/2 routed",
+		"Models      ● 4/4 present [##########] required ready",
+		"Logs        ● 1 cached    latest: runner:main-litert/stdout",
+		"Next action  open runner tab 2 main-litert or Models for downloads",
+		"Legend      ● ready  ◐ partial  ! attention",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("dashboard signal board missing %q:\n%s", expected, view)
 		}
 	}
 }
@@ -1207,6 +1238,22 @@ func TestSettingsRuntimeConfigEditorFeedsSharedRuntimeController(t *testing.T) {
 	if got := runtimeControl.lastCall(); got != "restart:release:runtimePort=9499:upstream=http://127.0.0.1:9499:modelId=gemma-custom:launchRuntime=false:runtimeVerbose=true" {
 		t.Fatalf("last call = %q, want restart with edited runtime config", got)
 	}
+}
+
+func testCatalog(t *testing.T) *catalog.Catalog {
+	t.Helper()
+
+	root := t.TempDir()
+	modelCatalog := catalog.NewDefault(root)
+	for _, entry := range modelCatalog.Entries() {
+		if err := os.MkdirAll(filepath.Dir(entry.TargetPath), 0o755); err != nil {
+			t.Fatalf("create model fixture directory: %v", err)
+		}
+		if err := os.WriteFile(entry.TargetPath, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write model fixture: %v", err)
+		}
+	}
+	return modelCatalog
 }
 
 type fakeRuntimeController struct {

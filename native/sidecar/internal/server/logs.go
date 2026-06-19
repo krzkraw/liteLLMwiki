@@ -5,6 +5,8 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	"litert-sidecar/internal/redact"
 )
 
 type LogEntry struct {
@@ -42,7 +44,7 @@ func (b *LogBroadcaster) Publish(source string, stream string, line string) LogE
 		Seq:    b.nextSeq,
 		Source: source,
 		Stream: stream,
-		Line:   strings.TrimSuffix(line, "\r"),
+		Line:   redact.FromEnv(strings.TrimSuffix(line, "\r")),
 	}
 	if len(b.ring) == b.capacity {
 		copy(b.ring, b.ring[1:])
@@ -110,25 +112,28 @@ func (w *logWriter) Write(p []byte) (int, error) {
 	defer w.mu.Unlock()
 
 	n := len(p)
-	var err error
-	if w.tee != nil {
-		n, err = w.tee.Write(p)
-	}
-	w.append(p[:n])
-	return n, err
+	return n, w.append(p)
 }
 
-func (w *logWriter) append(p []byte) {
+func (w *logWriter) append(p []byte) error {
+	var firstErr error
 	for len(p) > 0 {
 		index := bytes.IndexByte(p, '\n')
 		if index < 0 {
 			_, _ = w.buffer.Write(p)
-			return
+			return firstErr
 		}
 
 		_, _ = w.buffer.Write(p[:index])
-		w.broadcaster.Publish(w.source, w.stream, w.buffer.String())
+		entry := w.broadcaster.Publish(w.source, w.stream, w.buffer.String())
+		if w.tee != nil {
+			if _, err := io.WriteString(w.tee, entry.Line+"\n"); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
 		w.buffer.Reset()
 		p = p[index+1:]
 	}
+
+	return firstErr
 }

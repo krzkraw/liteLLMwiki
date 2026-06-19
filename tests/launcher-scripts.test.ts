@@ -131,21 +131,23 @@ describe("root launcher scripts", () => {
 
   it("launches web UI and sidecar TUI in separate terminals", () => {
     const shellLauncher = readRootScript("launch-all.sh");
+    expect(shellLauncher).toContain("launch_terminal");
     expect(shellLauncher).toContain("launch-webui");
     expect(shellLauncher).toContain("launch-sidecar");
+    expect(shellLauncher).toContain("--litert-launch-inline");
     expect(shellLauncher).toContain("LITERT_SIDECAR_TUI=1");
     expect(shellLauncher).not.toContain("SIDECAR_HEADLESS");
     expect(shellLauncher).not.toContain("cleanup");
 
     const powershellLauncher = readRootScript("launch-all.ps1");
+    expect(powershellLauncher).toContain("Start-LiteRTTerminal");
     expect(powershellLauncher).toContain("launch-webui");
     expect(powershellLauncher).toContain("launch-sidecar");
+    expect(powershellLauncher).toContain('"-Inline"');
     expect(powershellLauncher).toContain("-Tui");
     expect(powershellLauncher).not.toContain("SIDECAR_HEADLESS");
     expect(powershellLauncher).not.toContain("-Headless");
     expect(powershellLauncher).not.toContain("cleanup");
-    expect(powershellLauncher).not.toContain('"-Inline"');
-    expect(powershellLauncher).not.toContain("'-Inline'");
   });
 
   it("launch-all opens the web UI first and the sidecar TUI last", () => {

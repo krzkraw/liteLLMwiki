@@ -11,9 +11,16 @@ models_nextcloud_token=""
 llama_runtime_root="$repo_root/native/llama-runtimes"
 llama_selected_file="$llama_runtime_root/.selected"
 llama_release_base="https://github.com/ggml-org/llama.cpp/releases/download/b9724"
+ansiGreen=""
+ansiReset=""
 summary=()
 
 cd "$repo_root"
+
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  ansiGreen=$'\033[32m'
+  ansiReset=$'\033[0m'
+fi
 
 add_summary() {
   summary+=("$1")
@@ -23,12 +30,87 @@ has_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
+print_green_check() {
+  local message="$1"
+
+  printf '  %s✓ %s%s\n' "$ansiGreen" "$message" "$ansiReset"
+}
+
+print_task_pending() {
+  local message="$1"
+
+  printf '  [ ] %s\n' "$message"
+}
+
+print_task_status() {
+  local label="$1"
+  local check_cmd="$2"
+  local done_text="${3:-done}"
+  local pending_text="${4:-pending}"
+
+  if eval "$check_cmd"; then
+    print_green_check "$label - $done_text"
+  else
+    print_task_pending "$label - $pending_text"
+  fi
+}
+
+print_box_line() {
+  local text="${1:-}"
+
+  printf '| %s\n' "$text"
+}
+
+print_task_box() {
+  local label="$1"
+  local description="$2"
+  local command_text="$3"
+  local expected_result="$4"
+  local line
+
+  printf '\n+------------------------------------------------------------+\n'
+  printf '| Task: %s\n' "$label"
+  printf '| Description: %s\n' "$description"
+  printf '| Command or URL I would use:\n'
+  while IFS= read -r line; do
+    print_box_line "  $line"
+  done <<< "$command_text"
+  printf '| Expected result: %s\n' "$expected_result"
+  print_box_line "Do you want me to do it?"
+  printf '| Choices:\n'
+  print_box_line "  [Y] Yes - run it now"
+  print_box_line "  [N] No - stop this installer"
+  print_box_line "  [M] Manual & wait - I will do it and press Enter"
+  printf '+------------------------------------------------------------+\n'
+}
+
+prompt_task_choice() {
+  local label="$1"
+  local description="$2"
+  local command_text="$3"
+  local expected_result="$4"
+  local answer
+
+  print_task_box "$label" "$description" "$command_text" "$expected_result"
+  while true; do
+    printf 'Choice [Y/N/M]: '
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) return 0 ;;
+      n|N|no|NO) return 1 ;;
+      m|M|manual|MANUAL) return 2 ;;
+      *) printf 'Choose Y, N, or M.\n' ;;
+    esac
+  done
+}
+
 run_logged() {
   local label="$1"
   shift
 
   printf '\n==> %s\n' "$label"
   "$@"
+  print_green_check "$label - done"
   add_summary "PASS: $label"
 }
 
@@ -278,9 +360,12 @@ ensure_llama_runtime() {
   local input token index checked found selected_option
   local new_selected=()
   local primary_key primary_folder
+  local choice
+  local runtime_command_text
 
   installed="$(installed_llama_server || true)"
   if [[ -n "$installed" ]]; then
+    print_green_check "llama.cpp runtime - already done"
     add_summary "OK: llama-server at $installed"
     return 0
   fi
@@ -295,6 +380,32 @@ ensure_llama_runtime() {
       "manual_url_action 'https://github.com/ggml-org/llama.cpp/releases'; false"
     return 0
   fi
+
+  runtime_command_text="Source: $llama_release_base
+Destination: native/llama-runtimes
+The installer will show platform runtime choices and download selected archives."
+  if prompt_task_choice "llama.cpp runtime" \
+    "Download one or more local llama.cpp runtime folders, or install llama-server manually." \
+    "$runtime_command_text" \
+    "llama-server is available on PATH or under native/llama-runtimes"; then
+    choice=0
+  else
+    choice=$?
+  fi
+  case "$choice" in
+    0) ;;
+    1)
+      printf 'Installer stopped before llama.cpp runtime.\n'
+      exit 1
+      ;;
+    2)
+      wait_for_user_action "llama-server" \
+        "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\"" \
+        "llama-server is available on PATH or under native/llama-runtimes"
+      add_summary "OK: llama-server"
+      return 0
+      ;;
+  esac
 
   while true; do
     printf '\nllama.cpp runtime needs to be installed downloaded. Select one or more runtimes:\n'
@@ -348,7 +459,9 @@ ensure_llama_runtime() {
         return 0
         ;;
       s|S)
-        wait_for_user_action "llama-server" "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\""
+        wait_for_user_action "llama-server" \
+          "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\"" \
+          "llama-server is available on PATH or under native/llama-runtimes"
         add_summary "OK: llama-server"
         return 0
         ;;
@@ -508,14 +621,19 @@ manual_url_action() {
 wait_for_user_action() {
   local label="$1"
   local check_cmd="$2"
+  local expected_result="$3"
 
-  printf 'I will wait. Press Enter after you have done it: %s\n' "$label"
+  printf 'I will wait.\n'
+  printf 'Expected result: %s\n' "$expected_result"
+  printf 'Press Enter after the expected result is true: %s\n' "$label"
   while true; do
     read -r _
     if eval "$check_cmd"; then
+      print_green_check "$label - done"
       return 0
     fi
-    printf 'Still not detected. Press Enter after completing it, or Ctrl-C to stop.\n'
+    printf 'Still not detected. Expected result: %s\n' "$expected_result"
+    printf 'Press Enter after the expected result is true, or Ctrl-C to stop.\n'
   done
 }
 
@@ -525,39 +643,51 @@ confirm_or_wait() {
   local check_cmd="$3"
   local run_cmd="$4"
   local required="${5:-required}"
-  local answer
+  local expected_result="${6:-}"
+  local description="${7:-Install or download the missing requirement.}"
+  local choice
 
   if eval "$check_cmd"; then
+    print_green_check "$label - already done"
     add_summary "OK: $label"
     return 0
   fi
 
-  printf '\n%s needs to be installed downloaded, here is the command or URL I would use:\n' "$label"
-  printf '%s\n' "$command_text"
-
   while ! eval "$check_cmd"; do
-    printf 'Do you want me to do it? [y/N] '
-    read -r answer
-    case "$answer" in
-      y|Y|yes|YES)
+    if prompt_task_choice "$label" "$description" "$command_text" "$expected_result"; then
+      choice=0
+    else
+      choice=$?
+    fi
+    case "$choice" in
+      0)
         if [[ -n "$run_cmd" ]]; then
           if eval "$run_cmd"; then
             :
           else
             printf 'The task failed. Here is the command or URL again:\n%s\n' "$command_text"
-            wait_for_user_action "$label" "$check_cmd"
+            wait_for_user_action "$label" "$check_cmd" "$expected_result"
           fi
         else
           printf 'No automatic command is available for this environment.\n'
-          wait_for_user_action "$label" "$check_cmd"
+          wait_for_user_action "$label" "$check_cmd" "$expected_result"
         fi
         ;;
-      *)
-        wait_for_user_action "$label" "$check_cmd"
+      1)
+        if [[ "$required" == "optional" ]]; then
+          add_summary "SKIP: $label"
+          return 0
+        fi
+        printf 'Installer stopped before %s.\n' "$label"
+        exit 1
+        ;;
+      2)
+        wait_for_user_action "$label" "$check_cmd" "$expected_result"
         ;;
     esac
   done
 
+  print_green_check "$label - done"
   add_summary "OK: $label"
   if [[ "$required" == "optional" ]]; then
     return 0
@@ -572,7 +702,9 @@ ensure_dependency() {
 
   confirm_or_wait "$label" "$install_cmd" \
     "command -v '$command_name' >/dev/null 2>&1" \
-    "$install_cmd" "$required"
+    "$install_cmd" "$required" \
+    "command '$command_name' is available on PATH" \
+    "Install $label so the installer can run repository setup commands."
 }
 
 ensure_package_tool() {
@@ -606,7 +738,9 @@ ensure_optional_tool() {
 
   confirm_or_wait "$label" "$command_or_url" \
     "command -v '$command_name' >/dev/null 2>&1" \
-    "$run_cmd" "optional"
+    "$run_cmd" "optional" \
+    "command '$command_name' is available on PATH" \
+    "Install $label or provide it manually if you want this runtime path."
 }
 
 prompt_hf_token_if_needed() {
@@ -668,6 +802,8 @@ ensure_model() {
   local auth_kind="huggingface"
   local auth_token=""
   local command_text
+  local expected_result
+  local choice
 
   if [[ -n "$models_nextcloud_base" ]]; then
     download_url="$(nextcloud_model_url "$relative_path")"
@@ -686,20 +822,24 @@ Header: Authorization: Basic <modelsNextcloud-token>"
 Path: $relative_path
 Command: curl -L --fail -o '$relative_path' '$download_url'"
   fi
+  expected_result="file exists and is non-empty at $relative_path"
 
   if [[ -s "$target" ]]; then
+    print_green_check "$label at $relative_path - already done"
     add_summary "OK: $label at $relative_path"
     return 0
   fi
 
-  printf '\n%s needs to be installed downloaded, here is the command or URL I would use:\n%s\n' "$label" "$command_text"
-
   while [[ ! -s "$target" ]]; do
-    local answer
-    printf 'Do you want me to do it? [y/N] '
-    read -r answer
-    case "$answer" in
-      y|Y|yes|YES)
+    if prompt_task_choice "$label" \
+      "Download the model file or place it manually in the expected local path." \
+      "$command_text" "$expected_result"; then
+      choice=0
+    else
+      choice=$?
+    fi
+    case "$choice" in
+      0)
         if [[ "$may_need_token" == "true" ]]; then
           prompt_hf_token_if_needed
         fi
@@ -707,25 +847,54 @@ Command: curl -L --fail -o '$relative_path' '$download_url'"
           :
         else
           printf 'The task failed. Here is the command or URL again:\n%s\n' "$command_text"
-          printf 'I will wait. Press Enter after you have put the file at %s\n' "$relative_path"
-          read -r _
+          wait_for_user_action "$label" "test -s '$target'" "$expected_result"
         fi
         ;;
-      *)
-        printf 'I will wait. Open the URL in a browser if needed and put the file at:\n%s\n' "$relative_path"
-        printf 'Press Enter after the file is there.\n'
-        read -r _
+      1)
+        printf 'Installer stopped before %s.\n' "$label"
+        exit 1
+        ;;
+      2)
+        wait_for_user_action "$label" "test -s '$target'" "$expected_result"
         ;;
     esac
   done
 
+  print_green_check "$label at $relative_path - done"
   add_summary "OK: $label at $relative_path"
 }
 
 ensure_npm_dependencies() {
   confirm_or_wait "npm dependencies" "npm install" \
     "test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" \
-    "cd '$repo_root' && npm install"
+    "cd '$repo_root' && npm install" "required" \
+    "node_modules and public/vendor/litert-lm/core/wasm exist" \
+    "Install Node packages and regenerate the LiteRT-LM WASM vendor files."
+}
+
+print_install_tasks() {
+  printf '\nInstall tasks\n'
+  printf '-------------\n'
+  print_task_status "git" "command -v git >/dev/null 2>&1" "available" "needs install"
+  print_task_status "node" "command -v node >/dev/null 2>&1" "available" "needs install"
+  print_task_status "npm" "command -v npm >/dev/null 2>&1" "available" "needs install"
+  print_task_status "go" "command -v go >/dev/null 2>&1" "available" "needs install"
+  print_task_status "curl" "command -v curl >/dev/null 2>&1" "available" "needs install"
+  print_task_status "uv" "command -v uv >/dev/null 2>&1" "available" "needs install"
+  print_task_status "litert-lm" "command -v litert-lm >/dev/null 2>&1" "available" "needs install"
+  print_task_status "llama.cpp runtime" "test -n \"\$(installed_llama_server || true)\"" "available" "needs selection or manual install"
+  print_task_status "npm dependencies" "test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" "already installed" "needs npm install"
+  print_task_status "Gemma 4 E2B web model" "test -s '$repo_root/models/litert/gemma-4-E2B-it-web.litertlm'" "downloaded" "needs download"
+  print_task_status "Gemma 4 E2B native LiteRT model" "test -s '$repo_root/models/litert/gemma-4-E2B-it.litertlm'" "downloaded" "needs download"
+  print_task_status "Gemma 4 E2B llama.cpp GGUF model" "test -s '$repo_root/models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf'" "downloaded" "needs download"
+  print_task_status "Qwen3 embedding GGUF model" "test -s '$repo_root/models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf'" "downloaded" "needs download"
+  print_task_status "EmbeddingGemma LiteRT embedding model" "test -s '$repo_root/models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite'" "downloaded" "needs download"
+  print_task_pending "npm test - will run"
+  print_task_pending "web production build - will run"
+  print_task_pending "sidecar artifacts build - will run"
+  print_task_pending "smoke UI - will run"
+  print_task_pending "smoke executable sidecar - will run"
+  print_task_pending "smoke web model - will run when the web model is present"
 }
 
 wait_for_url() {
@@ -794,6 +963,8 @@ main() {
   curl_cmd="$(dependency_install_command curl)"
   uv_cmd="$(dependency_install_command uv)"
   llama_url="https://github.com/ggml-org/llama.cpp/releases"
+
+  print_install_tasks
 
   ensure_package_tool "git" "git" "git"
   ensure_dependency "node" "node" "${node_cmd:-Install Node.js from https://nodejs.org/}"

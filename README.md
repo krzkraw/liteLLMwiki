@@ -89,13 +89,15 @@ default Hugging Face URLs, pass the share URL at install time:
 ```
 
 The installer checks local tools, npm dependencies, sidecar artifacts, and known
-model paths. For every missing system dependency or model download it prints the
-command or browser URL plus destination path first, then asks whether it should
-run the action. Answer `y` to let the script run it, or `n` to do it yourself;
-the installer waits until you press Enter and re-checks the dependency or file.
-If an attempted install or download fails, it prints the command or URL again
-and waits for you to complete it. Hugging Face tokens are prompted only for
-downloads that may need one and are kept in the current process environment.
+model paths. It prints an up-front task list and marks already satisfied items
+with a green checkmark when terminal color is available. For every missing
+system dependency or model download it prints a boxed task prompt with the
+command or browser URL, the expected result, and `Y`/`N`/`M` choices. Answer
+`Y` to let the script run the action, `M` to do it manually while the installer
+waits and re-checks, or `N` to stop. If an attempted install or download fails,
+it prints the command or URL again and waits for you to complete it. Hugging
+Face tokens are prompted only for downloads that may need one and are kept in
+the current process environment.
 The installer also offers selectable llama.cpp runtime downloads for the
 current platform. Runtime archives are verified by SHA256 and extracted under
 `native/llama-runtimes/` into folders such as `llama-win-cpu-x64`,

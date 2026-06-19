@@ -28,6 +28,88 @@ function Test-Command {
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Write-GreenCheck {
+  param([string]$Message)
+
+  Write-Host "  ✓ $Message" -ForegroundColor Green
+}
+
+function Write-TaskPending {
+  param([string]$Message)
+
+  Write-Host "  [ ] $Message"
+}
+
+function Write-TaskStatus {
+  param(
+    [string]$Label,
+    [scriptblock]$Check,
+    [string]$DoneText = "done",
+    [string]$PendingText = "pending"
+  )
+
+  if (& $Check) {
+    Write-GreenCheck "$Label - $DoneText"
+  } else {
+    Write-TaskPending "$Label - $PendingText"
+  }
+}
+
+function Write-BoxLine {
+  param([string]$Text = "")
+
+  Write-Host "| $Text"
+}
+
+function Write-TaskBox {
+  param(
+    [string]$Label,
+    [string]$Description,
+    [string]$CommandText,
+    [string]$ExpectedResult
+  )
+
+  Write-Host ""
+  Write-Host "+------------------------------------------------------------+"
+  Write-Host "| Task: $Label"
+  Write-Host "| Description: $Description"
+  Write-Host "| Command or URL I would use:"
+  foreach ($Line in ($CommandText -split "`r?`n")) {
+    Write-BoxLine "  $Line"
+  }
+  Write-Host "| Expected result: $ExpectedResult"
+  Write-BoxLine "Do you want me to do it?"
+  Write-Host "| Choices:"
+  Write-BoxLine "  [Y] Yes - run it now"
+  Write-BoxLine "  [N] No - stop this installer"
+  Write-BoxLine "  [M] Manual & wait - I will do it and press Enter"
+  Write-Host "+------------------------------------------------------------+"
+}
+
+function Read-TaskChoice {
+  param(
+    [string]$Label,
+    [string]$Description,
+    [string]$CommandText,
+    [string]$ExpectedResult
+  )
+
+  Write-TaskBox -Label $Label -Description $Description -CommandText $CommandText -ExpectedResult $ExpectedResult
+  while ($true) {
+    $Answer = Read-Host "Choice [Y/N/M]"
+    if ($Answer -match "^(y|yes)$") {
+      return "yes"
+    }
+    if ($Answer -match "^(n|no)$") {
+      return "no"
+    }
+    if ($Answer -match "^(m|manual)$") {
+      return "manual"
+    }
+    Write-Host "Choose Y, N, or M."
+  }
+}
+
 function Invoke-RunLogged {
   param(
     [string]$Label,
@@ -40,6 +122,7 @@ function Invoke-RunLogged {
   if ($LASTEXITCODE -ne 0) {
     throw "$Label failed with exit code $LASTEXITCODE"
   }
+  Write-GreenCheck "$Label - done"
   Add-Summary "PASS: $Label"
 }
 
@@ -243,6 +326,7 @@ function Install-LlamaRuntime {
 function Ensure-LlamaRuntime {
   $Installed = Find-InstalledLlamaServer
   if (-not [string]::IsNullOrWhiteSpace($Installed)) {
+    Write-GreenCheck "llama.cpp runtime - already done"
     Add-Summary "OK: llama-server at $Installed"
     return
   }
@@ -254,11 +338,28 @@ function Ensure-LlamaRuntime {
     } -Action {
       Start-Process "https://github.com/ggml-org/llama.cpp/releases"
       throw "Manual install required"
-    }
+    } -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes" `
+      -Description "Install llama.cpp so the sidecar can start a llama-server runtime."
     return
   }
 
   $SelectedKeys = [System.Collections.Generic.List[string]]::new()
+  $RuntimeCommandText = "Source: $LlamaReleaseBase`nDestination: native/llama-runtimes`nThe installer will show platform runtime choices and download selected archives."
+  $RuntimeChoice = Read-TaskChoice `
+    -Label "llama.cpp runtime" `
+    -Description "Download one or more local llama.cpp runtime folders, or install llama-server manually." `
+    -CommandText $RuntimeCommandText `
+    -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes"
+  if ($RuntimeChoice -eq "no") {
+    throw "Installer stopped before llama.cpp runtime."
+  }
+  if ($RuntimeChoice -eq "manual") {
+    Invoke-WaitForUserAction -Label "llama-server" -Check {
+      -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
+    } -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes"
+    Add-Summary "OK: llama-server"
+    return
+  }
 
   while ($true) {
     Write-Host ""
@@ -319,7 +420,7 @@ function Ensure-LlamaRuntime {
     if ($SelectionText -eq "s") {
       Invoke-WaitForUserAction -Label "llama-server" -Check {
         -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
-      }
+      } -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes"
       Add-Summary "OK: llama-server"
       return
     }
@@ -362,16 +463,21 @@ function Get-PackageInstallCommand {
 function Invoke-WaitForUserAction {
   param(
     [string]$Label,
-    [scriptblock]$Check
+    [scriptblock]$Check,
+    [string]$ExpectedResult
   )
 
-  Write-Host "I will wait. Press Enter after you have done it: $Label"
+  Write-Host "I will wait."
+  Write-Host "Expected result: $ExpectedResult"
+  Write-Host "Press Enter after the expected result is true: $Label"
   while ($true) {
     [void](Read-Host)
     if (& $Check) {
+      Write-GreenCheck "$Label - done"
       return
     }
-    Write-Host "Still not detected. Press Enter after completing it, or Ctrl-C to stop."
+    Write-Host "Still not detected. Expected result: $ExpectedResult"
+    Write-Host "Press Enter after the expected result is true, or Ctrl-C to stop."
   }
 }
 
@@ -380,33 +486,35 @@ function Invoke-ConfirmOrWait {
     [string]$Label,
     [string]$CommandText,
     [scriptblock]$Check,
-    [scriptblock]$Action
+    [scriptblock]$Action,
+    [string]$ExpectedResult,
+    [string]$Description = "Install or download the missing requirement."
   )
 
   if (& $Check) {
+    Write-GreenCheck "$Label - already done"
     Add-Summary "OK: $Label"
     return
   }
 
-  Write-Host ""
-  Write-Host "$Label needs to be installed downloaded, here is the command or URL I would use:"
-  Write-Host $CommandText
-
   while (-not (& $Check)) {
-    $Answer = Read-Host "Do you want me to do it? [y/N]"
-    if ($Answer -match "^(y|yes)$") {
+    $Choice = Read-TaskChoice -Label $Label -Description $Description -CommandText $CommandText -ExpectedResult $ExpectedResult
+    if ($Choice -eq "yes") {
       try {
         & $Action
       } catch {
         Write-Host "The task failed. Here is the command or URL again:"
         Write-Host $CommandText
-        Invoke-WaitForUserAction -Label $Label -Check $Check
+        Invoke-WaitForUserAction -Label $Label -Check $Check -ExpectedResult $ExpectedResult
       }
+    } elseif ($Choice -eq "manual") {
+      Invoke-WaitForUserAction -Label $Label -Check $Check -ExpectedResult $ExpectedResult
     } else {
-      Invoke-WaitForUserAction -Label $Label -Check $Check
+      throw "Installer stopped before $Label."
     }
   }
 
+  Write-GreenCheck "$Label - done"
   Add-Summary "OK: $Label"
 }
 
@@ -421,7 +529,8 @@ function Ensure-Dependency {
     Test-Command $CommandName
   } -Action {
     Invoke-Expression $CommandText
-  }
+  } -ExpectedResult "command '$CommandName' is available on PATH" `
+    -Description "Install $Label so the installer can run repository setup commands."
 }
 
 function Prompt-HfTokenIfNeeded {
@@ -497,19 +606,21 @@ function Ensure-Model {
   } else {
     $CommandText = "URL: $DownloadUrl`nPath: $RelativePath`nCommand: Invoke-WebRequest -Uri '$DownloadUrl' -OutFile '$RelativePath'"
   }
+  $ExpectedResult = "file exists and is non-empty at $RelativePath"
 
   if ((Test-Path $Target) -and ((Get-Item $Target).Length -gt 0)) {
+    Write-GreenCheck "$Label at $RelativePath - already done"
     Add-Summary "OK: $Label at $RelativePath"
     return
   }
 
-  Write-Host ""
-  Write-Host "$Label needs to be installed downloaded, here is the command or URL I would use:"
-  Write-Host $CommandText
-
   while ((-not (Test-Path $Target)) -or ((Get-Item $Target -ErrorAction SilentlyContinue).Length -eq 0)) {
-    $Answer = Read-Host "Do you want me to do it? [y/N]"
-    if ($Answer -match "^(y|yes)$") {
+    $Choice = Read-TaskChoice `
+      -Label $Label `
+      -Description "Download the model file or place it manually in the expected local path." `
+      -CommandText $CommandText `
+      -ExpectedResult $ExpectedResult
+    if ($Choice -eq "yes") {
       if ($NeedsToken) {
         Prompt-HfTokenIfNeeded
       }
@@ -518,17 +629,20 @@ function Ensure-Model {
       } catch {
         Write-Host "The task failed. Here is the command or URL again:"
         Write-Host $CommandText
-        Write-Host "I will wait. Press Enter after you have put the file at $RelativePath"
-        [void](Read-Host)
+        Invoke-WaitForUserAction -Label $Label -Check {
+          (Test-Path $Target) -and ((Get-Item $Target -ErrorAction SilentlyContinue).Length -gt 0)
+        } -ExpectedResult $ExpectedResult
       }
+    } elseif ($Choice -eq "manual") {
+      Invoke-WaitForUserAction -Label $Label -Check {
+        (Test-Path $Target) -and ((Get-Item $Target -ErrorAction SilentlyContinue).Length -gt 0)
+      } -ExpectedResult $ExpectedResult
     } else {
-      Write-Host "I will wait. Open the URL in a browser if needed and put the file at:"
-      Write-Host $RelativePath
-      Write-Host "Press Enter after the file is there."
-      [void](Read-Host)
+      throw "Installer stopped before $Label."
     }
   }
 
+  Write-GreenCheck "$Label at $RelativePath - done"
   Add-Summary "OK: $Label at $RelativePath"
 }
 
@@ -543,7 +657,52 @@ function Ensure-NpmDependencies {
     if ($LASTEXITCODE -ne 0) {
       throw "npm install failed"
     }
-  }
+  } -ExpectedResult "node_modules and public/vendor/litert-lm/core/wasm exist" `
+    -Description "Install Node packages and regenerate the LiteRT-LM WASM vendor files."
+}
+
+function Print-InstallTasks {
+  Write-Host ""
+  Write-Host "Install tasks"
+  Write-Host "-------------"
+  Write-TaskStatus "git" { Test-Command "git" } "available" "needs install"
+  Write-TaskStatus "node" { Test-Command "node" } "available" "needs install"
+  Write-TaskStatus "npm" { Test-Command "npm" } "available" "needs install"
+  Write-TaskStatus "go" { Test-Command "go" } "available" "needs install"
+  Write-TaskStatus "curl" { Test-Command "curl" } "available" "needs install"
+  Write-TaskStatus "uv" { Test-Command "uv" } "available" "needs install"
+  Write-TaskStatus "litert-lm" { Test-Command "litert-lm" } "available" "needs install"
+  Write-TaskStatus "llama.cpp runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer)) } "available" "needs selection or manual install"
+  Write-TaskStatus "npm dependencies" {
+    (Test-Path (Join-Path $RepoRoot "node_modules")) -and
+      (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
+  } "already installed" "needs npm install"
+  Write-TaskStatus "Gemma 4 E2B web model" {
+    $Path = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it-web.litertlm"
+    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
+  } "downloaded" "needs download"
+  Write-TaskStatus "Gemma 4 E2B native LiteRT model" {
+    $Path = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it.litertlm"
+    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
+  } "downloaded" "needs download"
+  Write-TaskStatus "Gemma 4 E2B llama.cpp GGUF model" {
+    $Path = Join-Path $RepoRoot "models\llamacpp\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
+    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
+  } "downloaded" "needs download"
+  Write-TaskStatus "Qwen3 embedding GGUF model" {
+    $Path = Join-Path $RepoRoot "models\llamacpp\Qwen3-Embedding-0.6B-Q8_0.gguf"
+    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
+  } "downloaded" "needs download"
+  Write-TaskStatus "EmbeddingGemma LiteRT embedding model" {
+    $Path = Join-Path $RepoRoot "models\litert\embeddinggemma-300M_seq2048_mixed-precision.tflite"
+    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
+  } "downloaded" "needs download"
+  Write-TaskPending "npm test - will run"
+  Write-TaskPending "web production build - will run"
+  Write-TaskPending "sidecar artifacts build - will run"
+  Write-TaskPending "smoke UI - will run"
+  Write-TaskPending "smoke executable sidecar - will run"
+  Write-TaskPending "smoke web model - will run when the web model is present"
 }
 
 function Wait-ForUrl {
@@ -631,6 +790,8 @@ try {
   $GoCommand = Get-PackageInstallCommand "GoLang.Go" "golang" "Install Go from https://go.dev/dl/"
   $CurlCommand = Get-PackageInstallCommand "cURL.cURL" "curl" "Install curl with winget, choco, or from https://curl.se/windows/"
   $UvCommand = Get-PackageInstallCommand "astral-sh.uv" "uv" "Install uv from https://docs.astral.sh/uv/getting-started/installation/"
+
+  Print-InstallTasks
 
   Ensure-Dependency "git" "git" $GitCommand
   Ensure-Dependency "node" "node" $NodeCommand

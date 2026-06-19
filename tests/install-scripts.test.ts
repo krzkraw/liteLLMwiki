@@ -32,6 +32,42 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("prints an up-front installer task checklist with green checkmarks", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("Install tasks");
+      expect(contents).toContain("✓");
+      expect(contents).toContain("node");
+      expect(contents).toContain("Gemma 4 E2B web model");
+      expect(contents).toContain("smoke executable sidecar");
+      expect(contents).toContain("Green");
+    }
+  });
+
+  it("wraps current install actions in a boxed choice prompt", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("+");
+      expect(contents).toContain("| Task:");
+      expect(contents).toContain("| Description:");
+      expect(contents).toContain("| Choices:");
+      expect(contents).toContain("[Y] Yes");
+      expect(contents).toContain("[N] No");
+      expect(contents).toContain("[M] Manual & wait");
+    }
+  });
+
+  it("manual wait prompts describe the expected result", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("Expected result:");
+      expect(contents).toContain("Press Enter after the expected result is true");
+    }
+  });
+
   it("checks dependencies and prints package-manager commands before running them", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

@@ -1452,42 +1452,58 @@ func (m Model) settingsView() string {
 		runnerState = "RunnerController connected"
 	}
 
+	settingsPanel := renderPanel("Settings", []string{
+		"Controls",
+		"s Start release   d Start debug   r Restart release   g Restart debug   x Stop runtime",
+		"",
+		formatKV("Runtime controller", runtimeState),
+		formatKV("Runner controller", runnerState),
+		formatKV("HTTP listen", "configured by -addr"),
+		formatKV("Default upstream", fallback(m.runtime.Upstream, "unavailable")),
+		formatKV("Runtime mode", fallback(m.runtime.Mode, "release")),
+		formatKV("Log entries", fmt.Sprintf("%d cached", len(m.logEntries))),
+	}, "45")
+	configEditor := renderPanel("Runtime config editor", m.runtimeConfigLines(), "82")
+	activeEditor := m.runtimeEditorView()
+	actionMap := renderPanel("Shared action map", settingsActionMapLines(), "214")
+	runnerParity := renderPanel("Runner API parity / Live snapshot", m.settingsRunnerParityLines(), "39")
+	webSocketParity := renderPanel("WebSocket API parity", []string{
+		"status.get",
+		"runtime.start",
+		"runtime.start config",
+		"runtime.stop",
+		"runtime.restart",
+		"runtime.restart config",
+		"api.request GET /sidecar/v1/status",
+		"api.request GET /sidecar/v1/models",
+		"api.request POST /sidecar/v1/models/download",
+		"api.request POST /sidecar/v1/multimodal",
+		"api.request GET /sidecar/v1/runners",
+		"api.request POST /sidecar/v1/runners",
+		"api.request PATCH /sidecar/v1/runners/{id}",
+		"api.request POST /sidecar/v1/runners/{id}/start",
+		"api.request POST /sidecar/v1/runners/{id}/stop",
+		"api.request POST /sidecar/v1/runners/{id}/restart",
+		"api.request * /v1/* upstream proxy",
+		"TUI controls call the same methods underneath: RuntimeController and RunnerController.",
+	}, "205")
+
+	if m.width >= 150 {
+		return joinPanels(
+			joinPanelRow(settingsPanel, configEditor),
+			activeEditor,
+			joinPanelRow(actionMap, runnerParity),
+			webSocketParity,
+		)
+	}
+
 	return joinPanels(
-		renderPanel("Settings", []string{
-			"Controls",
-			"s Start release   d Start debug   r Restart release   g Restart debug   x Stop runtime",
-			"",
-			formatKV("Runtime controller", runtimeState),
-			formatKV("Runner controller", runnerState),
-			formatKV("HTTP listen", "configured by -addr"),
-			formatKV("Default upstream", fallback(m.runtime.Upstream, "unavailable")),
-			formatKV("Runtime mode", fallback(m.runtime.Mode, "release")),
-			formatKV("Log entries", fmt.Sprintf("%d cached", len(m.logEntries))),
-		}, "45"),
-		renderPanel("Runtime config editor", m.runtimeConfigLines(), "82"),
-		m.runtimeEditorView(),
-		renderPanel("Shared action map", settingsActionMapLines(), "214"),
-		renderPanel("Runner API parity / Live snapshot", m.settingsRunnerParityLines(), "39"),
-		renderPanel("WebSocket API parity", []string{
-			"status.get",
-			"runtime.start",
-			"runtime.start config",
-			"runtime.stop",
-			"runtime.restart",
-			"runtime.restart config",
-			"api.request GET /sidecar/v1/status",
-			"api.request GET /sidecar/v1/models",
-			"api.request POST /sidecar/v1/models/download",
-			"api.request POST /sidecar/v1/multimodal",
-			"api.request GET /sidecar/v1/runners",
-			"api.request POST /sidecar/v1/runners",
-			"api.request PATCH /sidecar/v1/runners/{id}",
-			"api.request POST /sidecar/v1/runners/{id}/start",
-			"api.request POST /sidecar/v1/runners/{id}/stop",
-			"api.request POST /sidecar/v1/runners/{id}/restart",
-			"api.request * /v1/* upstream proxy",
-			"TUI controls call the same methods underneath: RuntimeController and RunnerController.",
-		}, "205"),
+		settingsPanel,
+		configEditor,
+		activeEditor,
+		actionMap,
+		runnerParity,
+		webSocketParity,
 	)
 }
 

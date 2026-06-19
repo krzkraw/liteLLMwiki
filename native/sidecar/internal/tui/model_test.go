@@ -1147,6 +1147,32 @@ func TestSettingsViewShowsSharedActionMethodMap(t *testing.T) {
 	}
 }
 
+func TestSettingsViewUsesWideTwoColumnLayout(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	model.width = 180
+	model.height = 48
+	model.setActiveTab("settings")
+	view := model.View()
+
+	for _, tc := range []struct {
+		left  string
+		right string
+	}{
+		{left: "Settings", right: "Runtime config editor"},
+		{left: "Shared action map", right: "Runner API parity / Live snapshot"},
+	} {
+		if !viewLineContainsAll(view, tc.left, tc.right) {
+			t.Fatalf("wide settings tab did not place %q beside %q:\n%s", tc.left, tc.right, view)
+		}
+	}
+}
+
 func TestSettingsViewShowsRuntimeConfigEditor(t *testing.T) {
 	t.Parallel()
 

@@ -172,6 +172,37 @@ func TestDashboardRendersReadableRunnerBackendCards(t *testing.T) {
 	}
 }
 
+func TestDashboardRendersTopologyGraphWithRouteAuthority(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	view := model.View()
+
+	for _, expected := range []string{
+		"Topology graph",
+		"Visual route authority",
+		"◉ Browser UI",
+		"api.request / ws://127.0.0.1:9379/sidecar/v1/ws",
+		"◆ Sidecar API",
+		"127.0.0.1:9379 /sidecar/v1/*",
+		"◇ Runner supervisor",
+		"routes=2 runners=2",
+		"├─ embedding => ◐ embed-qwen",
+		"│  http://127.0.0.1:9382",
+		"└─ main => ● main-litert",
+		"   http://127.0.0.1:9381",
+		"Legend: ● running  ◐ configured  ! attention  ○ idle",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("dashboard topology graph missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestModelSwitchesTabsWithKeys(t *testing.T) {
 	t.Parallel()
 

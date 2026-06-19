@@ -660,6 +660,7 @@ func (m Model) dashboardView() string {
 	return joinPanels(
 		renderPanel("System health / Specs", m.systemHealthLines(), "82"),
 		renderPanel("Runtime topology", m.runtimeTopologyLines(), "45"),
+		renderPanel("Topology graph / Visual route authority", m.topologyGraphLines(), "39"),
 		renderPanel("Backend matrix / Runnable backends", m.backendMatrixLines(), "214"),
 		renderPanel("Route map / Routes", m.routeMapLines(), "205"),
 		renderPanel("Recent activity", m.recentActivityLines(6), "244"),
@@ -709,6 +710,57 @@ func (m Model) runtimeTopologyLines() []string {
 		formatKV("Executable", fallback(m.runtime.Executable, "not configured")),
 		"browser api.request => sidecar controllers => runner supervisor",
 	}
+}
+
+func (m Model) topologyGraphLines() []string {
+	lines := []string{
+		"◉ Browser UI",
+		"│  api.request / ws://127.0.0.1:9379/sidecar/v1/ws",
+		"▼",
+		"◆ Sidecar API",
+		"│  127.0.0.1:9379 /sidecar/v1/*",
+		"▼",
+		"◇ Runner supervisor",
+		fmt.Sprintf("│  routes=%d runners=%d", len(m.snapshot.Routes), len(m.snapshot.Runners)),
+	}
+
+	if len(m.snapshot.Routes) == 0 {
+		return append(lines,
+			"└─ no routes wired",
+			"Legend: ● running  ◐ configured  ! attention  ○ idle",
+		)
+	}
+
+	keys := make([]string, 0, len(m.snapshot.Routes))
+	for key := range m.snapshot.Routes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for index, key := range keys {
+		branch := "├─"
+		detailPrefix := "│ "
+		if index == len(keys)-1 {
+			branch = "└─"
+			detailPrefix = "  "
+		}
+
+		runnerID := m.snapshot.Routes[key]
+		glyph := "○"
+		upstream := "unavailable"
+		if runner, ok := m.runnerByID(runnerID); ok {
+			glyph = runnerStateGlyph(runner.State)
+			upstream = fallback(runner.Upstream, "unavailable")
+		}
+
+		lines = append(
+			lines,
+			fmt.Sprintf("%s %s => %s %s", branch, key, glyph, runnerID),
+			detailPrefix+" "+upstream,
+		)
+	}
+
+	return append(lines, "Legend: ● running  ◐ configured  ! attention  ○ idle")
 }
 
 func (m Model) backendMatrixLines() []string {

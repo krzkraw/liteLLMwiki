@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"litert-sidecar/internal/litert"
 	"litert-sidecar/internal/proxy"
 	"litert-sidecar/internal/server"
+	"litert-sidecar/internal/supervisor"
 )
 
 func TestModelsEndpointHandlesBaseAndV1Upstreams(t *testing.T) {
@@ -52,23 +52,20 @@ func TestModelsEndpointHandlesBaseAndV1Upstreams(t *testing.T) {
 	}
 }
 
-func TestRuntimeControllerRetargetsProxyToManagedRuntimePort(t *testing.T) {
+func TestSupervisorRuntimeControllerMapsLegacyExternalConfig(t *testing.T) {
 	t.Parallel()
 
-	upstreamProxy, err := proxy.New("http://127.0.0.1:9381")
-	if err != nil {
-		t.Fatalf("new proxy: %v", err)
-	}
-	manager := litert.NewManager(litert.Config{
-		Launch: false,
-		Host:   "127.0.0.1",
-		Port:   9381,
-	})
-	controller := runtimeControllerAdapter{
-		manager: manager,
-		proxy:   upstreamProxy,
-	}
 	launch := false
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DefaultLiteRT: supervisor.LiteRTConfig{
+			Launch: true,
+			Host:   "127.0.0.1",
+			Port:   9381,
+		},
+	})
+	controller := supervisorRuntimeController{
+		supervisor: runtimeSupervisor,
+	}
 
 	if err := controller.Start(context.Background(), server.RuntimeModeRelease, server.RuntimeControlConfig{
 		LaunchRuntime: &launch,
@@ -79,51 +76,32 @@ func TestRuntimeControllerRetargetsProxyToManagedRuntimePort(t *testing.T) {
 		t.Fatalf("start runtime: %v", err)
 	}
 
-	if got := upstreamProxy.Target(); got != "http://127.0.0.1:9999" {
-		t.Fatalf("external proxy target = %q, want explicit upstream", got)
+	status := controller.Status()
+	if status.State != "external" {
+		t.Fatalf("state = %q, want external", status.State)
 	}
-	if got := manager.Status().Upstream; got != "http://127.0.0.1:9999" {
-		t.Fatalf("external manager upstream = %q, want explicit upstream", got)
-	}
-
-	launch = true
-	if err := manager.ApplyConfigPatch(litert.ConfigPatch{
-		Launch: &launch,
-		Host:   "127.0.0.1",
-		Port:   9481,
-	}); err != nil {
-		t.Fatalf("apply config patch: %v", err)
-	}
-	if err := controller.retargetProxy(server.RuntimeControlConfig{
-		LaunchRuntime: &launch,
-		Upstream:      "http://127.0.0.1:9999",
-	}); err != nil {
-		t.Fatalf("retarget proxy: %v", err)
-	}
-
-	if got := upstreamProxy.Target(); got != "http://127.0.0.1:9481" {
-		t.Fatalf("managed proxy target = %q, want manager runtime port", got)
+	if status.Upstream != "http://127.0.0.1:9999" {
+		t.Fatalf("upstream = %q, want explicit upstream", status.Upstream)
 	}
 }
 
-func TestRetargetProxyToRuntimeManagerUsesInitialRuntimePort(t *testing.T) {
+func TestProxyTargetResolverUsesSupervisorRoutes(t *testing.T) {
 	t.Parallel()
 
 	upstreamProxy, err := proxy.New("http://127.0.0.1:9381")
 	if err != nil {
 		t.Fatalf("new proxy: %v", err)
 	}
-	manager := litert.NewManager(litert.Config{
-		Launch: true,
-		Host:   "127.0.0.1",
-		Port:   9481,
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DefaultLiteRT: supervisor.LiteRTConfig{
+			Launch: false,
+			Host:   "127.0.0.1",
+			Port:   9481,
+		},
 	})
+	upstreamProxy.SetTargetResolver(proxyTargetResolver(runtimeSupervisor))
 
-	if err := retargetProxyToRuntimeManager(upstreamProxy, manager); err != nil {
-		t.Fatalf("retarget initial proxy: %v", err)
-	}
-
-	if got := upstreamProxy.Target(); got != "http://127.0.0.1:9481" {
+	if got := upstreamProxy.TargetForPath("/v1/chat/completions"); got != "http://127.0.0.1:9481" {
 		t.Fatalf("proxy target = %q, want initial runtime port", got)
 	}
 }
@@ -132,7 +110,7 @@ func TestToLiteRTConfigPatchForwardsHuggingFaceToken(t *testing.T) {
 	t.Parallel()
 
 	huggingFaceToken := "hf_secret"
-	got := toLiteRTConfigPatch(server.RuntimeControlConfig{
+	got := toSupervisorLiteRTPatch(server.RuntimeControlConfig{
 		HuggingFaceToken: &huggingFaceToken,
 	})
 	if got.HuggingFaceToken == nil {
@@ -155,7 +133,7 @@ func TestBackendReporterUsesCurrentManagerStatus(t *testing.T) {
 	}))
 	defer modelsServer.Close()
 
-	status := litert.RuntimeStatus{
+	status := supervisor.RuntimeStatus{
 		State:    "running",
 		ModelID:  "runtime-model",
 		Upstream: modelsServer.URL,

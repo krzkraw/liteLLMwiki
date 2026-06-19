@@ -109,3 +109,47 @@ func TestProxyCanRetargetV1Requests(t *testing.T) {
 		t.Fatalf("requests = %#v, want only second upstream", saw)
 	}
 }
+
+func TestProxyUsesTargetResolverPerRequest(t *testing.T) {
+	t.Parallel()
+
+	var saw []string
+	main := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saw = append(saw, "main:"+r.URL.Path)
+		_, _ = w.Write([]byte("main"))
+	}))
+	defer main.Close()
+	embedding := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saw = append(saw, "embedding:"+r.URL.Path)
+		_, _ = w.Write([]byte("embedding"))
+	}))
+	defer embedding.Close()
+
+	proxy, err := New(main.URL)
+	if err != nil {
+		t.Fatalf("new proxy: %v", err)
+	}
+	proxy.SetTargetResolver(func(r *http.Request) (string, bool) {
+		if r.URL.Path == "/v1/embeddings" {
+			return embedding.URL, true
+		}
+		return "", false
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil)
+	rec := httptest.NewRecorder()
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Body.String() != "embedding" {
+		t.Fatalf("response = %q, want embedding", rec.Body.String())
+	}
+	if len(saw) != 1 || saw[0] != "embedding:/v1/embeddings" {
+		t.Fatalf("requests = %#v, want only embedding upstream", saw)
+	}
+	if got := proxy.TargetForPath("/v1/embeddings"); got != embedding.URL {
+		t.Fatalf("target for embeddings = %q, want embedding URL", got)
+	}
+	if got := proxy.TargetForPath("/v1/chat/completions"); got != main.URL {
+		t.Fatalf("target for chat = %q, want main URL", got)
+	}
+}

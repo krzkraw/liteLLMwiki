@@ -60,6 +60,13 @@ const (
 	StateUnavailable State = "unavailable"
 )
 
+type RuntimeMode string
+
+const (
+	RuntimeModeRelease RuntimeMode = "release"
+	RuntimeModeDebug   RuntimeMode = "debug"
+)
+
 type Config struct {
 	DefaultLiteRT  LiteRTConfig
 	Logs           LogSink
@@ -78,6 +85,32 @@ type LiteRTConfig struct {
 	ModelFile        string
 	ModelID          string
 	HuggingFaceToken string
+	Verbose          bool
+}
+
+type LiteRTPatch struct {
+	Launch           *bool
+	Executable       string
+	Host             string
+	Port             int
+	Upstream         string
+	ModelPath        string
+	ModelID          string
+	HuggingFaceToken *string
+	ImportModel      *bool
+	Verbose          *bool
+}
+
+type DefaultLiteRTConfig struct {
+	Launch           bool
+	Executable       string
+	Host             string
+	Port             int
+	Upstream         string
+	ModelFile        string
+	ModelID          string
+	HuggingFaceToken string
+	ImportModel      bool
 	Verbose          bool
 }
 
@@ -160,6 +193,7 @@ type runnerRecord struct {
 	executable       string
 	huggingFaceToken string
 	verbose          bool
+	mode             RuntimeMode
 	cmd              *exec.Cmd
 	done             chan error
 	stopped          bool
@@ -220,6 +254,7 @@ func (s *Supervisor) addDefaultLiteRTRunner(config LiteRTConfig) {
 		executable:       config.Executable,
 		huggingFaceToken: strings.TrimSpace(config.HuggingFaceToken),
 		verbose:          config.Verbose,
+		mode:             initialRuntimeMode(config.Verbose),
 	}
 	s.routes[RoleMain] = DefaultMainRunnerID
 }
@@ -255,6 +290,7 @@ func (s *Supervisor) CreateRunner(spec RunnerSpec) (string, error) {
 		executable:       normalized.Executable,
 		huggingFaceToken: strings.TrimSpace(normalized.HuggingFaceToken),
 		verbose:          normalized.Verbose,
+		mode:             initialRuntimeMode(normalized.Verbose),
 	}
 
 	s.runners[record.snapshot.ID] = record
@@ -303,7 +339,7 @@ func (s *Supervisor) LegacyStatus() RuntimeStatus {
 		ModelID:     snapshot.ModelID,
 		ModelFile:   snapshot.ModelPath,
 		Upstream:    snapshot.Upstream,
-		Mode:        runtimeMode(record.verbose),
+		Mode:        string(record.mode),
 		LogSequence: s.latestLogSeq(),
 		Detail:      snapshot.Detail,
 	}
@@ -349,14 +385,7 @@ func (s *Supervisor) StartRunner(ctx context.Context, id string) error {
 		return nil
 	}
 
-	switch record.snapshot.Runtime {
-	case RuntimeLiteRT:
-		return s.startLiteRTRunner(ctx, record)
-	default:
-		err := fmt.Errorf("runtime %q cannot be started yet", record.snapshot.Runtime)
-		s.markUnavailable(record, err)
-		return err
-	}
+	return s.startRecord(ctx, record)
 }
 
 func (s *Supervisor) StopRunner(ctx context.Context, id string) error {
@@ -389,12 +418,96 @@ func (s *Supervisor) RestartRunner(ctx context.Context, id string) error {
 		})
 		return nil
 	}
-	if record.snapshot.Runtime != RuntimeLiteRT {
+	return s.startRecord(ctx, record)
+}
+
+func (s *Supervisor) StartDefaultLiteRT(
+	ctx context.Context,
+	mode RuntimeMode,
+	patch LiteRTPatch,
+) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	record, err := s.recordForUpdate(DefaultMainRunnerID)
+	if err != nil {
+		return err
+	}
+	if err := s.applyDefaultLiteRTPatch(record, mode, patch); err != nil {
+		return err
+	}
+	if !record.launch {
+		s.updateRecord(record, func(snapshot *RunnerSnapshot) {
+			snapshot.State = StateExternal
+			snapshot.Detail = "Sidecar is proxying an externally managed runner."
+			snapshot.LastError = ""
+		})
+		return nil
+	}
+	return s.startRecord(ctx, record)
+}
+
+func (s *Supervisor) RestartDefaultLiteRT(
+	ctx context.Context,
+	mode RuntimeMode,
+	patch LiteRTPatch,
+) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	record, err := s.recordForUpdate(DefaultMainRunnerID)
+	if err != nil {
+		return err
+	}
+	if err := s.stopRecord(ctx, record); err != nil {
+		return err
+	}
+	if err := s.applyDefaultLiteRTPatch(record, mode, patch); err != nil {
+		return err
+	}
+	if !record.launch {
+		s.updateRecord(record, func(snapshot *RunnerSnapshot) {
+			snapshot.State = StateExternal
+			snapshot.Detail = "Sidecar is proxying an externally managed runner."
+			snapshot.LastError = ""
+		})
+		return nil
+	}
+	return s.startRecord(ctx, record)
+}
+
+func (s *Supervisor) DefaultLiteRTConfig() DefaultLiteRTConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	record := s.runners[DefaultMainRunnerID]
+	if record == nil {
+		return DefaultLiteRTConfig{}
+	}
+
+	return DefaultLiteRTConfig{
+		Launch:           record.launch,
+		Executable:       record.executable,
+		Host:             record.snapshot.Host,
+		Port:             record.snapshot.Port,
+		Upstream:         record.snapshot.Upstream,
+		ModelFile:        record.snapshot.ModelPath,
+		ModelID:          record.snapshot.ModelID,
+		HuggingFaceToken: record.huggingFaceToken,
+		ImportModel:      s.importModel,
+		Verbose:          record.verbose,
+	}
+}
+
+func (s *Supervisor) startRecord(ctx context.Context, record *runnerRecord) error {
+	switch record.snapshot.Runtime {
+	case RuntimeLiteRT:
+		return s.startLiteRTRunner(ctx, record)
+	default:
 		err := fmt.Errorf("runtime %q cannot be started yet", record.snapshot.Runtime)
 		s.markUnavailable(record, err)
 		return err
 	}
-	return s.startLiteRTRunner(ctx, record)
 }
 
 func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord) error {
@@ -436,7 +549,8 @@ func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord
 		}
 	}
 
-	cmd := litert.BuildServeCommandContext(ctx, exe, snapshot.Host, snapshot.Port, record.verbose)
+	serveVerbose := record.mode == RuntimeModeDebug || record.verbose
+	cmd := litert.BuildServeCommandContext(ctx, exe, snapshot.Host, snapshot.Port, serveVerbose)
 	cmd.Stdout = s.writer(record.snapshot.ID, "stdout", s.stdoutTee)
 	cmd.Stderr = s.writer(record.snapshot.ID, "stderr", s.stderrTee)
 	if err := cmd.Start(); err != nil {
@@ -562,6 +676,59 @@ func (s *Supervisor) markUnavailable(record *runnerRecord, err error) {
 		snapshot.LastError = err.Error()
 		snapshot.Detail = err.Error()
 	})
+}
+
+func (s *Supervisor) applyDefaultLiteRTPatch(
+	record *runnerRecord,
+	mode RuntimeMode,
+	patch LiteRTPatch,
+) error {
+	if !isRuntimeMode(mode) {
+		return fmt.Errorf("runtime mode must be %q or %q", RuntimeModeRelease, RuntimeModeDebug)
+	}
+	if patch.Port < 0 {
+		return errors.New("runtime port must be positive")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record.mode = mode
+	if patch.Launch != nil {
+		record.launch = *patch.Launch
+	}
+	if patch.Executable != "" {
+		record.executable = patch.Executable
+		record.snapshot.Executable = patch.Executable
+	}
+	if patch.Host != "" {
+		record.snapshot.Host = patch.Host
+	}
+	if patch.Port > 0 {
+		record.snapshot.Port = patch.Port
+	}
+	if patch.ModelPath != "" {
+		record.snapshot.ModelPath = patch.ModelPath
+	}
+	if patch.ModelID != "" {
+		record.snapshot.ModelID = patch.ModelID
+	}
+	if patch.HuggingFaceToken != nil {
+		record.huggingFaceToken = strings.TrimSpace(*patch.HuggingFaceToken)
+	}
+	if patch.ImportModel != nil {
+		s.importModel = *patch.ImportModel
+	}
+	if patch.Verbose != nil {
+		record.verbose = *patch.Verbose
+	}
+
+	upstream := patch.Upstream
+	if upstream == "" {
+		upstream = record.snapshot.Upstream
+	}
+	record.snapshot.Upstream = configuredUpstream(record.launch, upstream, record.snapshot.Host, record.snapshot.Port)
+	return nil
 }
 
 func (s *Supervisor) writer(id string, stream string, tee io.Writer) io.Writer {
@@ -702,10 +869,18 @@ func isRole(value Role) bool {
 }
 
 func runtimeMode(verbose bool) string {
+	return string(initialRuntimeMode(verbose))
+}
+
+func initialRuntimeMode(verbose bool) RuntimeMode {
 	if verbose {
-		return string(litert.RuntimeModeDebug)
+		return RuntimeModeDebug
 	}
-	return string(litert.RuntimeModeRelease)
+	return RuntimeModeRelease
+}
+
+func isRuntimeMode(mode RuntimeMode) bool {
+	return mode == RuntimeModeRelease || mode == RuntimeModeDebug
 }
 
 func findLiteRTExecutable(configured string) (string, error) {

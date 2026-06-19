@@ -620,6 +620,64 @@ func TestWebSocketAPIRequestStreamsOpenAIProxyResponse(t *testing.T) {
 	}
 }
 
+func TestWebSocketAPIRequestUsesProxyTargetResolver(t *testing.T) {
+	t.Parallel()
+
+	embedding := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Errorf("upstream path = %q, want /v1/embeddings", r.URL.Path)
+			http.Error(w, "bad path", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"embedding":[0.1]}]}`)
+	}))
+	t.Cleanup(embedding.Close)
+
+	main := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "wrong upstream", http.StatusBadGateway)
+	}))
+	t.Cleanup(main.Close)
+
+	upstreamProxy, err := proxy.New(main.URL)
+	if err != nil {
+		t.Fatalf("new proxy: %v", err)
+	}
+	upstreamProxy.SetTargetResolver(func(r *http.Request) (string, bool) {
+		if r.URL.Path == "/v1/embeddings" {
+			return embedding.URL, true
+		}
+		return "", false
+	})
+	handler := New(Options{Proxy: upstreamProxy}).Handler()
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	client := dialTestWebSocket(t, httpServer.URL, "/sidecar/v1/ws")
+	defer client.Close()
+
+	client.WriteJSON(t, map[string]any{
+		"type":       "api.request",
+		"id":         "request-1",
+		"method":     "POST",
+		"path":       "/v1/embeddings",
+		"headers":    map[string]string{"content-type": "application/json"},
+		"bodyBase64": base64.StdEncoding.EncodeToString([]byte(`{"input":"hello"}`)),
+	})
+
+	var start struct {
+		Type   string `json:"type"`
+		ID     string `json:"id"`
+		Status int    `json:"status"`
+	}
+	client.ReadJSON(t, &start)
+	if start.Type != "api.response.start" || start.ID != "request-1" {
+		t.Fatalf("start envelope = %#v", start)
+	}
+	if start.Status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", start.Status)
+	}
+}
+
 func TestWebSocketAPIRequestRunsMultimodal(t *testing.T) {
 	t.Parallel()
 

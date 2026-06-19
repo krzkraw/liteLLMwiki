@@ -347,7 +347,10 @@ func (s *Server) proxyWebSocketAPIRequest(
 		return
 	}
 
-	upstreamURL, err := websocketAPIUpstreamURL(s.proxy.Target(), requestPath)
+	upstreamURL, err := websocketAPIUpstreamURL(
+		s.proxy.TargetForPath(requestPath.Path),
+		requestPath,
+	)
 	if err != nil {
 		_ = writer.sendAPIError(message.ID, err.Error())
 		return

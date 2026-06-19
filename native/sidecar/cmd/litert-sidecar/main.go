@@ -19,6 +19,7 @@ import (
 	"litert-sidecar/internal/platform"
 	"litert-sidecar/internal/proxy"
 	"litert-sidecar/internal/server"
+	"litert-sidecar/internal/supervisor"
 )
 
 func main() {
@@ -32,44 +33,52 @@ func main() {
 	modelID := flag.String("model-id", litert.DefaultModelID, "LiteRT-LM registry model ID used by the web UI")
 	importModel := flag.Bool("import-model", true, "import -model-file into the LiteRT-LM registry when missing")
 	runtimeVerbose := flag.Bool("runtime-verbose", false, "pass --verbose to litert-lm serve")
+	headless := flag.Bool("headless", false, "run without the interactive terminal UI")
 	flag.Parse()
+	_ = headless
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	upstreamProxy, err := proxy.New(*upstream)
-	if err != nil {
-		log.Fatalf("create upstream proxy: %v", err)
-	}
-
 	logs := server.NewLogBroadcaster(512)
 	statusEvents := server.NewStatusBroadcaster()
-	runtimeManager := litert.NewManager(litert.Config{
-		Launch:      *launchRuntime,
-		Executable:  *runtimeExe,
-		Host:        *runtimeHost,
-		Port:        *runtimePort,
-		ModelFile:   *modelFile,
-		ModelID:     *modelID,
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DefaultLiteRT: supervisor.LiteRTConfig{
+			Launch:     *launchRuntime,
+			Executable: *runtimeExe,
+			Host:       *runtimeHost,
+			Port:       *runtimePort,
+			Upstream:   *upstream,
+			ModelFile:  *modelFile,
+			ModelID:    *modelID,
+			Verbose:    *runtimeVerbose,
+		},
+		Logs:        logs,
+		StdoutTee:   os.Stdout,
+		StderrTee:   os.Stderr,
 		ImportModel: *importModel,
-		Verbose:     *runtimeVerbose,
-		Stdout:      logs.Writer("runtime", "stdout", os.Stdout),
-		Stderr:      logs.Writer("runtime", "stderr", os.Stderr),
-		OnStatusChange: func(litert.RuntimeStatus) {
+		OnStatusChange: func(supervisor.Snapshot) {
 			statusEvents.Publish()
 		},
 	})
-	if err := runtimeManager.Start(ctx); err != nil {
+	if err := runtimeSupervisor.StartRunner(ctx, supervisor.DefaultMainRunnerID); err != nil {
 		log.Printf("litert-lm runtime is not ready: %v", err)
 	}
-	if err := retargetProxyToRuntimeManager(upstreamProxy, runtimeManager); err != nil {
-		log.Printf("retarget sidecar proxy: %v", err)
-	}
 
-	runtimeController := runtimeControllerAdapter{
-		manager: runtimeManager,
-		logs:    logs,
-		proxy:   upstreamProxy,
+	initialUpstream := *upstream
+	if routedUpstream, ok := runtimeSupervisor.UpstreamForPath("/v1/chat/completions"); ok {
+		initialUpstream = routedUpstream
+	} else if status := runtimeSupervisor.LegacyStatus(); status.Upstream != "" {
+		initialUpstream = status.Upstream
+	}
+	upstreamProxy, err := proxy.New(initialUpstream)
+	if err != nil {
+		log.Fatalf("create upstream proxy: %v", err)
+	}
+	upstreamProxy.SetTargetResolver(proxyTargetResolver(runtimeSupervisor))
+
+	runtimeController := supervisorRuntimeController{
+		supervisor: runtimeSupervisor,
 	}
 	handler := server.New(server.Options{
 		Proxy:             upstreamProxy,
@@ -77,14 +86,14 @@ func main() {
 		Logs:              logs,
 		StatusEvents:      statusEvents,
 		BackendReporter: func(ctx context.Context) ([]server.BackendStatus, error) {
-			status := runtimeManager.Status()
+			status := runtimeSupervisor.LegacyStatus()
 			return reportBackends(ctx, status.Upstream, status.ModelID)
 		},
 		MultimodalRunner: func(
 			ctx context.Context,
 			request server.MultimodalRunRequest,
 		) (server.MultimodalRunResponse, error) {
-			config := runtimeManager.ConfigSnapshot()
+			config := runtimeSupervisor.DefaultLiteRTConfig()
 			return runMultimodal(
 				ctx,
 				config.Executable,
@@ -121,106 +130,69 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown sidecar: %v", err)
 	}
-	if err := runtimeManager.Stop(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := runtimeSupervisor.StopRunner(shutdownCtx, supervisor.DefaultMainRunnerID); err != nil && !errors.Is(err, context.Canceled) {
 		log.Printf("stop litert-lm runtime: %v", err)
 	}
 }
 
-func retargetProxyToRuntimeManager(upstreamProxy *proxy.Proxy, manager *litert.Manager) error {
-	if upstreamProxy == nil || manager == nil {
-		return nil
-	}
-
-	config := manager.ConfigSnapshot()
-	if !config.Launch {
-		return nil
-	}
-
-	upstream := strings.TrimSpace(manager.Status().Upstream)
-	if upstream == "" {
-		return nil
-	}
-
-	return upstreamProxy.SetTarget(upstream)
+type supervisorRuntimeController struct {
+	supervisor *supervisor.Supervisor
 }
 
-type runtimeControllerAdapter struct {
-	manager *litert.Manager
-	logs    *server.LogBroadcaster
-	proxy   *proxy.Proxy
-}
-
-func (a runtimeControllerAdapter) Start(
+func (c supervisorRuntimeController) Start(
 	ctx context.Context,
 	mode server.RuntimeMode,
 	config server.RuntimeControlConfig,
 ) error {
-	if err := a.manager.StartModeWithConfig(
+	return c.supervisor.StartDefaultLiteRT(
 		ctx,
-		litert.RuntimeMode(mode),
-		toLiteRTConfigPatch(config),
-	); err != nil {
-		return err
-	}
-
-	return a.retargetProxy(config)
+		toSupervisorRuntimeMode(mode),
+		toSupervisorLiteRTPatch(config),
+	)
 }
 
-func (a runtimeControllerAdapter) Stop(ctx context.Context) error {
-	return a.manager.Stop(ctx)
+func (c supervisorRuntimeController) Stop(ctx context.Context) error {
+	return c.supervisor.StopRunner(ctx, supervisor.DefaultMainRunnerID)
 }
 
-func (a runtimeControllerAdapter) Restart(
+func (c supervisorRuntimeController) Restart(
 	ctx context.Context,
 	mode server.RuntimeMode,
 	config server.RuntimeControlConfig,
 ) error {
-	if err := a.manager.RestartWithConfig(
+	return c.supervisor.RestartDefaultLiteRT(
 		ctx,
-		litert.RuntimeMode(mode),
-		toLiteRTConfigPatch(config),
-	); err != nil {
-		return err
-	}
-
-	return a.retargetProxy(config)
+		toSupervisorRuntimeMode(mode),
+		toSupervisorLiteRTPatch(config),
+	)
 }
 
-func (a runtimeControllerAdapter) Status() server.RuntimeStatus {
-	status := toServerRuntimeStatus(a.manager.Status())
-	if a.logs != nil {
-		status.LogSequence = a.logs.LatestSeq()
-	}
-	return status
+func (c supervisorRuntimeController) Status() server.RuntimeStatus {
+	return toServerRuntimeStatus(c.supervisor.LegacyStatus())
 }
 
-func (a runtimeControllerAdapter) retargetProxy(config server.RuntimeControlConfig) error {
-	if a.proxy == nil {
-		return nil
+func proxyTargetResolver(runtimeSupervisor *supervisor.Supervisor) proxy.TargetResolver {
+	return func(r *http.Request) (string, bool) {
+		return runtimeSupervisor.UpstreamForPath(r.URL.Path)
 	}
-
-	upstream := ""
-	if config.LaunchRuntime != nil && !*config.LaunchRuntime {
-		upstream = strings.TrimSpace(config.Upstream)
-	}
-	if upstream == "" {
-		upstream = a.manager.Status().Upstream
-	}
-	if upstream == "" {
-		return nil
-	}
-
-	return a.proxy.SetTarget(upstream)
 }
 
-func toLiteRTConfigPatch(config server.RuntimeControlConfig) litert.ConfigPatch {
-	return litert.ConfigPatch{
+func toSupervisorRuntimeMode(mode server.RuntimeMode) supervisor.RuntimeMode {
+	if mode == server.RuntimeModeDebug {
+		return supervisor.RuntimeModeDebug
+	}
+
+	return supervisor.RuntimeModeRelease
+}
+
+func toSupervisorLiteRTPatch(config server.RuntimeControlConfig) supervisor.LiteRTPatch {
+	return supervisor.LiteRTPatch{
 		Launch:           config.LaunchRuntime,
 		Executable:       config.RuntimeExe,
 		Host:             config.RuntimeHost,
 		Port:             config.RuntimePort,
 		Upstream:         config.Upstream,
-		ModelFile:        config.ModelFile,
+		ModelPath:        config.ModelFile,
 		ModelID:          config.ModelID,
 		HuggingFaceToken: config.HuggingFaceToken,
 		ImportModel:      config.ImportModel,
@@ -228,7 +200,7 @@ func toLiteRTConfigPatch(config server.RuntimeControlConfig) litert.ConfigPatch 
 	}
 }
 
-func toServerRuntimeStatus(status litert.RuntimeStatus) server.RuntimeStatus {
+func toServerRuntimeStatus(status supervisor.RuntimeStatus) server.RuntimeStatus {
 	return server.RuntimeStatus{
 		State:       status.State,
 		Executable:  status.Executable,

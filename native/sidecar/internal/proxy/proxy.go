@@ -7,11 +7,14 @@ import (
 	"sync"
 )
 
+type TargetResolver func(*http.Request) (string, bool)
+
 type Proxy struct {
-	target  *url.URL
-	reverse *httputil.ReverseProxy
-	mu      sync.RWMutex
-	lastErr string
+	target   *url.URL
+	resolver TargetResolver
+	reverse  *httputil.ReverseProxy
+	mu       sync.RWMutex
+	lastErr  string
 }
 
 func New(target string) (*Proxy, error) {
@@ -25,7 +28,7 @@ func New(target string) (*Proxy, error) {
 	}
 	reverse := httputil.NewSingleHostReverseProxy(targetURL)
 	reverse.Director = func(req *http.Request) {
-		nextTarget := proxy.targetSnapshot()
+		nextTarget := proxy.targetForRequest(req)
 		req.URL.Scheme = nextTarget.Scheme
 		req.URL.Host = nextTarget.Host
 		req.Host = nextTarget.Host
@@ -53,8 +56,21 @@ func (p *Proxy) SetTarget(target string) error {
 	return nil
 }
 
+func (p *Proxy) SetTargetResolver(resolver TargetResolver) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.resolver = resolver
+	p.lastErr = ""
+}
+
 func (p *Proxy) Target() string {
 	target := p.targetSnapshot()
+	return target.String()
+}
+
+func (p *Proxy) TargetForPath(path string) string {
+	target := p.targetForRequest(&http.Request{URL: &url.URL{Path: path}})
 	return target.String()
 }
 
@@ -75,6 +91,30 @@ func (p *Proxy) targetSnapshot() *url.URL {
 
 	target := *p.target
 	return &target
+}
+
+func (p *Proxy) targetForRequest(r *http.Request) *url.URL {
+	p.mu.RLock()
+	resolver := p.resolver
+	fallback := *p.target
+	p.mu.RUnlock()
+
+	if resolver == nil {
+		return &fallback
+	}
+
+	target, ok := resolver(r)
+	if !ok || target == "" {
+		return &fallback
+	}
+
+	targetURL, err := url.Parse(target)
+	if err != nil {
+		p.recordError(err)
+		return &fallback
+	}
+
+	return targetURL
 }
 
 func (p *Proxy) recordError(err error) {

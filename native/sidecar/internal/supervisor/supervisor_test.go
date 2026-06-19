@@ -152,6 +152,86 @@ func TestSupervisorSerializesConcurrentStarts(t *testing.T) {
 	}
 }
 
+func TestSupervisorStartsDefaultLiteRTWithControlPatch(t *testing.T) {
+	t.Parallel()
+
+	launch := false
+	importModel := false
+	token := "hf_secret"
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{
+			Launch:   true,
+			Host:     "127.0.0.1",
+			Port:     9381,
+			ModelID:  "old-model",
+			Upstream: "http://127.0.0.1:9381",
+		},
+		ImportModel: true,
+	})
+
+	err := supervisor.StartDefaultLiteRT(context.Background(), RuntimeModeDebug, LiteRTPatch{
+		Launch:           &launch,
+		Executable:       "/opt/litert-lm",
+		Host:             "127.0.0.1",
+		Port:             9481,
+		Upstream:         "http://127.0.0.1:9999",
+		ModelPath:        "models/gemma-4-E2B-it.litertlm",
+		ModelID:          "gemma4-e2b",
+		HuggingFaceToken: &token,
+		ImportModel:      &importModel,
+	})
+	if err != nil {
+		t.Fatalf("start default external litert: %v", err)
+	}
+
+	status := supervisor.LegacyStatus()
+	if status.State != string(StateExternal) {
+		t.Fatalf("state = %q, want external", status.State)
+	}
+	if status.Mode != string(RuntimeModeDebug) {
+		t.Fatalf("mode = %q, want debug", status.Mode)
+	}
+	if status.Upstream != "http://127.0.0.1:9999" {
+		t.Fatalf("upstream = %q, want configured external upstream", status.Upstream)
+	}
+
+	config := supervisor.DefaultLiteRTConfig()
+	if config.Executable != "/opt/litert-lm" {
+		t.Fatalf("executable = %q", config.Executable)
+	}
+	if config.ModelID != "gemma4-e2b" || config.ModelFile != "models/gemma-4-E2B-it.litertlm" {
+		t.Fatalf("model config = %#v", config)
+	}
+	if config.HuggingFaceToken != "hf_secret" {
+		t.Fatalf("hugging face token = %q", config.HuggingFaceToken)
+	}
+	if config.ImportModel {
+		t.Fatal("import model = true, want false")
+	}
+}
+
+func TestSupervisorDefaultLiteRTPatchPreservesExternalUpstream(t *testing.T) {
+	t.Parallel()
+
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{
+			Launch:   false,
+			Host:     "127.0.0.1",
+			Port:     9381,
+			Upstream: "http://127.0.0.1:9999",
+		},
+	})
+
+	err := supervisor.StartDefaultLiteRT(context.Background(), RuntimeModeRelease, LiteRTPatch{})
+	if err != nil {
+		t.Fatalf("start default external litert: %v", err)
+	}
+
+	if got := supervisor.LegacyStatus().Upstream; got != "http://127.0.0.1:9999" {
+		t.Fatalf("upstream = %q, want existing external upstream", got)
+	}
+}
+
 func TestLogBroadcasterRedactsHuggingFaceToken(t *testing.T) {
 	t.Setenv("HF_TOKEN", "hf_secret")
 	t.Setenv("HUGGING_FACE_HUB_TOKEN", "hub_secret")

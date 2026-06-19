@@ -21,8 +21,11 @@ smoke tests, CI, or any process without a TTY.
 
 The TUI uses the same runtime and runner controller methods as the HTTP routes
 and WebSocket `api.request` bridge. It opens with a colorized status header,
-rounded panels, runtime/runner/route/log counters, and tab navigation. On wide
-terminals the dashboard pairs panels into two-column rows for faster scanning.
+rounded panels, runtime/runner/route/log counters, and a status-rich tab bar.
+The tab bar keeps number-key navigation stable while showing dashboard runner
+counts, per-runner state glyphs, model readiness, log count, and Settings API
+readiness. On wide terminals the dashboard pairs panels into two-column rows
+for faster scanning.
 Every tab ends with a context command rail that keeps global navigation,
 tab-specific actions, and the matching controller or WebSocket/API path visible
 without switching pages.

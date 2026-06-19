@@ -549,7 +549,7 @@ func (m Model) activeTabID() string {
 }
 
 func (m Model) tabs() []tab {
-	result := []tab{{id: "dashboard", label: "Dashboard"}}
+	result := []tab{{id: "dashboard", label: m.dashboardTabLabel()}}
 	for _, runner := range m.snapshot.Runners {
 		label := runner.ID
 		if len(label) > 18 {
@@ -557,16 +557,45 @@ func (m Model) tabs() []tab {
 		}
 		result = append(result, tab{
 			id:    "runner:" + runner.ID,
-			label: label,
+			label: runnerStateGlyph(runner.State) + " " + label,
 		})
 	}
 	result = append(
 		result,
-		tab{id: "models", label: "Models"},
-		tab{id: "logs", label: "Logs"},
-		tab{id: "settings", label: "Settings"},
+		tab{id: "models", label: m.modelsTabLabel()},
+		tab{id: "logs", label: m.logsTabLabel()},
+		tab{id: "settings", label: m.settingsTabLabel()},
 	)
 	return result
+}
+
+func (m Model) dashboardTabLabel() string {
+	return fmt.Sprintf(
+		"◆ Dashboard %d/%d running",
+		m.runningRunnerCount(),
+		len(m.snapshot.Runners),
+	)
+}
+
+func (m Model) modelsTabLabel() string {
+	required, present := m.requiredModelCounts()
+	if required <= 0 {
+		return "○ Models no catalog"
+	}
+	return fmt.Sprintf(
+		"%s Models %d/%d",
+		modelSignalGlyph(present, required),
+		present,
+		required,
+	)
+}
+
+func (m Model) logsTabLabel() string {
+	return fmt.Sprintf("%s Logs %d", logSignalGlyph(len(m.logEntries)), len(m.logEntries))
+}
+
+func (m Model) settingsTabLabel() string {
+	return settingsGlyph(m.runtimeController, m.runnerController) + " Settings API"
 }
 
 func (m *Model) refresh() {
@@ -2236,6 +2265,19 @@ func logSignalGlyph(count int) string {
 		return "●"
 	}
 	return "◐"
+}
+
+func settingsGlyph(
+	runtimeController server.RuntimeController,
+	runnerController server.RunnerController,
+) string {
+	if runtimeController != nil && runnerController != nil {
+		return "●"
+	}
+	if runtimeController != nil || runnerController != nil {
+		return "◐"
+	}
+	return "!"
 }
 
 func runnerRouteGlyph(runner server.RunnerSnapshot) string {

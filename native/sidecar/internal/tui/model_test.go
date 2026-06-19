@@ -73,6 +73,33 @@ func TestModelRendersRichVisualShell(t *testing.T) {
 	}
 }
 
+func TestModelRendersStatusRichTabBar(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "runtime ready")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+		Catalog:           testCatalog(t),
+	})
+	view := model.View()
+
+	for _, expected := range []string{
+		"1 ◆ Dashboard 1/2 running",
+		"2 ● main-litert",
+		"3 ◐ embed-qwen",
+		"4 ● Models 4/4",
+		"5 ● Logs 1",
+		"6 ● Settings API",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("status-rich tab bar missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestModelRendersContextCommandRail(t *testing.T) {
 	t.Parallel()
 

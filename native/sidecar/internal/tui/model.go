@@ -110,16 +110,7 @@ type Model struct {
 	runtimeDraft server.RuntimeControlConfig
 }
 
-var asciiBorder = lipgloss.Border{
-	Top:         "-",
-	Bottom:      "-",
-	Left:        "|",
-	Right:       "|",
-	TopLeft:     "+",
-	TopRight:    "+",
-	BottomLeft:  "+",
-	BottomRight: "+",
-}
+var panelBorder = lipgloss.RoundedBorder()
 
 var (
 	titleStyle = lipgloss.NewStyle().
@@ -462,11 +453,8 @@ func (m Model) updateRuntimeEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	var builder strings.Builder
-	builder.WriteString(titleStyle.Render("LiteRT sidecar"))
-	if m.width > 0 || m.height > 0 {
-		builder.WriteString(mutedStyle.Render(fmt.Sprintf("  %dx%d", m.width, m.height)))
-	}
-	builder.WriteString("\n")
+	builder.WriteString(m.headerView())
+	builder.WriteString("\n\n")
 	builder.WriteString(m.tabBar())
 	builder.WriteString("\n\n")
 	if strings.TrimSpace(m.notice) != "" {
@@ -615,6 +603,25 @@ func (m Model) activeRunner() (server.RunnerSnapshot, bool) {
 		return server.RunnerSnapshot{}, false
 	}
 	return m.runnerByID(id)
+}
+
+func (m Model) headerView() string {
+	parts := []string{
+		titleStyle.Render("◆ LiteRT sidecar"),
+		"Runtime: " + statusBadge(m.runtime.State),
+		fmt.Sprintf("Runners: %d", len(m.snapshot.Runners)),
+		fmt.Sprintf("Routes: %d", len(m.snapshot.Routes)),
+		fmt.Sprintf("Logs: %d", len(m.logEntries)),
+	}
+	if m.width > 0 || m.height > 0 {
+		parts = append(parts, fmt.Sprintf("Viewport: %dx%d", m.width, m.height))
+	}
+
+	return lipgloss.NewStyle().
+		Border(panelBorder).
+		BorderForeground(lipgloss.Color("45")).
+		Padding(0, 1).
+		Render(strings.Join(parts, "  "))
 }
 
 func (m Model) runnerByID(id string) (server.RunnerSnapshot, bool) {
@@ -1554,7 +1561,7 @@ func renderPanel(title string, lines []string, color string) string {
 		body = "No data."
 	}
 	return lipgloss.NewStyle().
-		Border(asciiBorder).
+		Border(panelBorder).
 		BorderForeground(lipgloss.Color(color)).
 		Padding(0, 1).
 		Render(subtitleStyle.Render(title) + "\n" + body)

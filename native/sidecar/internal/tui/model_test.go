@@ -41,6 +41,36 @@ func TestModelRendersRequiredTabs(t *testing.T) {
 	}
 }
 
+func TestModelRendersRichVisualShell(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "runtime ready")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+	})
+	model.width = 132
+	model.height = 42
+	view := model.View()
+
+	for _, expected := range []string{
+		"◆ LiteRT sidecar",
+		"Runtime:",
+		"Runners:",
+		"Routes:",
+		"Logs:",
+		"Viewport:",
+		"╭",
+		"╰",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("rich visual shell missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestDashboardRendersSpecsAndRunnableBackends(t *testing.T) {
 	t.Parallel()
 

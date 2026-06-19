@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 const stylesPath = join(process.cwd(), "src", "styles.css");
 const styles = readFileSync(stylesPath, "utf8");
 
+function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n/g, "\n");
+}
+
 function parseDeclarations(body: string): Map<string, string> {
   const declarations = new Map<string, string>();
 
@@ -56,7 +60,7 @@ function mergedDeclarationsFor(selector: string): Map<string, string> {
 
 describe("application layout styles", () => {
   it("keeps document scrolling disabled and gives scroll ownership to panels", () => {
-    expect(styles).toContain("html,\nbody,\n#root");
+    expect(normalizeNewlines(styles)).toContain("html,\nbody,\n#root");
     expect(styles).toContain("overflow: hidden;");
     expect(firstBlockFor(".app-shell").get("overflow")).toBe("hidden");
     expect(firstBlockFor(".workspace").get("height")).toBe("100%");

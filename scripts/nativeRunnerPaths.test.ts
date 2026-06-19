@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 describe("native runner paths", () => {
@@ -10,9 +11,8 @@ describe("native runner paths", () => {
       resolveSidecarSourceRoot,
     } = await import("./nativeRunnerPaths.mjs");
 
-    expect(resolveAppRoot("file:///repo/scripts/nativeRunnerPaths.mjs")).toBe(
-      resolve("/repo"),
-    );
+    const scriptPath = resolve("/repo/scripts/nativeRunnerPaths.mjs");
+    expect(resolveAppRoot(pathToFileURL(scriptPath).href)).toBe(resolve("/repo"));
     expect(resolveNativeRunnerRoot("/repo")).toBe(
       resolve("/repo/native/sidecar-artifacts"),
     );

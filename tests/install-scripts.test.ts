@@ -158,4 +158,16 @@ describe("interactive installer scripts", () => {
       expect(contents).toContain("launch-all");
     }
   });
+
+  it("uses separate PowerShell smoke server stdout and stderr log files", () => {
+    const contents = readRootScript("install.ps1");
+
+    expect(contents).toContain("$StdoutLogPath");
+    expect(contents).toContain("$StderrLogPath");
+    expect(contents).toContain("-RedirectStandardOutput $StdoutLogPath");
+    expect(contents).toContain("-RedirectStandardError $StderrLogPath");
+    expect(contents).not.toContain(
+      "-RedirectStandardOutput $LogPath -RedirectStandardError $LogPath",
+    );
+  });
 });

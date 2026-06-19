@@ -732,7 +732,9 @@ function Run-SmokeTests {
   Write-Host ""
   Write-Host "==> Starting temporary web UI for smoke tests at $SmokeUrl"
 
-  $LogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.log"
+  $StdoutLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stdout.log"
+  $StderrLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-vite.stderr.log"
+  Remove-Item -Force -ErrorAction SilentlyContinue $StdoutLogPath, $StderrLogPath
   $script:DevServerProcess = Start-Process -FilePath "npm" -ArgumentList @(
     "run",
     "dev",
@@ -742,10 +744,20 @@ function Run-SmokeTests {
     "--port",
     [string]$SmokePort,
     "--strictPort"
-  ) -WorkingDirectory $RepoRoot -NoNewWindow -RedirectStandardOutput $LogPath -RedirectStandardError $LogPath -PassThru
+  ) `
+    -WorkingDirectory $RepoRoot `
+    -NoNewWindow `
+    -RedirectStandardOutput $StdoutLogPath `
+    -RedirectStandardError $StderrLogPath `
+    -PassThru
 
   if (-not (Wait-ForUrl $SmokeUrl)) {
-    Get-Content $LogPath
+    if (Test-Path $StdoutLogPath) {
+      Get-Content $StdoutLogPath
+    }
+    if (Test-Path $StderrLogPath) {
+      Get-Content $StderrLogPath
+    }
     throw "Temporary web UI did not become ready."
   }
 

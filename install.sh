@@ -178,8 +178,9 @@ configure_models_nextcloud() {
 
 nextcloud_model_url() {
   local relative_path="$1"
+  local share_path="${relative_path#models/}"
 
-  printf '%s/public.php/webdav/%s\n' "$models_nextcloud_base" "$relative_path"
+  printf '%s/public.php/webdav/%s\n' "$models_nextcloud_base" "$share_path"
 }
 
 llama_executable_name() {

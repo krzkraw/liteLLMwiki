@@ -146,7 +146,8 @@ function Initialize-ModelsNextcloud {
 function Get-NextcloudModelUrl {
   param([string]$RelativePath)
 
-  return "$script:ModelsNextcloudBase/public.php/webdav/$RelativePath"
+  $SharePath = $RelativePath -replace "^models[\\/]", ""
+  return "$script:ModelsNextcloudBase/public.php/webdav/$SharePath"
 }
 
 function Get-BasicAuthorizationHeader {

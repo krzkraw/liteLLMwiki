@@ -78,7 +78,10 @@ Windows PowerShell:
 ```
 
 To use a Nextcloud public share as the model download source instead of the
-default Hugging Face URLs, pass the share URL at install time:
+default Hugging Face URLs, pass the share URL at install time. The share should
+point at the Models folder itself, with `litert/` and `llamacpp/` visible at the
+share root; the installer maps repository paths such as `models/litert/...` to
+share paths such as `litert/...`.
 
 ```bash
 ./install.sh modelsNextcloud=https://nextcloud.example/s/share-token

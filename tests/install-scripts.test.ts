@@ -138,6 +138,13 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("maps repository model paths to Models-folder Nextcloud share paths", () => {
+    expect(readRootScript("install.sh")).toContain("${relative_path#models/}");
+    expect(readRootScript("install.ps1")).toContain(
+      "-replace \"^models[\\\\/]\", \"\"",
+    );
+  });
+
   it("installs npm dependencies, builds artifacts, runs smoke checks, and prints a summary", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

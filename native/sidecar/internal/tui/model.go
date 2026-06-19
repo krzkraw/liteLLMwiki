@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,6 +67,14 @@ type runnerEdit struct {
 	numeric bool
 }
 
+type runtimeEdit struct {
+	field   string
+	label   string
+	current string
+	value   string
+	numeric bool
+}
+
 type runnerPreset struct {
 	id      string
 	role    string
@@ -80,15 +89,17 @@ type Model struct {
 	catalog           *catalog.Catalog
 	ctx               context.Context
 
-	active     int
-	width      int
-	height     int
-	snapshot   server.RunnerSnapshotResponse
-	runtime    server.RuntimeStatus
-	logEntries []server.LogEntry
-	models     []catalog.Entry
-	notice     string
-	edit       *runnerEdit
+	active       int
+	width        int
+	height       int
+	snapshot     server.RunnerSnapshotResponse
+	runtime      server.RuntimeStatus
+	logEntries   []server.LogEntry
+	models       []catalog.Entry
+	notice       string
+	edit         *runnerEdit
+	runtimeEdit  *runtimeEdit
+	runtimeDraft server.RuntimeControlConfig
 }
 
 var asciiBorder = lipgloss.Border{
@@ -175,6 +186,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.KeyMsg:
+		if m.runtimeEdit != nil {
+			return m.updateRuntimeEditKey(msg)
+		}
 		if m.edit != nil {
 			return m.updateEditKey(msg)
 		}
@@ -226,6 +240,42 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.runtimeActionCmd("stop", "")
 			case "r":
 				return m, m.runtimeActionCmd("restart", server.RuntimeModeRelease)
+			case "e":
+				m.runtimeEdit = m.newRuntimeEdit("runtimeExe", "Runtime exe", m.runtimeConfigValue("runtimeExe"), false)
+				return m, nil
+			case "h":
+				m.runtimeEdit = m.newRuntimeEdit("runtimeHost", "Runtime host", m.runtimeConfigValue("runtimeHost"), false)
+				return m, nil
+			case "p":
+				m.runtimeEdit = m.newRuntimeEdit("runtimePort", "Runtime port", m.runtimeConfigValue("runtimePort"), true)
+				return m, nil
+			case "m":
+				m.runtimeEdit = m.newRuntimeEdit("modelFile", "Model file", m.runtimeConfigValue("modelFile"), false)
+				return m, nil
+			case "i":
+				m.runtimeEdit = m.newRuntimeEdit("modelId", "Model ID", m.runtimeConfigValue("modelId"), false)
+				return m, nil
+			case "u":
+				m.runtimeEdit = m.newRuntimeEdit("upstream", "Upstream", m.runtimeConfigValue("upstream"), false)
+				return m, nil
+			case "l":
+				current := boolPointerValue(m.runtimeDraft.LaunchRuntime, true)
+				next := !current
+				m.runtimeDraft.LaunchRuntime = &next
+				m.notice = "runtime config launchRuntime " + strconv.FormatBool(next)
+				return m, nil
+			case "a":
+				current := boolPointerValue(m.runtimeDraft.ImportModel, true)
+				next := !current
+				m.runtimeDraft.ImportModel = &next
+				m.notice = "runtime config importModel " + strconv.FormatBool(next)
+				return m, nil
+			case "v":
+				current := boolPointerValue(m.runtimeDraft.RuntimeVerbose, false)
+				next := !current
+				m.runtimeDraft.RuntimeVerbose = &next
+				m.notice = "runtime config runtimeVerbose " + strconv.FormatBool(next)
+				return m, nil
 			}
 		}
 		if m.activeTabID() == "models" {
@@ -354,6 +404,40 @@ func (m Model) updateEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m Model) updateRuntimeEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	edit := *m.runtimeEdit
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.runtimeEdit = nil
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		if len(m.runtimeEdit.value) > 0 {
+			m.runtimeEdit.value = m.runtimeEdit.value[:len(m.runtimeEdit.value)-1]
+		}
+		return m, nil
+	case tea.KeyEnter:
+		m.runtimeEdit = nil
+		value, err := m.applyRuntimeEdit(edit)
+		if err != nil {
+			m.notice = fmt.Sprintf("runtime config %s failed: %v", edit.field, err)
+			return m, nil
+		}
+		m.notice = fmt.Sprintf("runtime config %s %s", edit.field, value)
+		return m, nil
+	case tea.KeyRunes:
+		input := msg.String()
+		if edit.numeric && !isDigits(input) {
+			return m, nil
+		}
+		m.runtimeEdit.value += input
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
 func (m Model) View() string {
 	var builder strings.Builder
 	builder.WriteString(titleStyle.Render("LiteRT sidecar"))
@@ -397,6 +481,21 @@ func newRunnerEdit(
 ) *runnerEdit {
 	return &runnerEdit{
 		runner:  runner,
+		field:   field,
+		label:   label,
+		current: value,
+		value:   "",
+		numeric: numeric,
+	}
+}
+
+func (m Model) newRuntimeEdit(
+	field string,
+	label string,
+	value string,
+	numeric bool,
+) *runtimeEdit {
+	return &runtimeEdit{
 		field:   field,
 		label:   label,
 		current: value,
@@ -827,7 +926,7 @@ func (m Model) settingsView() string {
 		runnerState = "RunnerController connected"
 	}
 
-	return strings.Join([]string{
+	return joinPanels(
 		renderPanel("Settings", []string{
 			"Controls",
 			"s Start release   d Start debug   r Restart release   x Stop runtime",
@@ -839,11 +938,15 @@ func (m Model) settingsView() string {
 			formatKV("Runtime mode", fallback(m.runtime.Mode, "release")),
 			formatKV("Log entries", fmt.Sprintf("%d cached", len(m.logEntries))),
 		}, "45"),
+		renderPanel("Runtime config editor", m.runtimeConfigLines(), "82"),
+		m.runtimeEditorView(),
 		renderPanel("WebSocket API parity", []string{
 			"status.get",
 			"runtime.start",
+			"runtime.start config",
 			"runtime.stop",
 			"runtime.restart",
+			"runtime.restart config",
 			"api.request GET /sidecar/v1/status",
 			"api.request GET /sidecar/v1/models",
 			"api.request POST /sidecar/v1/models/download",
@@ -855,7 +958,43 @@ func (m Model) settingsView() string {
 			"api.request POST /sidecar/v1/runners/{id}/restart",
 			"TUI controls call the same methods underneath: RuntimeController and RunnerController.",
 		}, "205"),
-	}, "\n\n")
+	)
+}
+
+func (m Model) runtimeConfigLines() []string {
+	return []string{
+		"Edit runtime config used by s/d/r runtime actions",
+		"e Runtime exe   h Runtime host   p Runtime port",
+		"m Model file    i Model ID       u Upstream",
+		"l Launch runtime   a Import model   v Runtime verbose",
+		"",
+		formatKV("Runtime exe", m.runtimeConfigValue("runtimeExe")),
+		formatKV("Runtime host", m.runtimeConfigValue("runtimeHost")),
+		formatKV("Runtime port", m.runtimeConfigValue("runtimePort")),
+		formatKV("Model file", m.runtimeConfigValue("modelFile")),
+		formatKV("Model ID", m.runtimeConfigValue("modelId")),
+		formatKV("Upstream", m.runtimeConfigValue("upstream")),
+		formatKV("Launch runtime", strconv.FormatBool(boolPointerValue(m.runtimeDraft.LaunchRuntime, true))),
+		formatKV("Import model", strconv.FormatBool(boolPointerValue(m.runtimeDraft.ImportModel, true))),
+		formatKV("Runtime verbose", strconv.FormatBool(boolPointerValue(m.runtimeDraft.RuntimeVerbose, false))),
+	}
+}
+
+func (m Model) runtimeEditorView() string {
+	if m.runtimeEdit == nil {
+		return ""
+	}
+	return renderPanel(
+		"Editing "+m.runtimeEdit.label,
+		[]string{
+			formatKV("Current", fallback(m.runtimeEdit.current, "not configured")),
+			"",
+			"New value",
+			m.runtimeEdit.value,
+			"Enter stores this config for runtime.start/runtime.restart; Esc cancels.",
+		},
+		"205",
+	)
 }
 
 func (m Model) runnerActionCmd(action string, id string) tea.Cmd {
@@ -906,11 +1045,11 @@ func (m Model) runtimeActionCmd(action string, mode server.RuntimeMode) tea.Cmd 
 		var err error
 		switch action {
 		case "start":
-			err = m.runtimeController.Start(ctx, mode, server.RuntimeControlConfig{})
+			err = m.runtimeController.Start(ctx, mode, m.runtimeDraft)
 		case "stop":
 			err = m.runtimeController.Stop(ctx)
 		case "restart":
-			err = m.runtimeController.Restart(ctx, mode, server.RuntimeControlConfig{})
+			err = m.runtimeController.Restart(ctx, mode, m.runtimeDraft)
 		default:
 			err = fmt.Errorf("unknown runtime action %q", action)
 		}
@@ -1076,6 +1215,74 @@ func runnerEditPatch(edit runnerEdit) (server.RunnerPatch, string, error) {
 	default:
 		return server.RunnerPatch{}, value, fmt.Errorf("unknown runner field %q", edit.field)
 	}
+}
+
+func (m *Model) applyRuntimeEdit(edit runtimeEdit) (string, error) {
+	value := strings.TrimSpace(edit.value)
+	switch edit.field {
+	case "runtimeExe":
+		m.runtimeDraft.RuntimeExe = value
+	case "runtimeHost":
+		m.runtimeDraft.RuntimeHost = value
+	case "runtimePort":
+		port, err := strconv.Atoi(value)
+		if err != nil || port <= 0 {
+			return value, fmt.Errorf("runtime port must be a positive integer")
+		}
+		m.runtimeDraft.RuntimePort = port
+		value = strconv.Itoa(port)
+	case "modelFile":
+		m.runtimeDraft.ModelFile = value
+	case "modelId":
+		m.runtimeDraft.ModelID = value
+	case "upstream":
+		m.runtimeDraft.Upstream = value
+	default:
+		return value, fmt.Errorf("unknown runtime config field %q", edit.field)
+	}
+	return value, nil
+}
+
+func (m Model) runtimeConfigValue(field string) string {
+	switch field {
+	case "runtimeExe":
+		return fallback(m.runtimeDraft.RuntimeExe, fallback(m.runtime.Executable, "not configured"))
+	case "runtimeHost":
+		return fallback(m.runtimeDraft.RuntimeHost, fallback(upstreamHost(m.runtime.Upstream), "127.0.0.1"))
+	case "runtimePort":
+		return fallbackInt(m.runtimeDraft.RuntimePort, fallback(upstreamPort(m.runtime.Upstream), "auto"))
+	case "modelFile":
+		return fallback(m.runtimeDraft.ModelFile, fallback(m.runtime.ModelFile, "not configured"))
+	case "modelId":
+		return fallback(m.runtimeDraft.ModelID, fallback(m.runtime.ModelID, "not configured"))
+	case "upstream":
+		return fallback(m.runtimeDraft.Upstream, fallback(m.runtime.Upstream, "unavailable"))
+	default:
+		return "unknown"
+	}
+}
+
+func upstreamHost(upstream string) string {
+	parsed, err := url.Parse(upstream)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+func upstreamPort(upstream string) string {
+	parsed, err := url.Parse(upstream)
+	if err != nil {
+		return ""
+	}
+	return parsed.Port()
+}
+
+func boolPointerValue(value *bool, fallbackValue bool) bool {
+	if value == nil {
+		return fallbackValue
+	}
+	return *value
 }
 
 func isDigits(value string) bool {

@@ -571,6 +571,47 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 	}
 }
 
+func TestSettingsViewShowsRuntimeConfigEditor(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	updated := next.(Model)
+	view := updated.View()
+
+	for _, expected := range []string{
+		"Runtime config editor",
+		"e Runtime exe",
+		"h Runtime host",
+		"p Runtime port",
+		"m Model file",
+		"i Model ID",
+		"u Upstream",
+		"l Launch runtime",
+		"a Import model",
+		"v Runtime verbose",
+		"Runtime exe:",
+		"Runtime host:",
+		"Runtime port:",
+		"Model file:",
+		"Model ID:",
+		"Upstream:",
+		"Launch runtime:",
+		"Import model:",
+		"Runtime verbose:",
+		"runtime.start config",
+		"runtime.restart config",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("settings config editor missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestSettingsControlsUseSharedRuntimeController(t *testing.T) {
 	t.Parallel()
 
@@ -614,6 +655,74 @@ func TestSettingsControlsUseSharedRuntimeController(t *testing.T) {
 	}
 }
 
+func TestSettingsRuntimeConfigEditorFeedsSharedRuntimeController(t *testing.T) {
+	t.Parallel()
+
+	runtimeControl := testRuntimeController()
+	model := NewModel(ModelOptions{
+		RuntimeController: runtimeControl,
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	updated := next.(Model)
+
+	for _, edit := range []struct {
+		key   string
+		value string
+		label string
+	}{
+		{key: "p", value: "9499", label: "Runtime port"},
+		{key: "u", value: "http://127.0.0.1:9499", label: "Upstream"},
+		{key: "i", value: "gemma-custom", label: "Model ID"},
+	} {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(edit.key)})
+		updated = next.(Model)
+		if !strings.Contains(updated.View(), "Editing "+edit.label) {
+			t.Fatalf("settings view missing editor for %q:\n%s", edit.label, updated.View())
+		}
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(edit.value)})
+		updated = next.(Model)
+		nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd != nil {
+			t.Fatalf("settings edit %q unexpectedly returned command", edit.label)
+		}
+		updated = nextModel.(Model)
+	}
+
+	for _, key := range []string{"l", "v"} {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		updated = next.(Model)
+	}
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if cmd == nil {
+		t.Fatalf("start runtime returned no command")
+	}
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runtimeControl.lastCall(); got != "start:release:runtimePort=9499:upstream=http://127.0.0.1:9499:modelId=gemma-custom:launchRuntime=false:runtimeVerbose=true" {
+		t.Fatalf("last call = %q, want start with edited runtime config", got)
+	}
+	if !strings.Contains(updated.View(), "started runtime release") {
+		t.Fatalf("view missing runtime start notice:\n%s", updated.View())
+	}
+
+	nextModel, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd == nil {
+		t.Fatalf("restart runtime returned no command")
+	}
+	message = cmd()
+	afterAction, _ = nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runtimeControl.lastCall(); got != "restart:release:runtimePort=9499:upstream=http://127.0.0.1:9499:modelId=gemma-custom:launchRuntime=false:runtimeVerbose=true" {
+		t.Fatalf("last call = %q, want restart with edited runtime config", got)
+	}
+}
+
 type fakeRuntimeController struct {
 	status server.RuntimeStatus
 	calls  []string
@@ -637,9 +746,9 @@ func testRuntimeController() *fakeRuntimeController {
 func (c *fakeRuntimeController) Start(
 	_ context.Context,
 	mode server.RuntimeMode,
-	_ server.RuntimeControlConfig,
+	config server.RuntimeControlConfig,
 ) error {
-	c.calls = append(c.calls, "start:"+string(mode))
+	c.calls = append(c.calls, runtimeControlCall("start", mode, config))
 	return nil
 }
 
@@ -651,9 +760,9 @@ func (c *fakeRuntimeController) Stop(context.Context) error {
 func (c *fakeRuntimeController) Restart(
 	_ context.Context,
 	mode server.RuntimeMode,
-	_ server.RuntimeControlConfig,
+	config server.RuntimeControlConfig,
 ) error {
-	c.calls = append(c.calls, "restart:"+string(mode))
+	c.calls = append(c.calls, runtimeControlCall("restart", mode, config))
 	return nil
 }
 
@@ -666,6 +775,42 @@ func (c *fakeRuntimeController) lastCall() string {
 		return ""
 	}
 	return c.calls[len(c.calls)-1]
+}
+
+func runtimeControlCall(
+	action string,
+	mode server.RuntimeMode,
+	config server.RuntimeControlConfig,
+) string {
+	parts := []string{action, string(mode)}
+	if config.RuntimeExe != "" {
+		parts = append(parts, "runtimeExe="+config.RuntimeExe)
+	}
+	if config.RuntimeHost != "" {
+		parts = append(parts, "runtimeHost="+config.RuntimeHost)
+	}
+	if config.RuntimePort > 0 {
+		parts = append(parts, "runtimePort="+strconv.Itoa(config.RuntimePort))
+	}
+	if config.Upstream != "" {
+		parts = append(parts, "upstream="+config.Upstream)
+	}
+	if config.ModelFile != "" {
+		parts = append(parts, "modelFile="+config.ModelFile)
+	}
+	if config.ModelID != "" {
+		parts = append(parts, "modelId="+config.ModelID)
+	}
+	if config.ImportModel != nil {
+		parts = append(parts, "importModel="+strconv.FormatBool(*config.ImportModel))
+	}
+	if config.LaunchRuntime != nil {
+		parts = append(parts, "launchRuntime="+strconv.FormatBool(*config.LaunchRuntime))
+	}
+	if config.RuntimeVerbose != nil {
+		parts = append(parts, "runtimeVerbose="+strconv.FormatBool(*config.RuntimeVerbose))
+	}
+	return strings.Join(parts, ":")
 }
 
 type fakeRunnerController struct {

@@ -45,4 +45,12 @@ describe("Bun and Rspack toolchain contract", () => {
     expect(existsSync(join(repoRoot, "bun.lock"))).toBe(true);
     expect(existsSync(join(repoRoot, oldLockfile))).toBe(false);
   });
+
+  it("uses the platform WebSocket client for the mock sidecar smoke test", () => {
+    const contents = readRootFile("scripts/mock-openai-compatible-server.test.ts");
+
+    expect(contents).toContain("new WebSocket(");
+    expect(contents).not.toContain("Bun.connect");
+    expect(contents).not.toContain("encodeClientWebSocketTextFrame");
+  });
 });

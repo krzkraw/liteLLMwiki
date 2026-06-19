@@ -27,18 +27,20 @@ runtime command, capability matrix, settings, process details, and recent log
 panels. Runner controls use `s` start, `x` stop, and `r` restart. Runner tabs
 edit settings through the same update method behind
 `PATCH /sidecar/v1/runners/{id}`: `b` backend, `p` port, `h` host, `i` model ID,
-`m` model path, `e` executable, `u` upstream, `l` launch mode, `v` verbose, `t`
-runtime, and `o` role. Typed edits show the current value, accept a replacement
-value, save with Enter, and cancel with Esc. The Settings tab lists the matching
-WebSocket messages and sidecar API paths, exposes default runtime controls with
-`s` start release, `d` start debug, `x` stop, and `r` restart release, and
-includes a runtime config editor for the same `runtime.start` and
-`runtime.restart` config fields used by WebSocket clients. Settings keys edit
-`e` runtime executable, `h` runtime host, `p` runtime port, `m` model file, `i`
-model ID, and `u` upstream, plus `l` launch runtime, `a` import model, and `v`
-runtime verbose toggles. The Models tab can also create catalog-backed llama.cpp
-runners with `m` main, `e` embedding, and `r` rerank by calling the same runner
-creation method behind `POST /sidecar/v1/runners`.
+`m` model path, `e` executable, `u` upstream, `f` Hugging Face token, `l`
+launch mode, `v` verbose, `t` runtime, and `o` role. Typed edits show the
+current value, accept a replacement value, save with Enter, and cancel with Esc;
+HF token edits mask the typed value and only report `set` or `cleared`. The
+Settings tab lists the matching WebSocket messages and sidecar API paths,
+exposes default runtime controls with `s` start release, `d` start debug, `x`
+stop, and `r` restart release, and includes a runtime config editor for the same
+`runtime.start` and `runtime.restart` config fields used by WebSocket clients.
+Settings keys edit `e` runtime executable, `h` runtime host, `p` runtime port,
+`m` model file, `i` model ID, `u` upstream, and `f` Hugging Face token, plus
+`l` launch runtime, `a` import model, and `v` runtime verbose toggles. The
+Models tab can also create catalog-backed llama.cpp runners with `m` main, `e`
+embedding, and `r` rerank by calling the same runner creation method behind
+`POST /sidecar/v1/runners`.
 
 By default it:
 

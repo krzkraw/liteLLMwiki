@@ -150,6 +150,7 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 		"m Model path",
 		"e Executable",
 		"u Upstream",
+		"f HF token",
 		"l Launch",
 		"v Verbose",
 		"t Runtime",
@@ -166,6 +167,7 @@ func TestRunnerTabShowsFullSettingsDetailsAndControls(t *testing.T) {
 		"Launch",
 		"Verbose",
 		"Upstream",
+		"HF token",
 		"Details",
 		"PID",
 		"Command",
@@ -293,6 +295,60 @@ func TestRunnerTabEditsModelIDThroughSharedRunnerController(t *testing.T) {
 	}
 	if !strings.Contains(view, "Model ID:      custom-embedding") {
 		t.Fatalf("view missing updated model id:\n%s", view)
+	}
+}
+
+func TestRunnerTabEditsHuggingFaceTokenThroughSharedRunnerControllerWithoutRenderingSecret(t *testing.T) {
+	t.Parallel()
+
+	const secret = "hf_test_runner_secret"
+
+	runners := testRunnerController()
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	updated := next.(Model)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	updated = next.(Model)
+	view := updated.View()
+	if !strings.Contains(view, "Editing HF token for embed-qwen") {
+		t.Fatalf("view missing HF token editor")
+	}
+	if strings.Contains(view, secret) {
+		t.Fatalf("view leaked runner HF token before typing")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(secret)})
+	updated = next.(Model)
+	if strings.Contains(updated.View(), secret) {
+		t.Fatalf("view leaked runner HF token while editing")
+	}
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("HF token editor enter returned no command")
+	}
+
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runners.lastCall(); got != "update:embed-qwen:huggingFaceToken=set" {
+		t.Fatalf("last call = %q, want masked HF token update", got)
+	}
+	if strings.Contains(runners.lastCall(), secret) {
+		t.Fatalf("runner controller call leaked HF token")
+	}
+	view = updated.View()
+	if strings.Contains(view, secret) {
+		t.Fatalf("view leaked runner HF token after save")
+	}
+	if !strings.Contains(view, "updated embed-qwen huggingFaceToken set") {
+		t.Fatalf("view missing masked HF token update notice:\n%s", view)
 	}
 }
 
@@ -591,6 +647,7 @@ func TestSettingsViewShowsRuntimeConfigEditor(t *testing.T) {
 		"m Model file",
 		"i Model ID",
 		"u Upstream",
+		"f HF token",
 		"l Launch runtime",
 		"a Import model",
 		"v Runtime verbose",
@@ -600,6 +657,7 @@ func TestSettingsViewShowsRuntimeConfigEditor(t *testing.T) {
 		"Model file:",
 		"Model ID:",
 		"Upstream:",
+		"HF token:",
 		"Launch runtime:",
 		"Import model:",
 		"Runtime verbose:",
@@ -609,6 +667,64 @@ func TestSettingsViewShowsRuntimeConfigEditor(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("settings config editor missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestSettingsRuntimeConfigEditorSetsHuggingFaceTokenWithoutRenderingSecret(t *testing.T) {
+	t.Parallel()
+
+	const secret = "hf_test_runtime_secret"
+
+	runtimeControl := testRuntimeController()
+	model := NewModel(ModelOptions{
+		RuntimeController: runtimeControl,
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	updated := next.(Model)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	updated = next.(Model)
+	view := updated.View()
+	if !strings.Contains(view, "Editing HF token") {
+		t.Fatalf("settings view missing HF token editor")
+	}
+	if strings.Contains(view, secret) {
+		t.Fatalf("settings view leaked HF token before typing")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(secret)})
+	updated = next.(Model)
+	if strings.Contains(updated.View(), secret) {
+		t.Fatalf("settings view leaked HF token while editing")
+	}
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("settings HF token edit unexpectedly returned command")
+	}
+	updated = nextModel.(Model)
+	if strings.Contains(updated.View(), secret) {
+		t.Fatalf("settings view leaked HF token after save")
+	}
+
+	nextModel, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if cmd == nil {
+		t.Fatalf("start runtime returned no command")
+	}
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runtimeControl.lastCall(); got != "start:release:huggingFaceToken=set" {
+		t.Fatalf("last call = %q, want masked runtime HF token config", got)
+	}
+	if strings.Contains(runtimeControl.lastCall(), secret) {
+		t.Fatalf("runtime controller call leaked HF token")
+	}
+	if strings.Contains(updated.View(), secret) {
+		t.Fatalf("settings view leaked HF token after runtime start")
 	}
 }
 
@@ -777,6 +893,13 @@ func (c *fakeRuntimeController) lastCall() string {
 	return c.calls[len(c.calls)-1]
 }
 
+func maskedTokenState(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "cleared"
+	}
+	return "set"
+}
+
 func runtimeControlCall(
 	action string,
 	mode server.RuntimeMode,
@@ -800,6 +923,9 @@ func runtimeControlCall(
 	}
 	if config.ModelID != "" {
 		parts = append(parts, "modelId="+config.ModelID)
+	}
+	if config.HuggingFaceToken != nil {
+		parts = append(parts, "huggingFaceToken="+maskedTokenState(*config.HuggingFaceToken))
 	}
 	if config.ImportModel != nil {
 		parts = append(parts, "importModel="+strconv.FormatBool(*config.ImportModel))
@@ -940,6 +1066,9 @@ func (c *fakeRunnerController) UpdateRunner(
 	}
 	if patch.ModelID != "" {
 		parts = append(parts, "modelId="+patch.ModelID)
+	}
+	if patch.HuggingFaceToken != nil {
+		parts = append(parts, "huggingFaceToken="+maskedTokenState(*patch.HuggingFaceToken))
 	}
 	if patch.Launch != nil {
 		parts = append(parts, "launch="+strconv.FormatBool(*patch.Launch))

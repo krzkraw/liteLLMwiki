@@ -65,6 +65,7 @@ type runnerEdit struct {
 	current string
 	value   string
 	numeric bool
+	secret  bool
 }
 
 type runtimeEdit struct {
@@ -73,6 +74,7 @@ type runtimeEdit struct {
 	current string
 	value   string
 	numeric bool
+	secret  bool
 }
 
 type runnerPreset struct {
@@ -258,6 +260,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case "u":
 				m.runtimeEdit = m.newRuntimeEdit("upstream", "Upstream", m.runtimeConfigValue("upstream"), false)
 				return m, nil
+			case "f":
+				m.runtimeEdit = m.newSecretRuntimeEdit("huggingFaceToken", "HF token", m.runtimeConfigValue("huggingFaceToken"))
+				return m, nil
 			case "l":
 				current := boolPointerValue(m.runtimeDraft.LaunchRuntime, true)
 				next := !current
@@ -315,6 +320,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "u":
 				m.edit = newRunnerEdit(runner, "upstream", "Upstream", runner.Upstream, false)
+				return m, nil
+			case "f":
+				m.edit = newSecretRunnerEdit(runner, "huggingFaceToken", "HF token", "not shown")
 				return m, nil
 			case "l":
 				launch := !runner.Launch
@@ -489,6 +497,17 @@ func newRunnerEdit(
 	}
 }
 
+func newSecretRunnerEdit(
+	runner server.RunnerSnapshot,
+	field string,
+	label string,
+	value string,
+) *runnerEdit {
+	edit := newRunnerEdit(runner, field, label, value, false)
+	edit.secret = true
+	return edit
+}
+
 func (m Model) newRuntimeEdit(
 	field string,
 	label string,
@@ -502,6 +521,16 @@ func (m Model) newRuntimeEdit(
 		value:   "",
 		numeric: numeric,
 	}
+}
+
+func (m Model) newSecretRuntimeEdit(
+	field string,
+	label string,
+	value string,
+) *runtimeEdit {
+	edit := m.newRuntimeEdit(field, label, value, false)
+	edit.secret = true
+	return edit
 }
 
 func (m Model) activeTabID() string {
@@ -735,6 +764,7 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		formatKV("Launch", runnerLaunchMode(runner)),
 		formatKV("Verbose", strconv.FormatBool(runner.Verbose)),
 		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
+		formatKV("HF token", "not shown"),
 	}
 
 	details := []string{
@@ -809,7 +839,7 @@ func (m Model) runnerControlLines(runner server.RunnerSnapshot) []string {
 		"b Backend CPU/GPU   l Launch managed/external   v Verbose",
 		"t Runtime   o Role",
 		"p Port   h Host   i Model ID",
-		"m Model path   e Executable   u Upstream",
+		"m Model path   e Executable   u Upstream   f HF token",
 		"PATCH " + basePath,
 	}
 }
@@ -859,13 +889,17 @@ func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
 	if m.edit == nil || m.edit.runner.ID != runner.ID {
 		return ""
 	}
+	newValue := m.edit.value
+	if m.edit.secret {
+		newValue = secretEditValue(m.edit.value)
+	}
 	return renderPanel(
 		"Editing "+m.edit.label+" for "+runner.ID,
 		[]string{
 			formatKV("Current", fallback(m.edit.current, "not configured")),
 			"",
 			"New value",
-			m.edit.value,
+			newValue,
 			"Enter saves through PATCH /sidecar/v1/runners/{id}; Esc cancels.",
 		},
 		"205",
@@ -966,6 +1000,7 @@ func (m Model) runtimeConfigLines() []string {
 		"Edit runtime config used by s/d/r runtime actions",
 		"e Runtime exe   h Runtime host   p Runtime port",
 		"m Model file    i Model ID       u Upstream",
+		"f HF token",
 		"l Launch runtime   a Import model   v Runtime verbose",
 		"",
 		formatKV("Runtime exe", m.runtimeConfigValue("runtimeExe")),
@@ -974,6 +1009,7 @@ func (m Model) runtimeConfigLines() []string {
 		formatKV("Model file", m.runtimeConfigValue("modelFile")),
 		formatKV("Model ID", m.runtimeConfigValue("modelId")),
 		formatKV("Upstream", m.runtimeConfigValue("upstream")),
+		formatKV("HF token", m.runtimeConfigValue("huggingFaceToken")),
 		formatKV("Launch runtime", strconv.FormatBool(boolPointerValue(m.runtimeDraft.LaunchRuntime, true))),
 		formatKV("Import model", strconv.FormatBool(boolPointerValue(m.runtimeDraft.ImportModel, true))),
 		formatKV("Runtime verbose", strconv.FormatBool(boolPointerValue(m.runtimeDraft.RuntimeVerbose, false))),
@@ -984,13 +1020,17 @@ func (m Model) runtimeEditorView() string {
 	if m.runtimeEdit == nil {
 		return ""
 	}
+	newValue := m.runtimeEdit.value
+	if m.runtimeEdit.secret {
+		newValue = secretEditValue(m.runtimeEdit.value)
+	}
 	return renderPanel(
 		"Editing "+m.runtimeEdit.label,
 		[]string{
 			formatKV("Current", fallback(m.runtimeEdit.current, "not configured")),
 			"",
 			"New value",
-			m.runtimeEdit.value,
+			newValue,
 			"Enter stores this config for runtime.start/runtime.restart; Esc cancels.",
 		},
 		"205",
@@ -1212,6 +1252,8 @@ func runnerEditPatch(edit runnerEdit) (server.RunnerPatch, string, error) {
 		return server.RunnerPatch{Executable: value}, value, nil
 	case "upstream":
 		return server.RunnerPatch{Upstream: value}, value, nil
+	case "huggingFaceToken":
+		return server.RunnerPatch{HuggingFaceToken: &value}, tokenNoticeValue(value), nil
 	default:
 		return server.RunnerPatch{}, value, fmt.Errorf("unknown runner field %q", edit.field)
 	}
@@ -1237,6 +1279,9 @@ func (m *Model) applyRuntimeEdit(edit runtimeEdit) (string, error) {
 		m.runtimeDraft.ModelID = value
 	case "upstream":
 		m.runtimeDraft.Upstream = value
+	case "huggingFaceToken":
+		m.runtimeDraft.HuggingFaceToken = &value
+		value = tokenNoticeValue(value)
 	default:
 		return value, fmt.Errorf("unknown runtime config field %q", edit.field)
 	}
@@ -1257,9 +1302,28 @@ func (m Model) runtimeConfigValue(field string) string {
 		return fallback(m.runtimeDraft.ModelID, fallback(m.runtime.ModelID, "not configured"))
 	case "upstream":
 		return fallback(m.runtimeDraft.Upstream, fallback(m.runtime.Upstream, "unavailable"))
+	case "huggingFaceToken":
+		if m.runtimeDraft.HuggingFaceToken == nil {
+			return "not set"
+		}
+		return tokenNoticeValue(*m.runtimeDraft.HuggingFaceToken)
 	default:
 		return "unknown"
 	}
+}
+
+func secretEditValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "[empty clears token]"
+	}
+	return "[hidden]"
+}
+
+func tokenNoticeValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "cleared"
+	}
+	return "set"
 }
 
 func upstreamHost(upstream string) string {

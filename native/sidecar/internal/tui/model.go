@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -17,6 +21,7 @@ import (
 )
 
 const refreshInterval = time.Second
+const defaultChatEndpoint = "http://127.0.0.1:9379/v1/chat/completions"
 
 type tab struct {
 	id    string
@@ -29,6 +34,7 @@ type ModelOptions struct {
 	Logs              *server.LogBroadcaster
 	Catalog           *catalog.Catalog
 	Context           context.Context
+	ChatEndpoint      string
 }
 
 type tickMsg time.Time
@@ -57,6 +63,12 @@ type modelDownloadMsg struct {
 	err   error
 }
 
+type chatCompletionMsg struct {
+	prompt   string
+	response string
+	err      error
+}
+
 type runnerUpdateMsg struct {
 	field  string
 	value  string
@@ -83,6 +95,11 @@ type runtimeEdit struct {
 	secret  bool
 }
 
+type chatMessage struct {
+	role    string
+	content string
+}
+
 type runnerPreset struct {
 	id      string
 	role    string
@@ -96,6 +113,7 @@ type Model struct {
 	logs              *server.LogBroadcaster
 	catalog           *catalog.Catalog
 	ctx               context.Context
+	chatEndpoint      string
 
 	active       int
 	width        int
@@ -108,6 +126,9 @@ type Model struct {
 	edit         *runnerEdit
 	runtimeEdit  *runtimeEdit
 	runtimeDraft server.RuntimeControlConfig
+	chatDraft    string
+	chatMessages []chatMessage
+	chatBusy     bool
 }
 
 var panelBorder = lipgloss.RoundedBorder()
@@ -142,12 +163,17 @@ func NewModel(options ModelOptions) Model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	chatEndpoint := strings.TrimSpace(options.ChatEndpoint)
+	if chatEndpoint == "" {
+		chatEndpoint = defaultChatEndpoint
+	}
 	model := Model{
 		runtimeController: options.RuntimeController,
 		runnerController:  options.RunnerController,
 		logs:              options.Logs,
 		catalog:           options.Catalog,
 		ctx:               ctx,
+		chatEndpoint:      chatEndpoint,
 		active:            0,
 	}
 	model.refresh()
@@ -209,6 +235,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.setActiveTab("models")
 		m.notice = m.modelDownloadNotice(msg)
+	case chatCompletionMsg:
+		m.chatBusy = false
+		if msg.err != nil {
+			m.notice = fmt.Sprintf("chat prompt failed: %v", msg.err)
+			break
+		}
+		m.chatMessages = append(m.chatMessages, chatMessage{
+			role:    "assistant",
+			content: msg.response,
+		})
+		m.notice = "sent chat prompt through /v1/chat/completions"
 	case runnerUpdateMsg:
 		m.refresh()
 		m.setActiveTab("runner:" + msg.runner.ID)
@@ -228,10 +265,27 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyLeft, tea.KeyShiftTab:
 		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
 		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH, tea.KeyEnter:
+		if m.activeTabID() == "chat" {
+			return m.updateChatKey(msg)
+		}
 	case tea.KeyRunes:
 		value := msg.String()
 		if m.selectRuneTab(value) {
 			return m, nil
+		}
+		if m.activeTabID() == "chat" {
+			return m.updateChatKey(msg)
+		}
+		if m.activeTabID() == "wizard" {
+			switch strings.ToLower(value) {
+			case "m":
+				return m, m.runnerCreateCmd("main")
+			case "e":
+				return m, m.runnerCreateCmd("embedding")
+			case "r":
+				return m, m.runnerCreateCmd("reranking")
+			}
 		}
 		if m.activeTabID() == "settings" {
 			switch strings.ToLower(value) {
@@ -451,6 +505,38 @@ func (m Model) updateRuntimeEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m Model) updateChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		if len(m.chatDraft) > 0 {
+			m.chatDraft = m.chatDraft[:len(m.chatDraft)-1]
+		}
+		return m, nil
+	case tea.KeyEnter:
+		prompt := strings.TrimSpace(m.chatDraft)
+		if prompt == "" || m.chatBusy {
+			return m, nil
+		}
+		runner, ok := m.selectedChatRunner()
+		if !ok {
+			m.notice = "chat prompt failed: no main runner configured"
+			return m, nil
+		}
+		m.chatDraft = ""
+		m.chatBusy = true
+		m.chatMessages = append(m.chatMessages, chatMessage{
+			role:    "user",
+			content: prompt,
+		})
+		return m, m.chatCompletionCmd(prompt, runner)
+	case tea.KeyRunes:
+		m.chatDraft += msg.String()
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
 func (m Model) View() string {
 	var builder strings.Builder
 	builder.WriteString(m.headerView())
@@ -467,6 +553,10 @@ func (m Model) View() string {
 	switch m.activeTabID() {
 	case "dashboard":
 		builder.WriteString(m.dashboardView())
+	case "wizard":
+		builder.WriteString(m.wizardView())
+	case "chat":
+		builder.WriteString(m.chatView())
 	case "models":
 		builder.WriteString(m.modelsView())
 	case "logs":
@@ -564,6 +654,8 @@ func (m Model) tabs() []tab {
 	}
 	result = append(
 		result,
+		tab{id: "wizard", label: m.wizardTabLabel()},
+		tab{id: "chat", label: m.chatTabLabel()},
 		tab{id: "models", label: m.modelsTabLabel()},
 		tab{id: "logs", label: m.logsTabLabel()},
 		tab{id: "settings", label: m.settingsTabLabel()},
@@ -590,6 +682,18 @@ func (m Model) modelsTabLabel() string {
 		present,
 		required,
 	)
+}
+
+func (m Model) wizardTabLabel() string {
+	return "◇ Launch Wizard"
+}
+
+func (m Model) chatTabLabel() string {
+	runner, ok := m.selectedChatRunner()
+	if !ok {
+		return "○ Chat no main"
+	}
+	return runnerStateGlyph(runner.State) + " Chat " + runner.ID
 }
 
 func (m Model) logsTabLabel() string {
@@ -666,6 +770,24 @@ func (m Model) runnerByID(id string) (server.RunnerSnapshot, bool) {
 	return server.RunnerSnapshot{}, false
 }
 
+func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
+	var fallbackRunner server.RunnerSnapshot
+	hasFallback := false
+	for _, runner := range m.snapshot.Runners {
+		if runner.Role != "main" {
+			continue
+		}
+		if strings.EqualFold(runner.State, "running") {
+			return runner, true
+		}
+		if !hasFallback {
+			fallbackRunner = runner
+			hasFallback = true
+		}
+	}
+	return fallbackRunner, hasFallback
+}
+
 func (m *Model) setActiveTab(id string) {
 	for index, item := range m.tabs() {
 		if item.id == id {
@@ -732,6 +854,13 @@ func (m Model) activeMissionLine() string {
 	switch m.activeTabID() {
 	case "dashboard":
 		return "◆ Dashboard / status.get + /sidecar/v1/status"
+	case "wizard":
+		return "◇ Launch Wizard / RunnerController.CreateRunner"
+	case "chat":
+		if runner, ok := m.selectedChatRunner(); ok {
+			return "● Chat / " + runner.ID + " -> /v1/chat/completions"
+		}
+		return "○ Chat / no main runner"
 	case "models":
 		return "● Models / Catalog.Download + RunnerController.CreateRunner"
 	case "logs":
@@ -777,7 +906,7 @@ func (m Model) commandRailView() string {
 
 func (m Model) commandRailLines() []string {
 	lines := []string{
-		"Global: Tab/Right next | Shift+Tab/Left previous | 1-6 jump | Esc quit",
+		fmt.Sprintf("Global: Tab/Right next | Shift+Tab/Left previous | 1-%d jump | Esc quit", len(m.tabs())),
 	}
 
 	switch m.activeTabID() {
@@ -786,6 +915,19 @@ func (m Model) commandRailLines() []string {
 			lines,
 			"Dashboard: specs + topology + runnable backends",
 			"API: status.get + /sidecar/v1/status",
+		)
+	case "wizard":
+		lines = append(
+			lines,
+			"Launch Wizard: m Main | e Embedding | r Rerank",
+			"API: RunnerController.CreateRunner + POST /sidecar/v1/runners",
+			"API: WebSocket api.request POST /sidecar/v1/runners",
+		)
+	case "chat":
+		lines = append(
+			lines,
+			"Chat: type prompt | Enter send | Backspace edit",
+			"API: POST /v1/chat/completions through supervisor route authority",
 		)
 	case "models":
 		lines = append(
@@ -1483,6 +1625,156 @@ func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
 	)
 }
 
+func (m Model) wizardView() string {
+	presets := renderPanel(
+		"Launch Wizard / Runner presets",
+		[]string{
+			"Choose a runnable preset, inspect the dry run, then create through the shared controller.",
+			"",
+			"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
+			"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
+			"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
+			"",
+			"RunnerController.CreateRunner",
+			"POST /sidecar/v1/runners",
+			"WebSocket api.request POST /sidecar/v1/runners",
+		},
+		"214",
+	)
+	dryRun := renderPanel("Dry-run command preview", m.wizardDryRunLines(), "45")
+	routeAuthority := renderPanel(
+		"Wizard route authority",
+		[]string{
+			"main -> /v1/chat/completions",
+			"embedding -> /v1/embeddings",
+			"reranking -> /v1/rerank",
+			"Created runners appear as first-class runner tabs.",
+			"Models tab uses the same RunnerController.CreateRunner action.",
+		},
+		"39",
+	)
+
+	if m.width >= 150 {
+		return joinPanels(
+			joinPanelRow(presets, dryRun),
+			routeAuthority,
+		)
+	}
+
+	return joinPanels(presets, dryRun, routeAuthority)
+}
+
+func (m Model) wizardDryRunLines() []string {
+	spec, _, err := m.runnerSpecForRole("main")
+	if err != nil {
+		return []string{
+			"Main llama.cpp preset unavailable.",
+			err.Error(),
+		}
+	}
+
+	return []string{
+		formatKV("ID", spec.ID),
+		formatKV("Role", spec.Role),
+		formatKV("Runtime", spec.Runtime),
+		formatKV("Backend", spec.Backend),
+		formatKV("Model", spec.ModelID),
+		formatKV("Model path", spec.ModelPath),
+		formatKV("Host", spec.Host),
+		formatKV("Port", strconv.Itoa(spec.Port)),
+		formatKV("API route", runnerRoleRoute(spec.Role)),
+		formatKV("Launch", runnerSpecLaunchMode(spec)),
+		formatKV("Upstream", spec.Upstream),
+		"",
+		"Command preview",
+		wizardCommandPreview(spec),
+	}
+}
+
+func (m Model) chatView() string {
+	runnerPanel := renderPanel("Chat console / Main runner", m.chatRunnerLines(), "82")
+	composer := renderPanel("Composer", m.chatComposerLines(), "214")
+	transcript := renderPanel("Transcript", m.chatTranscriptLines(), "45")
+	parity := renderPanel("API parity / Route authority", m.chatParityLines(), "39")
+
+	if m.width >= 150 {
+		return joinPanels(
+			joinPanelRow(runnerPanel, composer),
+			joinPanelRow(transcript, parity),
+		)
+	}
+
+	return joinPanels(runnerPanel, composer, transcript, parity)
+}
+
+func (m Model) chatRunnerLines() []string {
+	runner, ok := m.selectedChatRunner()
+	if !ok {
+		return []string{
+			"Selected runner: none",
+			"Create or start a main runner from Launch Wizard or Models.",
+		}
+	}
+
+	return []string{
+		formatKV("Selected runner", runner.ID),
+		formatKV("State", fallback(runner.State, "unknown")),
+		formatKV("Route", runnerRoleRoute(runner.Role)),
+		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
+		formatKV("Model", fallback(runner.ModelID, "not configured")),
+		formatKV("Backend", fallback(runner.Backend, "default")),
+		formatKV("Capabilities", capabilitiesLine(runner.Capabilities)),
+	}
+}
+
+func (m Model) chatComposerLines() []string {
+	prompt := m.chatDraft
+	if prompt == "" {
+		prompt = "(empty)"
+	}
+	state := "ready"
+	if m.chatBusy {
+		state = "waiting for response"
+	}
+	return []string{
+		formatKV("Prompt", prompt),
+		formatKV("State", state),
+		"Enter sends via POST /v1/chat/completions; Backspace edits.",
+		"Requests use stream=false and the selected main runner model ID.",
+	}
+}
+
+func (m Model) chatTranscriptLines() []string {
+	if len(m.chatMessages) == 0 {
+		return []string{"No messages yet."}
+	}
+
+	lines := make([]string, 0, len(m.chatMessages))
+	for _, message := range m.chatMessages {
+		prefix := "Assistant"
+		if message.role == "user" {
+			prefix = "You"
+		}
+		lines = append(lines, prefix+": "+message.content)
+	}
+	return lines
+}
+
+func (m Model) chatParityLines() []string {
+	lines := []string{
+		"TUI Enter -> POST " + m.chatEndpoint,
+		"/v1/chat/completions -> runner supervisor route authority",
+	}
+	if runner, ok := m.selectedChatRunner(); ok {
+		lines = append(
+			lines,
+			"Selected runner: "+runner.ID,
+			"Route: main -> "+runner.ID,
+		)
+	}
+	return lines
+}
+
 func (m Model) modelsView() string {
 	readiness := renderPanel(
 		"Model readiness / Required artifacts",
@@ -2033,6 +2325,21 @@ func (m Model) runnerCreateCmd(role string) tea.Cmd {
 	}
 }
 
+func (m Model) chatCompletionCmd(prompt string, runner server.RunnerSnapshot) tea.Cmd {
+	endpoint := m.chatEndpoint
+	modelID := fallback(runner.ModelID, runner.ID)
+	ctx := m.ctx
+
+	return func() tea.Msg {
+		response, err := postChatCompletion(ctx, endpoint, modelID, prompt)
+		return chatCompletionMsg{
+			prompt:   prompt,
+			response: response,
+			err:      err,
+		}
+	}
+}
+
 func (m Model) modelDownloadCmd() tea.Cmd {
 	entry, ok := m.nextDownloadEntry()
 	if !ok {
@@ -2303,6 +2610,83 @@ func isDigits(value string) bool {
 		}
 	}
 	return true
+}
+
+type chatCompletionRequest struct {
+	Model    string        `json:"model"`
+	Messages []chatAPIItem `json:"messages"`
+	Stream   bool          `json:"stream"`
+}
+
+type chatAPIItem struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type chatCompletionResponse struct {
+	Choices []struct {
+		Message chatAPIItem `json:"message"`
+	} `json:"choices"`
+}
+
+func postChatCompletion(
+	ctx context.Context,
+	endpoint string,
+	modelID string,
+	prompt string,
+) (string, error) {
+	payload := chatCompletionRequest{
+		Model: modelID,
+		Messages: []chatAPIItem{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Stream: false,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("encode chat request: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create chat request: %w", err)
+	}
+	request.Header.Set("content-type", "application/json")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("send chat request: %w", err)
+	}
+	defer response.Body.Close()
+
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", fmt.Errorf("read chat response: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("chat response %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+
+	var decoded chatCompletionResponse
+	if err := json.Unmarshal(responseBody, &decoded); err != nil {
+		return "", fmt.Errorf("decode chat response: %w", err)
+	}
+	if len(decoded.Choices) == 0 {
+		return "", fmt.Errorf("chat response had no choices")
+	}
+	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	if content == "" {
+		return "", fmt.Errorf("chat response was empty")
+	}
+	return content, nil
 }
 
 func (m Model) runnerSpecForRole(role string) (server.RunnerSpec, string, error) {
@@ -2754,6 +3138,34 @@ func runnerLaunchMode(runner server.RunnerSnapshot) string {
 		return "external upstream"
 	}
 	return "managed by sidecar"
+}
+
+func runnerSpecLaunchMode(spec server.RunnerSpec) string {
+	if !spec.Launch {
+		return "external upstream"
+	}
+	return "managed by sidecar"
+}
+
+func wizardCommandPreview(spec server.RunnerSpec) string {
+	executable := fallback(spec.Executable, "llama-server")
+	args := []string{
+		executable,
+		"--host",
+		fallback(spec.Host, "127.0.0.1"),
+		"--port",
+		strconv.Itoa(spec.Port),
+	}
+	if spec.ModelPath != "" {
+		args = append(args, "--model", spec.ModelPath)
+	}
+	switch spec.Role {
+	case "embedding":
+		args = append(args, "--embedding")
+	case "reranking":
+		args = append(args, "--embedding", "--pooling", "rank", "--reranking")
+	}
+	return strings.Join(args, " ")
 }
 
 func runnerRoleRoute(role string) string {

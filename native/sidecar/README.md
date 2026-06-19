@@ -32,6 +32,13 @@ scanning.
 Every tab ends with a context command rail that keeps global navigation,
 tab-specific actions, and the matching controller or WebSocket/API path visible
 without switching pages.
+The Launch Wizard tab gives catalog-backed main, embedding, and rerank runner
+presets, shows a dry-run command preview, and creates runners through the same
+`RunnerController.CreateRunner` path as `POST /sidecar/v1/runners`. The Chat
+tab selects the running main runner, provides an inline prompt composer and
+transcript, and sends non-streaming chat requests through the sidecar
+`/v1/chat/completions` proxy so route authority stays shared with the browser
+API.
 Its dashboard lists runtime specs, a visual topology graph, route authority,
 runnable backend cards, runtime topology, route maps, recent activity, and a
 signal board with readiness meters for runtime, runners, routes, required model

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,6 +31,8 @@ func TestModelRendersRequiredTabs(t *testing.T) {
 		"Dashboard",
 		"main-litert",
 		"embed-qwen",
+		"Launch Wizard",
+		"Chat",
 		"Models",
 		"Logs",
 		"Settings",
@@ -138,9 +141,11 @@ func TestModelRendersStatusRichTabBar(t *testing.T) {
 		"1 ◆ Dashboard 1/2 running",
 		"2 ● main-litert",
 		"3 ◐ embed-qwen",
-		"4 ● Models 4/4",
-		"5 ● Logs 1",
-		"6 ● Settings API",
+		"4 ◇ Launch Wizard",
+		"5 ● Chat main-litert",
+		"6 ● Models 4/4",
+		"7 ● Logs 1",
+		"8 ● Settings API",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("status-rich tab bar missing %q:\n%s", expected, view)
@@ -160,7 +165,7 @@ func TestModelRendersContextCommandRail(t *testing.T) {
 	dashboardView := model.View()
 	for _, expected := range []string{
 		"Command rail",
-		"Global: Tab/Right next | Shift+Tab/Left previous | 1-6 jump | Esc quit",
+		"Global: Tab/Right next | Shift+Tab/Left previous | 1-8 jump | Esc quit",
 		"Dashboard: specs + topology + runnable backends",
 		"API: status.get + /sidecar/v1/status",
 	} {
@@ -189,6 +194,28 @@ func TestModelRendersContextCommandRail(t *testing.T) {
 	} {
 		if !strings.Contains(modelsView, expected) {
 			t.Fatalf("models command rail missing %q:\n%s", expected, modelsView)
+		}
+	}
+
+	model.setActiveTab("wizard")
+	wizardView := model.View()
+	for _, expected := range []string{
+		"Launch Wizard: m Main | e Embedding | r Rerank",
+		"API: RunnerController.CreateRunner + POST /sidecar/v1/runners",
+	} {
+		if !strings.Contains(wizardView, expected) {
+			t.Fatalf("wizard command rail missing %q:\n%s", expected, wizardView)
+		}
+	}
+
+	model.setActiveTab("chat")
+	chatView := model.View()
+	for _, expected := range []string{
+		"Chat: type prompt | Enter send | Backspace edit",
+		"API: POST /v1/chat/completions through supervisor route authority",
+	} {
+		if !strings.Contains(chatView, expected) {
+			t.Fatalf("chat command rail missing %q:\n%s", expected, chatView)
 		}
 	}
 
@@ -431,6 +458,18 @@ func TestModelSwitchesTabsWithKeys(t *testing.T) {
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	updated = next.(Model)
+	if updated.activeTabID() != "wizard" {
+		t.Fatalf("active tab = %q, want wizard", updated.activeTabID())
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
+	updated = next.(Model)
+	if updated.activeTabID() != "chat" {
+		t.Fatalf("active tab = %q, want chat", updated.activeTabID())
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
 	updated = next.(Model)
 	if updated.activeTabID() != "models" {
 		t.Fatalf("active tab = %q, want models", updated.activeTabID())
@@ -943,7 +982,7 @@ func TestModelLogsViewShowsRecentEntries(t *testing.T) {
 		RunnerController:  testRunnerController(),
 		Logs:              logs,
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("7")})
 	updated := next.(Model)
 	view := updated.View()
 
@@ -1004,7 +1043,7 @@ func TestModelModelsViewShowsCatalogEntries(t *testing.T) {
 		Logs:              server.NewLogBroadcaster(8),
 		Catalog:           modelCatalog,
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
 	updated := next.(Model)
 	view := updated.View()
 
@@ -1094,7 +1133,7 @@ func TestModelsTabDownloadsNextMissingRequiredModelThroughSharedCatalog(t *testi
 		Logs:              server.NewLogBroadcaster(8),
 		Catalog:           modelCatalog,
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
 	updated := next.(Model)
 
 	nextModel, cmd := updated.Update(tea.KeyMsg{
@@ -1136,7 +1175,7 @@ func TestModelsTabCreatesRunnersFromCatalogThroughSharedController(t *testing.T)
 		Logs:              server.NewLogBroadcaster(8),
 		Catalog:           modelCatalog,
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
 	updated := next.(Model)
 
 	for _, tc := range []struct {
@@ -1189,6 +1228,159 @@ func TestModelsTabCreatesRunnersFromCatalogThroughSharedController(t *testing.T)
 	}
 }
 
+func TestLaunchWizardCreatesRunnersThroughSharedController(t *testing.T) {
+	t.Parallel()
+
+	runners := testRunnerController()
+	modelCatalog := catalog.NewDefault(t.TempDir())
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           modelCatalog,
+	})
+	model.setActiveTab("wizard")
+	view := model.View()
+
+	for _, expected := range []string{
+		"Launch Wizard / Runner presets",
+		"Choose a runnable preset, inspect the dry run, then create through the shared controller.",
+		"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
+		"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
+		"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
+		"Dry-run command preview",
+		"Role:          main",
+		"Runtime:       llamacpp",
+		"Backend:       cpu",
+		"Model:         gemma4-gguf",
+		"API route:     /v1/chat/completions",
+		"RunnerController.CreateRunner",
+		"POST /sidecar/v1/runners",
+		"WebSocket api.request POST /sidecar/v1/runners",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("launch wizard missing %q:\n%s", expected, view)
+		}
+	}
+
+	nextModel, cmd := model.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("m"),
+	})
+	if cmd == nil {
+		t.Fatalf("wizard main preset returned no command")
+	}
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated := afterAction.(Model)
+
+	if got := runners.lastCall(); got != "create:main-llamacpp:llamacpp:main:gemma4-gguf" {
+		t.Fatalf("last call = %q, want wizard main create", got)
+	}
+	if !strings.Contains(updated.View(), "created runner main-llamacpp") {
+		t.Fatalf("wizard view missing create notice:\n%s", updated.View())
+	}
+}
+
+func TestChatTabRendersMainRunnerConsole(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	model.setActiveTab("chat")
+	view := model.View()
+
+	for _, expected := range []string{
+		"Chat console / Main runner",
+		"Selected runner: main-litert",
+		"State:         running",
+		"Route:         /v1/chat/completions",
+		"Upstream:      http://127.0.0.1:9381",
+		"Model:         gemma4-e2b",
+		"Composer",
+		"Prompt:        (empty)",
+		"Enter sends via POST /v1/chat/completions; Backspace edits.",
+		"Transcript",
+		"No messages yet.",
+		"API parity / Route authority",
+		"TUI Enter -> POST http://127.0.0.1:9379/v1/chat/completions",
+		"/v1/chat/completions -> runner supervisor route authority",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("chat view missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestChatTabSendsPromptThroughOpenAIProxy(t *testing.T) {
+	t.Parallel()
+
+	var requestedPath string
+	var requestBody string
+	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requestBody = string(body)
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"proxy response"}}]}`))
+	}))
+	defer chatServer.Close()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+		ChatEndpoint:      chatServer.URL + "/v1/chat/completions",
+	})
+	model.setActiveTab("chat")
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello main runner")})
+	updated := next.(Model)
+	if !strings.Contains(updated.View(), "Prompt:        hello main runner") {
+		t.Fatalf("chat view missing typed prompt:\n%s", updated.View())
+	}
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("chat enter returned no command")
+	}
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if requestedPath != "/v1/chat/completions" {
+		t.Fatalf("requested path = %q, want /v1/chat/completions", requestedPath)
+	}
+	for _, expectedBody := range []string{
+		`"model":"gemma4-e2b"`,
+		`"role":"user"`,
+		`"content":"hello main runner"`,
+		`"stream":false`,
+	} {
+		if !strings.Contains(requestBody, expectedBody) {
+			t.Fatalf("chat request missing %q in %s", expectedBody, requestBody)
+		}
+	}
+
+	view := updated.View()
+	for _, expected := range []string{
+		"You: hello main runner",
+		"Assistant: proxy response",
+		"Prompt:        (empty)",
+		"sent chat prompt through /v1/chat/completions",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("chat view missing response %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 	t.Parallel()
 
@@ -1197,7 +1389,7 @@ func TestSettingsViewShowsWebSocketAPIParity(t *testing.T) {
 		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
 	updated := next.(Model)
 	view := updated.View()
 
@@ -1272,7 +1464,7 @@ func TestSettingsViewShowsRunnerAPIParityFromLiveSnapshot(t *testing.T) {
 		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
 	updated := next.(Model)
 	view := updated.View()
 
@@ -1303,7 +1495,7 @@ func TestSettingsViewShowsSharedActionMethodMap(t *testing.T) {
 		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
 	updated := next.(Model)
 	view := updated.View()
 
@@ -1361,7 +1553,7 @@ func TestSettingsViewShowsRuntimeConfigEditor(t *testing.T) {
 		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
 	updated := next.(Model)
 	view := updated.View()
 
@@ -1407,7 +1599,7 @@ func TestSettingsRuntimeConfigEditorSetsHuggingFaceTokenWithoutRenderingSecret(t
 		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
 	updated := next.(Model)
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
@@ -1463,7 +1655,7 @@ func TestSettingsControlsUseSharedRuntimeController(t *testing.T) {
 		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
 	updated := next.(Model)
 
 	for _, tc := range []struct {
@@ -1507,7 +1699,7 @@ func TestSettingsRuntimeConfigEditorFeedsSharedRuntimeController(t *testing.T) {
 		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 	})
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
 	updated := next.(Model)
 
 	for _, edit := range []struct {

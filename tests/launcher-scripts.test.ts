@@ -87,7 +87,7 @@ describe("root launcher scripts", () => {
       const contents = readRootScript(scriptName);
 
       expect(contents).toContain("launch_terminal");
-      expect(contents).toContain("LITERT_LAUNCH_INLINE");
+      expect(contents).toContain("--litert-launch-inline");
       expect(contents).toContain("osascript");
       expect(contents).toContain("gnome-terminal");
       expect(contents).toContain("xterm");
@@ -104,6 +104,28 @@ describe("root launcher scripts", () => {
       expect(contents).toContain("Start-Process");
       expect(contents).toContain("-NoExit");
       expect(contents).toContain("-Inline");
+    }
+  });
+
+  it("does not let inherited inline environment state bypass terminal launch", () => {
+    for (const scriptName of [
+      "launch-webui.sh",
+      "launch-sidecar.sh",
+      "launch-all.sh",
+    ]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).not.toContain("LITERT_LAUNCH_INLINE");
+    }
+
+    for (const scriptName of [
+      "launch-webui.ps1",
+      "launch-sidecar.ps1",
+      "launch-all.ps1",
+    ]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).not.toContain("$env:LITERT_LAUNCH_INLINE");
     }
   });
 

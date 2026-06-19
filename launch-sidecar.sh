@@ -6,6 +6,12 @@ llama_runtime_root="$repo_root/native/llama-runtimes"
 llama_selected_file="$llama_runtime_root/.selected"
 
 sidecar_args=()
+inline_launch=0
+
+if [[ "${1:-}" == "--litert-launch-inline" ]]; then
+  inline_launch=1
+  shift
+fi
 
 shell_join() {
   local arg
@@ -58,7 +64,7 @@ launch_terminal() {
   shift
   local command
 
-  command="cd $(shell_join "$repo_root") && $(launcher_env_assignments)LITERT_SIDECAR_TUI=1 LITERT_LAUNCH_INLINE=1 $(shell_join "$@")"
+  command="cd $(shell_join "$repo_root") && $(launcher_env_assignments)LITERT_SIDECAR_TUI=1 $(shell_join "$@")"
 
   if [[ "$(uname -s)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
     osascript <<OSA
@@ -89,8 +95,8 @@ OSA
   return 1
 }
 
-if [[ "${LITERT_LAUNCH_INLINE:-}" != "1" ]]; then
-  launch_terminal "LiteRT Sidecar TUI" "$repo_root/launch-sidecar.sh" "$@"
+if [[ "$inline_launch" != "1" ]]; then
+  launch_terminal "LiteRT Sidecar TUI" "$repo_root/launch-sidecar.sh" "--litert-launch-inline" "$@"
   exit 0
 fi
 

@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 host="${WEBUI_HOST:-127.0.0.1}"
 port="${WEBUI_PORT:-5173}"
+inline_launch=0
+
+if [[ "${1:-}" == "--litert-launch-inline" ]]; then
+  inline_launch=1
+  shift
+fi
 
 shell_join() {
   local arg
@@ -30,7 +36,7 @@ launch_terminal() {
   shift
   local command
 
-  command="cd $(shell_join "$repo_root") && WEBUI_HOST=$(shell_join "$host") WEBUI_PORT=$(shell_join "$port") LITERT_LAUNCH_INLINE=1 $(shell_join "$@")"
+  command="cd $(shell_join "$repo_root") && WEBUI_HOST=$(shell_join "$host") WEBUI_PORT=$(shell_join "$port") $(shell_join "$@")"
 
   if [[ "$(uname -s)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
     osascript <<OSA
@@ -61,8 +67,8 @@ OSA
   return 1
 }
 
-if [[ "${LITERT_LAUNCH_INLINE:-}" != "1" ]]; then
-  launch_terminal "LiteRT Web UI" "$repo_root/launch-webui.sh" "$@"
+if [[ "$inline_launch" != "1" ]]; then
+  launch_terminal "LiteRT Web UI" "$repo_root/launch-webui.sh" "--litert-launch-inline" "$@"
   exit 0
 fi
 

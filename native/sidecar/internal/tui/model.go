@@ -716,18 +716,33 @@ func (m Model) backendMatrixLines() []string {
 		return []string{"No runners configured."}
 	}
 
-	lines := make([]string, 0, len(m.snapshot.Runners))
-	for _, runner := range m.snapshot.Runners {
-		lines = append(lines, fmt.Sprintf(
-			"%s | %s | %s/%s | backend=%s | %s | %s",
-			runner.ID,
-			statusBadge(runner.State),
+	lines := make([]string, 0, 1+len(m.snapshot.Runners)*9)
+	lines = append(lines, "Runnable backends - Runner backend cards")
+	for index, runner := range m.snapshot.Runners {
+		if index > 0 {
+			lines = append(lines, "")
+		}
+
+		runtimeRole := fmt.Sprintf(
+			"%s / %s",
 			fallback(runner.Runtime, "runtime"),
 			fallback(runner.Role, "role"),
-			fallback(runner.Backend, "backend"),
-			runnerLaunchMode(runner),
-			capabilitiesLine(runner.Capabilities),
-		))
+		)
+		lines = append(lines,
+			fmt.Sprintf(
+				"%s %s  %s",
+				runnerStateGlyph(runner.State),
+				runner.ID,
+				statusBadge(runner.State),
+			),
+			formatKV("Runtime/Role", runtimeRole),
+			formatKV("Backend", fallback(runner.Backend, "backend")),
+			formatKV("Model", fallback(runner.ModelID, fallback(runner.ModelPath, "model"))),
+			formatKV("Launch", runnerLaunchMode(runner)),
+			formatKV("Health", runnerHealthMeter(runner)),
+			formatKV("Route", fallback(runner.Upstream, "unavailable")),
+			formatKV("Caps", capabilitiesLine(runner.Capabilities)),
+		)
 	}
 	return lines
 }
@@ -1601,6 +1616,23 @@ func statusBadge(state string) string {
 		Bold(true).
 		Foreground(lipgloss.Color(color)).
 		Render(state)
+}
+
+func runnerStateGlyph(state string) string {
+	switch strings.ToLower(state) {
+	case "running", "available", "ready":
+		return "●"
+	case "starting":
+		return "◉"
+	case "created":
+		return "◐"
+	case "external":
+		return "◆"
+	case "unavailable", "error", "missing":
+		return "!"
+	default:
+		return "○"
+	}
 }
 
 func statusMeter(active int, total int) string {

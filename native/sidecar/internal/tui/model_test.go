@@ -134,6 +134,44 @@ func TestDashboardRendersRichOperationalOverview(t *testing.T) {
 	}
 }
 
+func TestDashboardRendersReadableRunnerBackendCards(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	view := model.View()
+
+	for _, expected := range []string{
+		"Runner backend cards",
+		"● main-litert",
+		"Runtime/Role:",
+		"litert / main",
+		"Backend:",
+		"cpu",
+		"Launch:",
+		"managed by sidecar",
+		"Health:",
+		"[##########] serving",
+		"Route:",
+		"http://127.0.0.1:9381",
+		"Caps:",
+		"chat=openai-compatible",
+		"◐ embed-qwen",
+		"llamacpp / embedding",
+		"[#####-----] ready to start",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("dashboard backend cards missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "main-litert |") {
+		t.Fatalf("dashboard still renders dense pipe-delimited runner rows:\n%s", view)
+	}
+}
+
 func TestModelSwitchesTabsWithKeys(t *testing.T) {
 	t.Parallel()
 

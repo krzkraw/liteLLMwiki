@@ -208,7 +208,7 @@ describe("ProviderSetup", () => {
       modelLoaded: true,
       sidecarModelCatalog: {
         state: "ready",
-        detail: "4 models detected.",
+        detail: "9 models detected.",
         models: [
           {
             id: "gemma4-gguf",
@@ -223,10 +223,10 @@ describe("ProviderSetup", () => {
             sizeBytes: 1024,
           },
           {
-            id: "qwen3-embedding-gguf",
-            repo: "Qwen/Qwen3-Embedding-0.6B-GGUF",
-            filename: "Qwen3-Embedding-0.6B-Q8_0.gguf",
-            targetPath: "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+            id: "qwen3-embedding-q8-mungert",
+            repo: "Mungert/Qwen3-Embedding-0.6B-GGUF",
+            filename: "Qwen3-Embedding-0.6B-q8_0.gguf",
+            targetPath: "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf",
             runtime: "llamacpp",
             role: "embedding",
             required: true,
@@ -271,7 +271,7 @@ describe("ProviderSetup", () => {
     expect(models.textContent).toContain("llamacpp");
     expect(models.textContent).toContain("main");
     expect(models.textContent).toContain("present");
-    expect(models.textContent).toContain("Qwen3-Embedding-0.6B-Q8_0.gguf");
+    expect(models.textContent).toContain("Qwen3-Embedding-0.6B-q8_0.gguf");
 
     expect(config.tagName).toBe("DETAILS");
     expect(config.textContent).toContain("Endpoint");

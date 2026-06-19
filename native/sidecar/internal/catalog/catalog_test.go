@@ -19,9 +19,18 @@ func TestDefaultCatalogContainsRequiredArtifacts(t *testing.T) {
 	entries := catalog.Entries()
 
 	assertEntry(t, entries, "gemma4-gguf", filepath.Join(root, "llamacpp", "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"))
-	assertEntry(t, entries, "qwen3-embedding-gguf", filepath.Join(root, "llamacpp", "Qwen3-Embedding-0.6B-Q8_0.gguf"))
+	assertEntry(t, entries, "qwen35-2b-gguf", filepath.Join(root, "llamacpp", "Qwen3.5-2B-IQ4_NL.gguf"))
+	assertEntry(t, entries, "qwen35-08b-gguf", filepath.Join(root, "llamacpp", "Qwen3.5-0.8B-UD-Q8_K_XL.gguf"))
+	assertEntry(t, entries, "qwen3-embedding-q8-mungert", filepath.Join(root, "llamacpp", "Qwen3-Embedding-0.6B-q8_0.gguf"))
+	assertEntry(t, entries, "qwen3-embedding-iq4-mungert", filepath.Join(root, "llamacpp", "Qwen3-Embedding-0.6B-iq4_nl.gguf"))
+	assertEntry(t, entries, "qwen3-reranker-q4km", filepath.Join(root, "llamacpp", "Qwen3-Reranker-0.6B-Q4_K_M.gguf"))
 	assertEntry(t, entries, "gemma4-litert", filepath.Join(root, "litert", "gemma-4-E2B-it.litertlm"))
+	assertEntry(t, entries, "gemma4-web-litert", filepath.Join(root, "litert", "gemma-4-E2B-it-web.litertlm"))
 	assertEntry(t, entries, "embeddinggemma-litert", filepath.Join(root, "litert", "embeddinggemma-300M_seq2048_mixed-precision.tflite"))
+
+	if len(entries) != 9 {
+		t.Fatalf("entry count = %d, want 9", len(entries))
+	}
 
 	for _, entry := range entries {
 		if entry.Required != true {
@@ -29,6 +38,73 @@ func TestDefaultCatalogContainsRequiredArtifacts(t *testing.T) {
 		}
 		if entry.State != StateMissing {
 			t.Fatalf("entry %q state = %q, want missing", entry.ID, entry.State)
+		}
+	}
+}
+
+func TestDefaultCatalogUsesRequestedHuggingFaceRepositories(t *testing.T) {
+	t.Parallel()
+
+	entries := NewDefault(t.TempDir()).Entries()
+
+	assertRepoFilenameRole(
+		t,
+		entries,
+		"gemma4-web-litert",
+		"litert-community/gemma-4-E2B-it-litert-lm",
+		"gemma-4-E2B-it-web.litertlm",
+		"litert",
+		"browser",
+	)
+	assertRepoFilenameRole(
+		t,
+		entries,
+		"qwen3-reranker-q4km",
+		"Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp",
+		"Qwen3-Reranker-0.6B-Q4_K_M.gguf",
+		"llamacpp",
+		"reranking",
+	)
+	assertRepoFilenameRole(
+		t,
+		entries,
+		"qwen3-embedding-q8-mungert",
+		"Mungert/Qwen3-Embedding-0.6B-GGUF",
+		"Qwen3-Embedding-0.6B-q8_0.gguf",
+		"llamacpp",
+		"embedding",
+	)
+	assertRepoFilenameRole(
+		t,
+		entries,
+		"qwen3-embedding-iq4-mungert",
+		"Mungert/Qwen3-Embedding-0.6B-GGUF",
+		"Qwen3-Embedding-0.6B-iq4_nl.gguf",
+		"llamacpp",
+		"embedding",
+	)
+	assertRepoFilenameRole(
+		t,
+		entries,
+		"qwen35-2b-gguf",
+		"unsloth/Qwen3.5-2B-GGUF",
+		"Qwen3.5-2B-IQ4_NL.gguf",
+		"llamacpp",
+		"main",
+	)
+	assertRepoFilenameRole(
+		t,
+		entries,
+		"qwen35-08b-gguf",
+		"unsloth/Qwen3.5-0.8B-GGUF",
+		"Qwen3.5-0.8B-UD-Q8_K_XL.gguf",
+		"llamacpp",
+		"main",
+	)
+
+	for _, entry := range entries {
+		if entry.ID == "qwen3-embedding-gguf" {
+			t.Fatalf("removed legacy catalog entry qwen3-embedding-gguf is still present")
 		}
 	}
 }
@@ -107,6 +183,36 @@ func assertEntry(t *testing.T, entries []Entry, id string, targetPath string) {
 			}
 			return
 		}
+	}
+	encoded, _ := json.Marshal(entries)
+	t.Fatalf("entry %q not found in %s", id, encoded)
+}
+
+func assertRepoFilenameRole(
+	t *testing.T,
+	entries []Entry,
+	id string,
+	repo string,
+	filename string,
+	runtimeName string,
+	role string,
+) {
+	t.Helper()
+
+	for _, entry := range entries {
+		if entry.ID != id {
+			continue
+		}
+		if entry.Repo != repo {
+			t.Fatalf("%s repo = %q, want %q", id, entry.Repo, repo)
+		}
+		if entry.Filename != filename {
+			t.Fatalf("%s filename = %q, want %q", id, entry.Filename, filename)
+		}
+		if entry.Runtime != runtimeName || entry.Role != role {
+			t.Fatalf("%s runtime/role = %q/%q, want %q/%q", id, entry.Runtime, entry.Role, runtimeName, role)
+		}
+		return
 	}
 	encoded, _ := json.Marshal(entries)
 	t.Fatalf("entry %q not found in %s", id, encoded)

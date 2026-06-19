@@ -14,6 +14,7 @@ llama_release_base="https://github.com/ggml-org/llama.cpp/releases/download/b972
 ansiGreen=""
 ansiReset=""
 summary=()
+selected_model_downloads=()
 
 cd "$repo_root"
 
@@ -843,6 +844,140 @@ Command: curl -L --fail -o '$relative_path' '$download_url'"
   add_summary "OK: $label at $relative_path"
 }
 
+model_download_specs() {
+  cat <<'MODELS'
+gemma4-litert|1|Gemma 4 E2B native LiteRT model|models/litert/gemma-4-E2B-it.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm|true
+gemma4-web-litert|1|Gemma 4 E2B web model|models/litert/gemma-4-E2B-it-web.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm|true
+embeddinggemma-litert|1|EmbeddingGemma LiteRT embedding model|models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite|https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite|true
+gemma4-gguf|0|Gemma 4 E2B llama.cpp GGUF model|models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|false
+qwen35-2b-gguf|0|Qwen3.5 2B llama.cpp GGUF model|models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf|https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf|false
+qwen35-08b-gguf|0|Qwen3.5 0.8B llama.cpp GGUF model|models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf|https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf|false
+qwen3-embedding-q8-mungert|0|Qwen3 embedding Q8 llama.cpp GGUF model|models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf|https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q8_0.gguf|false
+qwen3-embedding-iq4-mungert|0|Qwen3 embedding IQ4 llama.cpp GGUF model|models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf|https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-iq4_nl.gguf|false
+qwen3-reranker-q4km|1|Qwen3 reranker Q4_K_M llama.cpp GGUF model|models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf|https://huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp/resolve/main/Qwen3-Reranker-0.6B-Q4_K_M.gguf|false
+MODELS
+}
+
+is_selected_model_download() {
+  local key="$1"
+  local selected
+
+  for selected in "${selected_model_downloads[@]}"; do
+    if [[ "$selected" == "$key" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+print_model_task_statuses() {
+  local key default_selected label relative_path url may_need_token
+
+  while IFS='|' read -r key default_selected label relative_path url may_need_token; do
+    print_task_status "$label" "test -s '$repo_root/$relative_path'" "downloaded" "needs download"
+  done < <(model_download_specs)
+}
+
+select_models_to_download() {
+  local specs=()
+  local spec key default_selected label relative_path url may_need_token
+  local input token index checked found selected_key
+  local new_selected=()
+
+  selected_model_downloads=()
+  while IFS= read -r spec; do
+    specs+=("$spec")
+    IFS='|' read -r key default_selected label relative_path url may_need_token <<< "$spec"
+    if [[ "$default_selected" == "1" ]]; then
+      selected_model_downloads+=("$key")
+    fi
+  done < <(model_download_specs)
+
+  while true; do
+    printf '\nSelect models to download\n'
+    printf 'Default selected: gemma4-litert, gemma4-web-litert, embeddinggemma-litert, qwen3-reranker-q4km\n'
+    for index in "${!specs[@]}"; do
+      spec="${specs[$index]}"
+      IFS='|' read -r key default_selected label relative_path url may_need_token <<< "$spec"
+      checked='[ ]'
+      if is_selected_model_download "$key"; then
+        checked='[x]'
+      fi
+      printf '  %d) %s %s: %s\n' "$((index + 1))" "$checked" "$key" "$label"
+      printf '      Path: %s\n' "$relative_path"
+      printf '      URL: %s\n' "$url"
+    done
+    printf '  a: toggle all\n'
+    printf '  c: continue\n'
+    printf '  s: skip model downloads\n'
+
+    printf 'Toggle numbers, a: toggle all, c: continue, s: skip: '
+    read -r input
+    input="${input:-c}"
+
+    case "$input" in
+      a|A)
+        if [[ "${#selected_model_downloads[@]}" -eq "${#specs[@]}" ]]; then
+          selected_model_downloads=()
+        else
+          selected_model_downloads=()
+          for spec in "${specs[@]}"; do
+            IFS='|' read -r key _ <<< "$spec"
+            selected_model_downloads+=("$key")
+          done
+        fi
+        ;;
+      c|C)
+        return 0
+        ;;
+      s|S)
+        selected_model_downloads=()
+        add_summary "SKIP: model downloads"
+        return 0
+        ;;
+      *)
+        input="${input//,/ }"
+        for token in $input; do
+          if [[ "$token" =~ ^[0-9]+$ ]] && [[ "$token" -ge 1 ]] && [[ "$token" -le "${#specs[@]}" ]]; then
+            spec="${specs[$((token - 1))]}"
+            IFS='|' read -r key _ <<< "$spec"
+            found=0
+            new_selected=()
+            for selected_key in "${selected_model_downloads[@]}"; do
+              if [[ "$selected_key" == "$key" ]]; then
+                found=1
+              else
+                new_selected+=("$selected_key")
+              fi
+            done
+            selected_model_downloads=("${new_selected[@]}")
+            if [[ "$found" -eq 0 ]]; then
+              selected_model_downloads+=("$key")
+            fi
+          else
+            printf 'Unknown model selection: %s\n' "$token"
+          fi
+        done
+        ;;
+    esac
+  done
+}
+
+ensure_selected_models() {
+  local spec key default_selected label relative_path url may_need_token
+
+  if [[ "${#selected_model_downloads[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  while IFS= read -r spec; do
+    IFS='|' read -r key default_selected label relative_path url may_need_token <<< "$spec"
+    if is_selected_model_download "$key"; then
+      ensure_model "$label" "$relative_path" "$url" "$may_need_token"
+    fi
+  done < <(model_download_specs)
+}
+
 ensure_bun_dependencies() {
   confirm_or_wait "Bun dependencies" "bun install" \
     "test -f '$repo_root/bun.lock' && test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" \
@@ -887,11 +1022,7 @@ print_install_tasks() {
   print_task_status "llama.cpp runtime" "test -n \"\$(installed_llama_server || true)\"" "available" "needs selection or manual install"
   print_task_status "Bun dependencies" "test -f '$repo_root/bun.lock' && test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" "already installed" "needs bun install"
   print_task_status "Playwright Chromium" "playwright_chromium_ready" "available" "needs bunx playwright install chromium"
-  print_task_status "Gemma 4 E2B web model" "test -s '$repo_root/models/litert/gemma-4-E2B-it-web.litertlm'" "downloaded" "needs download"
-  print_task_status "Gemma 4 E2B native LiteRT model" "test -s '$repo_root/models/litert/gemma-4-E2B-it.litertlm'" "downloaded" "needs download"
-  print_task_status "Gemma 4 E2B llama.cpp GGUF model" "test -s '$repo_root/models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf'" "downloaded" "needs download"
-  print_task_status "Qwen3 embedding GGUF model" "test -s '$repo_root/models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf'" "downloaded" "needs download"
-  print_task_status "EmbeddingGemma LiteRT embedding model" "test -s '$repo_root/models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite'" "downloaded" "needs download"
+  print_model_task_statuses
   print_task_pending "bun test - will run"
   print_task_pending "web production build - will run"
   print_task_pending "sidecar artifacts build - will run"
@@ -980,26 +1111,8 @@ main() {
   ensure_bun_dependencies
   ensure_playwright_chromium
 
-  ensure_model "Gemma 4 E2B web model" \
-    "models/litert/gemma-4-E2B-it-web.litertlm" \
-    "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" \
-    "true"
-  ensure_model "Gemma 4 E2B native LiteRT model" \
-    "models/litert/gemma-4-E2B-it.litertlm" \
-    "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" \
-    "true"
-  ensure_model "Gemma 4 E2B llama.cpp GGUF model" \
-    "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" \
-    "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" \
-    "false"
-  ensure_model "Qwen3 embedding GGUF model" \
-    "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf" \
-    "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf" \
-    "false"
-  ensure_model "EmbeddingGemma LiteRT embedding model" \
-    "models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite" \
-    "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" \
-    "true"
+  select_models_to_download
+  ensure_selected_models
 
   run_logged "bun test" bun run test
   run_logged "web production build" bun run build

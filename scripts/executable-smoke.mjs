@@ -89,7 +89,7 @@ try {
   await page.getByTestId("connect-sidecar-button").click();
   await page.getByText("Sidecar connected").waitFor({ timeout: 5000 });
   await page.getByText("gemma4-gguf").waitFor({ timeout: 5000 });
-  await page.getByText("qwen3-embedding-gguf").waitFor({ timeout: 5000 });
+  await page.getByText("qwen3-embedding-q8-mungert").waitFor({ timeout: 5000 });
 
   const connectDisabled = await page.getByTestId("connect-sidecar-button").isDisabled();
   const setupText = await page.locator(".setup-panel").textContent();
@@ -142,7 +142,7 @@ try {
     setupText.includes("/sidecar/v1/models") &&
     setupText.includes("/sidecar/v1/ws") &&
     setupText.includes("gemma4-gguf") &&
-    setupText.includes("qwen3-embedding-gguf") &&
+    setupText.includes("qwen3-embedding-q8-mungert") &&
     setupText.includes("Runtime host") &&
     setupText.includes("Model file");
 

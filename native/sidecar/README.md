@@ -32,13 +32,17 @@ scanning.
 Every tab ends with a context command rail that keeps global navigation,
 tab-specific actions, and the matching controller or WebSocket/API path visible
 without switching pages.
-The Launch Wizard tab gives catalog-backed main, embedding, and rerank runner
-presets, shows a dry-run command preview, and creates runners through the same
-`RunnerController.CreateRunner` path as `POST /sidecar/v1/runners`. The Chat
-tab selects the running main runner, provides an inline prompt composer and
-transcript, and sends non-streaming chat requests through the sidecar
-`/v1/chat/completions` proxy so route authority stays shared with the browser
-API.
+The Launch Wizard tab lets the user choose `litert` or `llamacpp`, then a
+runtime variant, role, and downloaded applicable catalog model. LiteRT variants
+are backend choices such as `cpu`, `gpu`, and `npu`; llama.cpp variants are
+installed folders under `native/llama-runtimes` such as `llama-win-cpu-x64` or
+`llama-win-cuda-13.3-x64`. The selected llama folder's `llama-server`
+executable is written into the runner spec. The wizard shows a dry-run command
+preview and creates runners through the same `RunnerController.CreateRunner`
+path as `POST /sidecar/v1/runners`. The Chat tab selects the running main
+runner, provides an inline prompt composer and transcript, and sends
+non-streaming chat requests through the sidecar `/v1/chat/completions` proxy so
+route authority stays shared with the browser API.
 Its dashboard lists runtime specs, a visual topology graph, route authority,
 runnable backend cards, runtime topology, route maps, recent activity, and a
 signal board with readiness meters for runtime, runners, routes, required model
@@ -80,13 +84,12 @@ Settings keys edit `e` runtime executable, `h` runtime host, `p` runtime port,
 `l` launch runtime, `a` import model, and `v` runtime verbose toggles. The
 Models tab can download the next missing required catalog artifact with `d` by
 calling the same catalog download method behind
-`POST /sidecar/v1/models/download`; it can also create catalog-backed llama.cpp
-runners with `m` main, `e` embedding, and `r` rerank by calling the same runner
-creation method behind `POST /sidecar/v1/runners`. The Models tab renders a
-readiness panel for required artifacts, a runner creation/action parity panel,
-and catalog cards that show runtime, role, target file, progress, and any
-download error for each artifact. On wide terminals it pairs readiness beside
-actions so download state and runnable presets stay visible together.
+`POST /sidecar/v1/models/download`; `w` opens the filtered Launch Wizard for
+runner creation through `POST /sidecar/v1/runners`. The Models tab renders a
+readiness panel for required artifacts, a launch-wizard action parity panel, and
+catalog cards that show runtime, role, target file, progress, and any download
+error for each artifact. On wide terminals it pairs readiness beside actions so
+download state and runnable creation stay visible together.
 The Logs tab turns the `LogBroadcaster` cache into a live diagnostics view with
 cache health, source/stream activity, recent events, and the matching
 WebSocket `logs.subscribe` path. On wide terminals it pairs log signal state
@@ -100,14 +103,16 @@ By default it:
   registry;
 - starts `litert-lm serve --host 127.0.0.1 --port 9381`.
 
-In a fresh clone, provide the native model from the external model host before
-starting the sidecar. The default local path is
-`models/litert/gemma-4-E2B-it.litertlm`; model binaries are ignored by Git.
+In a fresh clone, provide selected models from the external model hosts before
+starting the sidecar. The default LiteRT main path is
+`models/litert/gemma-4-E2B-it.litertlm`; llama.cpp main, embedding, and
+reranking models live under `models/llamacpp/`. Model binaries are ignored by
+Git.
 The sidecar also exposes a model catalog at `/sidecar/v1/models` and supports
 authenticated Hugging Face downloads through `/sidecar/v1/models/download`.
 The supervisor can also start a `llama-server` main runner against a GGUF model
 and route OpenAI-compatible chat requests to that runner. llama.cpp embedding
-runners use `--embedding`; rerank probes use `--embedding --pooling rank
+runners use `--embedding`; reranking runners use `--embedding --pooling rank
 --reranking` and route `/v1/rerank` when healthy.
 
 Useful flags:

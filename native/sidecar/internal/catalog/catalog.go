@@ -90,12 +90,48 @@ func NewDefault(modelRoot string, options ...Option) *Catalog {
 		Required:   true,
 	})
 	catalog.add(Entry{
-		ID:         "qwen3-embedding-gguf",
-		Repo:       "Qwen/Qwen3-Embedding-0.6B-GGUF",
-		Filename:   "Qwen3-Embedding-0.6B-Q8_0.gguf",
-		TargetPath: filepath.Join(modelRoot, "llamacpp", "Qwen3-Embedding-0.6B-Q8_0.gguf"),
+		ID:         "qwen35-2b-gguf",
+		Repo:       "unsloth/Qwen3.5-2B-GGUF",
+		Filename:   "Qwen3.5-2B-IQ4_NL.gguf",
+		TargetPath: filepath.Join(modelRoot, "llamacpp", "Qwen3.5-2B-IQ4_NL.gguf"),
+		Runtime:    "llamacpp",
+		Role:       "main",
+		Required:   true,
+	})
+	catalog.add(Entry{
+		ID:         "qwen35-08b-gguf",
+		Repo:       "unsloth/Qwen3.5-0.8B-GGUF",
+		Filename:   "Qwen3.5-0.8B-UD-Q8_K_XL.gguf",
+		TargetPath: filepath.Join(modelRoot, "llamacpp", "Qwen3.5-0.8B-UD-Q8_K_XL.gguf"),
+		Runtime:    "llamacpp",
+		Role:       "main",
+		Required:   true,
+	})
+	catalog.add(Entry{
+		ID:         "qwen3-embedding-q8-mungert",
+		Repo:       "Mungert/Qwen3-Embedding-0.6B-GGUF",
+		Filename:   "Qwen3-Embedding-0.6B-q8_0.gguf",
+		TargetPath: filepath.Join(modelRoot, "llamacpp", "Qwen3-Embedding-0.6B-q8_0.gguf"),
 		Runtime:    "llamacpp",
 		Role:       "embedding",
+		Required:   true,
+	})
+	catalog.add(Entry{
+		ID:         "qwen3-embedding-iq4-mungert",
+		Repo:       "Mungert/Qwen3-Embedding-0.6B-GGUF",
+		Filename:   "Qwen3-Embedding-0.6B-iq4_nl.gguf",
+		TargetPath: filepath.Join(modelRoot, "llamacpp", "Qwen3-Embedding-0.6B-iq4_nl.gguf"),
+		Runtime:    "llamacpp",
+		Role:       "embedding",
+		Required:   true,
+	})
+	catalog.add(Entry{
+		ID:         "qwen3-reranker-q4km",
+		Repo:       "Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp",
+		Filename:   "Qwen3-Reranker-0.6B-Q4_K_M.gguf",
+		TargetPath: filepath.Join(modelRoot, "llamacpp", "Qwen3-Reranker-0.6B-Q4_K_M.gguf"),
+		Runtime:    "llamacpp",
+		Role:       "reranking",
 		Required:   true,
 	})
 	catalog.add(Entry{
@@ -105,6 +141,15 @@ func NewDefault(modelRoot string, options ...Option) *Catalog {
 		TargetPath: filepath.Join(modelRoot, "litert", "gemma-4-E2B-it.litertlm"),
 		Runtime:    "litert",
 		Role:       "main",
+		Required:   true,
+	})
+	catalog.add(Entry{
+		ID:         "gemma4-web-litert",
+		Repo:       "litert-community/gemma-4-E2B-it-litert-lm",
+		Filename:   "gemma-4-E2B-it-web.litertlm",
+		TargetPath: filepath.Join(modelRoot, "litert", "gemma-4-E2B-it-web.litertlm"),
+		Runtime:    "litert",
+		Role:       "browser",
 		Required:   true,
 	})
 	catalog.add(Entry{

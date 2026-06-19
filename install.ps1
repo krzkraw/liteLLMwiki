@@ -9,6 +9,7 @@ $RepoRoot = $PSScriptRoot
 $SmokePort = if ($env:INSTALL_SMOKE_PORT) { [int]$env:INSTALL_SMOKE_PORT } else { 5177 }
 $SmokeUrl = "http://127.0.0.1:$SmokePort/"
 $Summary = [System.Collections.Generic.List[string]]::new()
+$SelectedModelDownloadKeys = [System.Collections.Generic.List[string]]::new()
 $DevServerProcess = $null
 $DevServerStdinPath = $null
 $ModelsNextcloudBase = $null
@@ -654,6 +655,128 @@ function Ensure-Model {
   Add-Summary "OK: $Label at $RelativePath"
 }
 
+function New-ModelDownloadDefinition {
+  param(
+    [string]$Key,
+    [bool]$Default,
+    [string]$Label,
+    [string]$RelativePath,
+    [string]$Url,
+    [bool]$MayNeedToken
+  )
+
+  [pscustomobject]@{
+    Key = $Key
+    Default = $Default
+    Label = $Label
+    RelativePath = $RelativePath
+    Url = $Url
+    MayNeedToken = $MayNeedToken
+  }
+}
+
+function Get-ModelDownloadDefinitions {
+  return @(
+    New-ModelDownloadDefinition "gemma4-litert" $true "Gemma 4 E2B native LiteRT model" "models/litert/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true
+    New-ModelDownloadDefinition "gemma4-web-litert" $true "Gemma 4 E2B web model" "models/litert/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
+    New-ModelDownloadDefinition "embeddinggemma-litert" $true "EmbeddingGemma LiteRT embedding model" "models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite" "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" $true
+    New-ModelDownloadDefinition "gemma4-gguf" $false "Gemma 4 E2B llama.cpp GGUF model" "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" $false
+    New-ModelDownloadDefinition "qwen35-2b-gguf" $false "Qwen3.5 2B llama.cpp GGUF model" "models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf" "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf" $false
+    New-ModelDownloadDefinition "qwen35-08b-gguf" $false "Qwen3.5 0.8B llama.cpp GGUF model" "models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf" "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q8_K_XL.gguf" $false
+    New-ModelDownloadDefinition "qwen3-embedding-q8-mungert" $false "Qwen3 embedding Q8 llama.cpp GGUF model" "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf" "https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q8_0.gguf" $false
+    New-ModelDownloadDefinition "qwen3-embedding-iq4-mungert" $false "Qwen3 embedding IQ4 llama.cpp GGUF model" "models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf" "https://huggingface.co/Mungert/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-iq4_nl.gguf" $false
+    New-ModelDownloadDefinition "qwen3-reranker-q4km" $true "Qwen3 reranker Q4_K_M llama.cpp GGUF model" "models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf" "https://huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp/resolve/main/Qwen3-Reranker-0.6B-Q4_K_M.gguf" $false
+  )
+}
+
+function Write-ModelTaskStatuses {
+  foreach ($Definition in Get-ModelDownloadDefinitions) {
+    Write-TaskStatus $Definition.Label {
+      $Path = Join-Path $RepoRoot $Definition.RelativePath
+      (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
+    } "downloaded" "needs download"
+  }
+}
+
+function Select-ModelsToDownload {
+  $Definitions = @(Get-ModelDownloadDefinitions)
+  $script:SelectedModelDownloadKeys.Clear()
+  foreach ($Definition in $Definitions) {
+    if ($Definition.Default) {
+      [void]$script:SelectedModelDownloadKeys.Add($Definition.Key)
+    }
+  }
+
+  while ($true) {
+    Write-Host ""
+    Write-Host "Select models to download"
+    Write-Host "Default selected: gemma4-litert, gemma4-web-litert, embeddinggemma-litert, qwen3-reranker-q4km"
+    for ($ModelIndex = 0; $ModelIndex -lt $Definitions.Count; $ModelIndex += 1) {
+      $Definition = $Definitions[$ModelIndex]
+      $Checked = "[ ]"
+      if ($script:SelectedModelDownloadKeys.Contains($Definition.Key)) {
+        $Checked = "[x]"
+      }
+      Write-Host ("  {0}) {1} {2}: {3}" -f ($ModelIndex + 1), $Checked, $Definition.Key, $Definition.Label)
+      Write-Host "      Path: $($Definition.RelativePath)"
+      Write-Host "      URL: $($Definition.Url)"
+    }
+    Write-Host "  a: toggle all"
+    Write-Host "  c: continue"
+    Write-Host "  s: skip model downloads"
+
+    $SelectionText = Read-Host "Toggle numbers, a: toggle all, c: continue, s: skip"
+    if ([string]::IsNullOrWhiteSpace($SelectionText)) {
+      $SelectionText = "c"
+    }
+
+    if ($SelectionText -eq "a") {
+      if ($script:SelectedModelDownloadKeys.Count -eq $Definitions.Count) {
+        $script:SelectedModelDownloadKeys.Clear()
+      } else {
+        $script:SelectedModelDownloadKeys.Clear()
+        foreach ($Definition in $Definitions) {
+          [void]$script:SelectedModelDownloadKeys.Add($Definition.Key)
+        }
+      }
+      continue
+    }
+
+    if ($SelectionText -eq "c") {
+      return
+    }
+
+    if ($SelectionText -eq "s") {
+      $script:SelectedModelDownloadKeys.Clear()
+      Add-Summary "SKIP: model downloads"
+      return
+    }
+
+    $Tokens = $SelectionText -split "[,\s]+" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($Token in $Tokens) {
+      [int]$ParsedIndex = 0
+      if (([int]::TryParse($Token, [ref]$ParsedIndex)) -and ($ParsedIndex -ge 1) -and ($ParsedIndex -le $Definitions.Count)) {
+        $SelectedKey = $Definitions[$ParsedIndex - 1].Key
+        if ($script:SelectedModelDownloadKeys.Contains($SelectedKey)) {
+          [void]$script:SelectedModelDownloadKeys.Remove($SelectedKey)
+        } else {
+          [void]$script:SelectedModelDownloadKeys.Add($SelectedKey)
+        }
+      } else {
+        Write-Host "Unknown model selection: $Token"
+      }
+    }
+  }
+}
+
+function Ensure-SelectedModels {
+  foreach ($Definition in Get-ModelDownloadDefinitions) {
+    if ($script:SelectedModelDownloadKeys.Contains($Definition.Key)) {
+      Ensure-Model $Definition.Label $Definition.RelativePath $Definition.Url $Definition.MayNeedToken
+    }
+  }
+}
+
 Initialize-ModelsNextcloud -Share $modelsNextcloud
 
 function Ensure-BunDependencies {
@@ -723,26 +846,7 @@ function Print-InstallTasks {
       (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
   } "already installed" "needs bun install"
   Write-TaskStatus "Playwright Chromium" { Test-PlaywrightChromium } "available" "needs bunx playwright install chromium"
-  Write-TaskStatus "Gemma 4 E2B web model" {
-    $Path = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it-web.litertlm"
-    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
-  } "downloaded" "needs download"
-  Write-TaskStatus "Gemma 4 E2B native LiteRT model" {
-    $Path = Join-Path $RepoRoot "models\litert\gemma-4-E2B-it.litertlm"
-    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
-  } "downloaded" "needs download"
-  Write-TaskStatus "Gemma 4 E2B llama.cpp GGUF model" {
-    $Path = Join-Path $RepoRoot "models\llamacpp\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
-    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
-  } "downloaded" "needs download"
-  Write-TaskStatus "Qwen3 embedding GGUF model" {
-    $Path = Join-Path $RepoRoot "models\llamacpp\Qwen3-Embedding-0.6B-Q8_0.gguf"
-    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
-  } "downloaded" "needs download"
-  Write-TaskStatus "EmbeddingGemma LiteRT embedding model" {
-    $Path = Join-Path $RepoRoot "models\litert\embeddinggemma-300M_seq2048_mixed-precision.tflite"
-    (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
-  } "downloaded" "needs download"
+  Write-ModelTaskStatuses
   Write-TaskPending "bun test - will run"
   Write-TaskPending "web production build - will run"
   Write-TaskPending "sidecar artifacts build - will run"
@@ -943,11 +1047,8 @@ try {
   Ensure-BunDependencies
   Ensure-PlaywrightChromium
 
-  Ensure-Model "Gemma 4 E2B web model" "models/litert/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
-  Ensure-Model "Gemma 4 E2B native LiteRT model" "models/litert/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true
-  Ensure-Model "Gemma 4 E2B llama.cpp GGUF model" "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" $false
-  Ensure-Model "Qwen3 embedding GGUF model" "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf" "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf" $false
-  Ensure-Model "EmbeddingGemma LiteRT embedding model" "models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite" "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" $true
+  Select-ModelsToDownload
+  Ensure-SelectedModels
 
   Invoke-RunLogged "bun test" { & bun run test }
   Invoke-RunLogged "web production build" { & bun run build }

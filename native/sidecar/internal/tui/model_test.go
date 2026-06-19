@@ -188,7 +188,7 @@ func TestModelRendersPersistentMissionControlStrip(t *testing.T) {
 		"Runtime     ● running     [##########] serving",
 		"Runners     ● 1/2 active  [#####-----] 1/2 running",
 		"Routes      ● 2 wired     embedding -> embed-qwen, main -> main-litert",
-		"Models      ● 4/4 present [##########] required ready",
+		"Models      ● 9/9 present [##########] required ready",
 		"API        WebSocket api.request + shared controllers",
 	} {
 		if !strings.Contains(dashboardView, expected) {
@@ -234,7 +234,7 @@ func TestModelRendersStatusRichTabBar(t *testing.T) {
 		"3 ◐ embed-qwen",
 		"4 ◇ Launch Wizard",
 		"5 ● Chat main-litert",
-		"6 ● Models 4/4",
+		"6 ● Models 9/9",
 		"7 ● Logs 1",
 		"8 ● Settings API",
 	} {
@@ -280,7 +280,7 @@ func TestModelRendersContextCommandRail(t *testing.T) {
 	model.setActiveTab("models")
 	modelsView := model.View()
 	for _, expected := range []string{
-		"Models: d Download | m Main | e Embedding | r Rerank",
+		"Models: d Download | w Launch wizard",
 		"API: Catalog.Download + POST /sidecar/v1/models/download",
 	} {
 		if !strings.Contains(modelsView, expected) {
@@ -291,7 +291,7 @@ func TestModelRendersContextCommandRail(t *testing.T) {
 	model.setActiveTab("wizard")
 	wizardView := model.View()
 	for _, expected := range []string{
-		"Launch Wizard: m Main | e Embedding | r Rerank",
+		"Launch Wizard: t Runtime | b Variant | m/e/r Role | n/p Model | Enter create",
 		"API: RunnerController.CreateRunner + POST /sidecar/v1/runners",
 	} {
 		if !strings.Contains(wizardView, expected) {
@@ -430,7 +430,7 @@ func TestDashboardRendersSignalBoardWithReadinessMeters(t *testing.T) {
 		"Runtime     ● running     [##########] serving",
 		"Runners     ● 1/2 active  [#####-----] 1/2 running",
 		"Routes      ● 2 wired     [##########] 2/2 routed",
-		"Models      ● 4/4 present [##########] required ready",
+		"Models      ● 9/9 present [##########] required ready",
 		"Logs        ● 1 cached    latest: runner:main-litert/stdout",
 		"Next action  open runner tab 2 main-litert or Models for downloads",
 		"Legend      ● ready  ◐ partial  ! attention",
@@ -1141,7 +1141,7 @@ func TestModelModelsViewShowsCatalogEntries(t *testing.T) {
 	if !strings.Contains(view, "gemma4-gguf") {
 		t.Fatalf("models view missing catalog entry:\n%s", view)
 	}
-	if !strings.Contains(view, "Create runners") {
+	if !strings.Contains(view, "Open Launch Wizard") {
 		t.Fatalf("models view missing create controls:\n%s", view)
 	}
 	for _, expected := range []string{
@@ -1183,25 +1183,24 @@ func TestModelsTabRendersReadinessAndActionPanels(t *testing.T) {
 
 	for _, expected := range []string{
 		"Model readiness / Required artifacts",
-		"Required    ◐ 1/4 present [##--------] required ready",
-		"Missing     ! 3 missing   download queue",
-		"Next        d Download qwen3-embedding-gguf via POST /sidecar/v1/models/download",
-		"Runner creation / Catalog presets",
-		"Create runners",
-		"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
-		"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
-		"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
+		"Required    ◐ 1/9 present [#---------] required ready",
+		"Missing     ! 8 missing   download queue",
+		"Next        d Download qwen35-2b-gguf via POST /sidecar/v1/models/download",
+		"Runner creation / Launch Wizard",
+		"Open Launch Wizard",
+		"w Launch wizard with runtime, variant, role, and downloaded model filters",
 		"POST /sidecar/v1/runners",
 		"Catalog cards / Download state",
 		"● present     llamacpp/main      gemma4-gguf",
-		"○ missing     llamacpp/embedding qwen3-embedding-gguf",
+		"○ missing     llamacpp/main      qwen35-2b-gguf",
+		"○ missing     llamacpp/reranking qwen3-reranker-q4km",
 		"Progress:      5/5 B",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("models view missing rich panel content %q:\n%s", expected, view)
 		}
 	}
-	if !viewLineContainsAll(view, "Model readiness / Required artifacts", "Runner creation / Catalog presets") {
+	if !viewLineContainsAll(view, "Model readiness / Required artifacts", "Runner creation / Launch Wizard") {
 		t.Fatalf("wide models tab did not place readiness beside actions:\n%s", view)
 	}
 }
@@ -1255,67 +1254,33 @@ func TestModelsTabDownloadsNextMissingRequiredModelThroughSharedCatalog(t *testi
 	}
 }
 
-func TestModelsTabCreatesRunnersFromCatalogThroughSharedController(t *testing.T) {
+func TestModelsTabOpensFilteredLaunchWizard(t *testing.T) {
 	t.Parallel()
 
-	runners := testRunnerController()
 	modelCatalog := catalog.NewDefault(t.TempDir())
 	model := NewModel(ModelOptions{
 		RuntimeController: testRuntimeController(),
-		RunnerController:  runners,
+		RunnerController:  testRunnerController(),
 		Logs:              server.NewLogBroadcaster(8),
 		Catalog:           modelCatalog,
 	})
 	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
 	updated := next.(Model)
 
-	for _, tc := range []struct {
-		key       string
-		wantCall  string
-		wantToast string
-		wantTab   string
-	}{
-		{
-			key:       "m",
-			wantCall:  "create:main-llamacpp:llamacpp:main:gemma4-gguf",
-			wantToast: "created runner main-llamacpp",
-			wantTab:   "main-llamacpp",
-		},
-		{
-			key:       "e",
-			wantCall:  "create:embedding-llamacpp:llamacpp:embedding:qwen3-embedding",
-			wantToast: "created runner embedding-llamacpp",
-			wantTab:   "embedding-llamacpp",
-		},
-		{
-			key:       "r",
-			wantCall:  "create:rerank-llamacpp:llamacpp:reranking:qwen3-rerank-probe",
-			wantToast: "created runner rerank-llamacpp",
-			wantTab:   "rerank-llamacpp",
-		},
-	} {
-		nextModel, cmd := updated.Update(tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune(tc.key),
-		})
-		if cmd == nil {
-			t.Fatalf("key %q returned no command", tc.key)
-		}
+	nextModel, cmd := updated.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("w"),
+	})
+	if cmd != nil {
+		t.Fatalf("models wizard shortcut returned unexpected command")
+	}
+	updated = nextModel.(Model)
 
-		message := cmd()
-		afterAction, _ := nextModel.(Model).Update(message)
-		updated = afterAction.(Model)
-
-		if got := runners.lastCall(); got != tc.wantCall {
-			t.Fatalf("last call = %q, want %q", got, tc.wantCall)
-		}
-		view := updated.View()
-		if !strings.Contains(view, tc.wantToast) {
-			t.Fatalf("view missing action result %q:\n%s", tc.wantToast, view)
-		}
-		if !strings.Contains(view, tc.wantTab) {
-			t.Fatalf("view missing created runner tab %q:\n%s", tc.wantTab, view)
-		}
+	if updated.activeTabID() != "wizard" {
+		t.Fatalf("active tab = %q, want wizard", updated.activeTabID())
+	}
+	if !strings.Contains(updated.View(), "Launch Wizard / Runtime and variant") {
+		t.Fatalf("wizard view missing after models shortcut:\n%s", updated.View())
 	}
 }
 
@@ -1323,27 +1288,34 @@ func TestLaunchWizardCreatesRunnersThroughSharedController(t *testing.T) {
 	t.Parallel()
 
 	runners := testRunnerController()
-	modelCatalog := catalog.NewDefault(t.TempDir())
+	modelCatalog := testCatalogWithPresentModels(
+		t,
+		"gemma4-litert",
+		"qwen3-reranker-q4km",
+	)
+	llamaRuntimeRoot := testLlamaRuntimeRoot(t, "llama-win-cpu-x64")
 	model := NewModel(ModelOptions{
 		RuntimeController: testRuntimeController(),
 		RunnerController:  runners,
 		Logs:              server.NewLogBroadcaster(8),
 		Catalog:           modelCatalog,
+		LlamaRuntimeRoot:  llamaRuntimeRoot,
 	})
 	model.setActiveTab("wizard")
 	view := model.View()
 
 	for _, expected := range []string{
-		"Launch Wizard / Runner presets",
-		"Choose a runnable preset, inspect the dry run, then create through the shared controller.",
-		"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
-		"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
-		"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
+		"Launch Wizard / Runtime and variant",
+		"Runtime:       litert",
+		"Variant:       cpu",
+		"Role:          main",
+		"Downloaded models",
+		"gemma4-litert",
 		"Dry-run command preview",
 		"Role:          main",
-		"Runtime:       llamacpp",
+		"Runtime:       litert",
 		"Backend:       cpu",
-		"Model:         gemma4-gguf",
+		"Model:         gemma4-e2b",
 		"API route:     /v1/chat/completions",
 		"RunnerController.CreateRunner",
 		"POST /sidecar/v1/runners",
@@ -1355,21 +1327,95 @@ func TestLaunchWizardCreatesRunnersThroughSharedController(t *testing.T) {
 	}
 
 	nextModel, cmd := model.Update(tea.KeyMsg{
-		Type:  tea.KeyRunes,
-		Runes: []rune("m"),
+		Type: tea.KeyEnter,
 	})
 	if cmd == nil {
-		t.Fatalf("wizard main preset returned no command")
+		t.Fatalf("wizard create returned no command")
 	}
 	message := cmd()
 	afterAction, _ := nextModel.(Model).Update(message)
 	updated := afterAction.(Model)
 
-	if got := runners.lastCall(); got != "create:main-llamacpp:llamacpp:main:gemma4-gguf" {
+	if got := runners.lastCall(); got != "create:main-litert-gemma4-litert:litert:main:gemma4-e2b" {
 		t.Fatalf("last call = %q, want wizard main create", got)
 	}
-	if !strings.Contains(updated.View(), "created runner main-llamacpp") {
+	if !strings.Contains(updated.View(), "created runner main-litert-gemma4-litert") {
 		t.Fatalf("wizard view missing create notice:\n%s", updated.View())
+	}
+}
+
+func TestLaunchWizardShowsInstalledLlamaRuntimeVariantsAndApplicableModels(t *testing.T) {
+	t.Parallel()
+
+	runners := testRunnerController()
+	modelCatalog := testCatalogWithPresentModels(
+		t,
+		"gemma4-litert",
+		"embeddinggemma-litert",
+		"qwen3-reranker-q4km",
+	)
+	llamaRuntimeRoot := testLlamaRuntimeRoot(
+		t,
+		"llama-win-cpu-x64",
+		"llama-win-cuda-13.3-x64",
+	)
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  runners,
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           modelCatalog,
+		LlamaRuntimeRoot:  llamaRuntimeRoot,
+	})
+	model.setActiveTab("wizard")
+
+	nextModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	updated := nextModel.(Model)
+	litertRerankView := updated.View()
+	for _, expected := range []string{
+		"Runtime:       litert",
+		"Role:          reranking",
+		"No downloaded litert/reranking models.",
+	} {
+		if !strings.Contains(litertRerankView, expected) {
+			t.Fatalf("litert rerank view missing %q:\n%s", expected, litertRerankView)
+		}
+	}
+
+	nextModel, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	updated = nextModel.(Model)
+	llamaRerankView := updated.View()
+	for _, expected := range []string{
+		"Runtime:       llamacpp",
+		"Variant:       llama-win-cpu-x64",
+		"llama-win-cuda-13.3-x64",
+		"Executable:    " + filepath.Join(llamaRuntimeRoot, "llama-win-cpu-x64", "bin", "llama-server"),
+		"qwen3-reranker-q4km",
+	} {
+		if !strings.Contains(llamaRerankView, expected) {
+			t.Fatalf("llama rerank view missing %q:\n%s", expected, llamaRerankView)
+		}
+	}
+
+	nextModel, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	updated = nextModel.(Model)
+	if !strings.Contains(updated.View(), "Variant:       llama-win-cuda-13.3-x64") {
+		t.Fatalf("wizard did not cycle to CUDA llama runtime:\n%s", updated.View())
+	}
+
+	nextModel, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("wizard llama rerank create returned no command")
+	}
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	updated = afterAction.(Model)
+
+	if got := runners.lastCall(); got != "create:reranking-llamacpp-qwen3-reranker-q4km:llamacpp:reranking:qwen3-reranker-q4km" {
+		t.Fatalf("last call = %q, want reranking llama create", got)
+	}
+	created := runners.lastCreated()
+	if created.Executable != filepath.Join(llamaRuntimeRoot, "llama-win-cuda-13.3-x64", "bin", "llama-server") {
+		t.Fatalf("created executable = %q, want selected llama runtime executable", created.Executable)
 	}
 }
 
@@ -1602,7 +1648,7 @@ func TestSettingsViewShowsSharedActionMethodMap(t *testing.T) {
 		"POST /sidecar/v1/runners/{id}/start|stop|restart",
 		"Runner edits -> RunnerController.UpdateRunner -> PATCH /sidecar/v1/runners/{id}",
 		"Models d -> Catalog.Download -> POST /sidecar/v1/models/download",
-		"Models m/e/r -> RunnerController.CreateRunner -> POST /sidecar/v1/runners",
+		"Wizard Enter -> RunnerController.CreateRunner -> POST /sidecar/v1/runners",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("settings action map missing %q:\n%s", expected, view)
@@ -1865,6 +1911,46 @@ func testCatalog(t *testing.T) *catalog.Catalog {
 	return modelCatalog
 }
 
+func testCatalogWithPresentModels(t *testing.T, ids ...string) *catalog.Catalog {
+	t.Helper()
+
+	wanted := map[string]bool{}
+	for _, id := range ids {
+		wanted[id] = true
+	}
+
+	root := t.TempDir()
+	modelCatalog := catalog.NewDefault(root)
+	for _, entry := range modelCatalog.Entries() {
+		if !wanted[entry.ID] {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(entry.TargetPath), 0o755); err != nil {
+			t.Fatalf("create model fixture directory: %v", err)
+		}
+		if err := os.WriteFile(entry.TargetPath, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write model fixture: %v", err)
+		}
+	}
+	return modelCatalog
+}
+
+func testLlamaRuntimeRoot(t *testing.T, names ...string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	for _, name := range names {
+		path := filepath.Join(root, name, "bin", "llama-server")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create llama runtime fixture directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatalf("write llama runtime fixture: %v", err)
+		}
+	}
+	return root
+}
+
 type fakeRuntimeController struct {
 	status server.RuntimeStatus
 	calls  []string
@@ -2016,7 +2102,7 @@ func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
 			Role:       "embedding",
 			Backend:    "gpu",
 			Executable: "/opt/llama-server",
-			ModelPath:  "/models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+			ModelPath:  "/models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf",
 			ModelID:    "qwen3-embedding",
 			Host:       "127.0.0.1",
 			Port:       9382,
@@ -2057,19 +2143,20 @@ func (c *fakeRunnerController) CreateRunner(
 		spec.ModelID,
 	}, ":"))
 	runner := server.RunnerSnapshot{
-		ID:        spec.ID,
-		Runtime:   spec.Runtime,
-		Role:      spec.Role,
-		Backend:   spec.Backend,
-		ModelPath: spec.ModelPath,
-		ModelID:   spec.ModelID,
-		Host:      spec.Host,
-		Port:      spec.Port,
-		Launch:    spec.Launch,
-		Verbose:   spec.Verbose,
-		State:     "created",
-		Upstream:  spec.Upstream,
-		Detail:    "Runner has not been started yet.",
+		ID:         spec.ID,
+		Runtime:    spec.Runtime,
+		Role:       spec.Role,
+		Backend:    spec.Backend,
+		Executable: spec.Executable,
+		ModelPath:  spec.ModelPath,
+		ModelID:    spec.ModelID,
+		Host:       spec.Host,
+		Port:       spec.Port,
+		Launch:     spec.Launch,
+		Verbose:    spec.Verbose,
+		State:      "created",
+		Upstream:   spec.Upstream,
+		Detail:     "Runner has not been started yet.",
 	}
 	c.created = append(c.created, runner)
 	return runner, nil
@@ -2167,4 +2254,11 @@ func (c *fakeRunnerController) lastCall() string {
 		return ""
 	}
 	return c.calls[len(c.calls)-1]
+}
+
+func (c *fakeRunnerController) lastCreated() server.RunnerSnapshot {
+	if len(c.created) == 0 {
+		return server.RunnerSnapshot{}
+	}
+	return c.created[len(c.created)-1]
 }

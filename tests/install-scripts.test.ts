@@ -123,10 +123,43 @@ describe("interactive installer scripts", () => {
         "models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
       );
       expect(contents).toContain(
-        "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf",
       );
+      expect(contents).toContain(
+        "models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf",
+      );
+      expect(contents).toContain(
+        "models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf",
+      );
+      expect(contents).toContain("models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf");
+      expect(contents).toContain(
+        "models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf",
+      );
+      expect(contents).toContain("Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp");
+      expect(contents).toContain("Mungert/Qwen3-Embedding-0.6B-GGUF");
+      expect(contents).toContain("unsloth/Qwen3.5-2B-GGUF");
+      expect(contents).toContain("unsloth/Qwen3.5-0.8B-GGUF");
       expect(contents).toContain("huggingface.co");
       expect(contents).toContain("HF_TOKEN");
+    }
+  });
+
+  it("uses checkbox model downloads with requested defaults", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("Select models to download");
+      expect(contents).toContain("Default selected");
+      expect(contents).toContain("gemma4-litert");
+      expect(contents).toContain("gemma4-web-litert");
+      expect(contents).toContain("embeddinggemma-litert");
+      expect(contents).toContain("qwen3-reranker-q4km");
+      expect(contents).toContain("[ ]");
+      expect(contents).toContain("[x]");
+      expect(contents).toContain("Toggle numbers");
+      expect(contents).toContain("c: continue");
+      expect(contents).not.toContain("Qwen3-Embedding-0.6B-Q8_0.gguf");
+      expect(contents).not.toContain("Qwen/Qwen3-Embedding-0.6B-GGUF");
     }
   });
 

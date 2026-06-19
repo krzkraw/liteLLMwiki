@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +38,7 @@ type ModelOptions struct {
 	Context           context.Context
 	ChatEndpoint      string
 	ManagedScreen     bool
+	LlamaRuntimeRoot  string
 }
 
 type tickMsg time.Time
@@ -104,8 +107,16 @@ type chatMessage struct {
 type runnerPreset struct {
 	id      string
 	role    string
+	backend string
+	exe     string
 	modelID string
 	port    int
+}
+
+type llamaRuntimeVariant struct {
+	Name       string
+	Backend    string
+	Executable string
 }
 
 type Model struct {
@@ -132,6 +143,14 @@ type Model struct {
 	chatBusy      bool
 	managedScreen bool
 	scrollOffset  int
+
+	wizardRuntime          string
+	wizardBackend          string
+	wizardRole             string
+	wizardVariantSelection int
+	wizardModelSelection   int
+	llamaRuntimeRoot       string
+	llamaRuntimeVariants   []llamaRuntimeVariant
 }
 
 var panelBorder = lipgloss.RoundedBorder()
@@ -179,8 +198,13 @@ func NewModel(options ModelOptions) Model {
 		chatEndpoint:      chatEndpoint,
 		active:            0,
 		managedScreen:     options.ManagedScreen,
+		wizardRuntime:     "litert",
+		wizardBackend:     "cpu",
+		wizardRole:        "main",
+		llamaRuntimeRoot:  options.LlamaRuntimeRoot,
 	}
 	model.refresh()
+	model.normalizeWizardSelection()
 	return model
 }
 
@@ -282,6 +306,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.resetScroll()
 		return m, nil
 	case tea.KeyBackspace, tea.KeyCtrlH, tea.KeyEnter:
+		if m.activeTabID() == "wizard" && msg.Type == tea.KeyEnter {
+			return m, m.wizardCreateCmd()
+		}
 		if m.activeTabID() == "chat" {
 			return m.updateChatKey(msg)
 		}
@@ -295,12 +322,27 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeTabID() == "wizard" {
 			switch strings.ToLower(value) {
+			case "t":
+				m.toggleWizardRuntime()
+				return m, nil
+			case "b":
+				m.cycleWizardVariant()
+				return m, nil
 			case "m":
-				return m, m.runnerCreateCmd("main")
+				m.setWizardRole("main")
+				return m, nil
 			case "e":
-				return m, m.runnerCreateCmd("embedding")
+				m.setWizardRole("embedding")
+				return m, nil
 			case "r":
-				return m, m.runnerCreateCmd("reranking")
+				m.setWizardRole("reranking")
+				return m, nil
+			case "n":
+				m.cycleWizardModel(1)
+				return m, nil
+			case "p":
+				m.cycleWizardModel(-1)
+				return m, nil
 			}
 		}
 		if m.activeTabID() == "settings" {
@@ -360,12 +402,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch strings.ToLower(value) {
 			case "d":
 				return m, m.modelDownloadCmd()
-			case "m":
-				return m, m.runnerCreateCmd("main")
-			case "e":
-				return m, m.runnerCreateCmd("embedding")
-			case "r":
-				return m, m.runnerCreateCmd("reranking")
+			case "w":
+				m.setActiveTab("wizard")
+				m.resetScroll()
+				return m, nil
 			}
 		}
 		if runner, ok := m.activeRunner(); ok {
@@ -817,6 +857,8 @@ func (m *Model) refresh() {
 	if m.catalog != nil {
 		m.models = m.catalog.Entries()
 	}
+	m.llamaRuntimeVariants = discoverLlamaRuntimeVariants(m.llamaRuntimeRoot)
+	m.normalizeWizardSelection()
 	if m.active >= len(m.tabs()) {
 		m.active = 0
 	}
@@ -1040,7 +1082,7 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 	case "wizard":
 		lines = append(
 			lines,
-			"Launch Wizard: m Main | e Embedding | r Rerank",
+			"Launch Wizard: t Runtime | b Variant | m/e/r Role | n/p Model | Enter create",
 			"API: RunnerController.CreateRunner + POST /sidecar/v1/runners",
 			"API: WebSocket api.request POST /sidecar/v1/runners",
 		)
@@ -1053,7 +1095,7 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 	case "models":
 		lines = append(
 			lines,
-			"Models: d Download | m Main | e Embedding | r Rerank",
+			"Models: d Download | w Launch wizard",
 			"API: Catalog.Download + POST /sidecar/v1/models/download",
 			"API: RunnerController.CreateRunner + POST /sidecar/v1/runners",
 		)
@@ -1747,21 +1789,8 @@ func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
 }
 
 func (m Model) wizardView() string {
-	presets := renderPanel(
-		"Launch Wizard / Runner presets",
-		[]string{
-			"Choose a runnable preset, inspect the dry run, then create through the shared controller.",
-			"",
-			"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
-			"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
-			"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
-			"",
-			"RunnerController.CreateRunner",
-			"POST /sidecar/v1/runners",
-			"WebSocket api.request POST /sidecar/v1/runners",
-		},
-		"214",
-	)
+	selection := renderPanel("Launch Wizard / Runtime and variant", m.wizardSelectionLines(), "214")
+	models := renderPanel("Downloaded models", m.wizardModelLines(), "82")
 	dryRun := renderPanel("Dry-run command preview", m.wizardDryRunLines(), "45")
 	routeAuthority := renderPanel(
 		"Wizard route authority",
@@ -1770,26 +1799,95 @@ func (m Model) wizardView() string {
 			"embedding -> /v1/embeddings",
 			"reranking -> /v1/rerank",
 			"Created runners appear as first-class runner tabs.",
-			"Models tab uses the same RunnerController.CreateRunner action.",
+			"Models tab opens this same filtered creation flow.",
 		},
 		"39",
 	)
 
 	if m.width >= 150 {
 		return joinPanels(
-			joinPanelRow(presets, dryRun),
+			joinPanelRow(selection, models),
+			dryRun,
 			routeAuthority,
 		)
 	}
 
-	return joinPanels(presets, dryRun, routeAuthority)
+	return joinPanels(selection, models, dryRun, routeAuthority)
+}
+
+func (m Model) wizardSelectionLines() []string {
+	variant := m.wizardVariantLabel()
+	lines := []string{
+		formatKV("Runtime", m.wizardRuntime),
+		formatKV("Variant", variant),
+		formatKV("Variants", strings.Join(m.wizardVariantNames(), ", ")),
+		formatKV("Role", m.wizardRole),
+		formatKV("Route", runnerRoleRoute(m.wizardRole)),
+		"",
+		"t Runtime toggle litert/llamacpp",
+		"b Variant cycle after runtime selection",
+		"m/e/r Role main/embedding/reranking",
+		"n/p Model cycle downloaded applicable models",
+		"Enter creates through RunnerController.CreateRunner",
+		"POST /sidecar/v1/runners",
+		"WebSocket api.request POST /sidecar/v1/runners",
+	}
+	if m.wizardRuntime == "llamacpp" && len(m.llamaRuntimeVariants) == 0 {
+		lines = append(lines, "", "Install llama runtime folders under native/llama-runtimes first.")
+	}
+	return lines
+}
+
+func (m Model) wizardVariantNames() []string {
+	if m.wizardRuntime == "llamacpp" {
+		if len(m.llamaRuntimeVariants) == 0 {
+			return []string{"none installed"}
+		}
+		names := make([]string, 0, len(m.llamaRuntimeVariants))
+		for _, variant := range m.llamaRuntimeVariants {
+			names = append(names, variant.Name)
+		}
+		return names
+	}
+	return litertBackendOptions()
+}
+
+func (m Model) wizardModelLines() []string {
+	candidates := m.wizardCandidateModels()
+	if len(candidates) == 0 {
+		return []string{
+			fmt.Sprintf(
+				"No downloaded %s/%s models.",
+				m.wizardRuntime,
+				m.wizardRole,
+			),
+			"Download or place a matching model, then refresh will show it here.",
+		}
+	}
+
+	selectedIndex := clampInt(m.wizardModelSelection, 0, len(candidates)-1)
+	lines := make([]string, 0, len(candidates)+1)
+	for index, entry := range candidates {
+		marker := " "
+		if index == selectedIndex {
+			marker = ">"
+		}
+		lines = append(lines, fmt.Sprintf(
+			"%s %s  %s  %s",
+			marker,
+			entry.ID,
+			entry.Filename,
+			entry.TargetPath,
+		))
+	}
+	return lines
 }
 
 func (m Model) wizardDryRunLines() []string {
-	spec, _, err := m.runnerSpecForRole("main")
+	spec, entry, err := m.wizardRunnerSpec()
 	if err != nil {
 		return []string{
-			"Main llama.cpp preset unavailable.",
+			"Selected runner unavailable.",
 			err.Error(),
 		}
 	}
@@ -1799,8 +1897,11 @@ func (m Model) wizardDryRunLines() []string {
 		formatKV("Role", spec.Role),
 		formatKV("Runtime", spec.Runtime),
 		formatKV("Backend", spec.Backend),
+		formatKV("Variant", m.wizardVariantLabel()),
 		formatKV("Model", spec.ModelID),
+		formatKV("Catalog entry", entry.ID),
 		formatKV("Model path", spec.ModelPath),
+		formatKV("Executable", fallback(spec.Executable, "default runtime executable")),
 		formatKV("Host", spec.Host),
 		formatKV("Port", strconv.Itoa(spec.Port)),
 		formatKV("API route", runnerRoleRoute(spec.Role)),
@@ -1903,7 +2004,7 @@ func (m Model) modelsView() string {
 		"82",
 	)
 	actions := renderPanel(
-		"Runner creation / Catalog presets",
+		"Runner creation / Launch Wizard",
 		modelActionLines(),
 		"214",
 	)
@@ -1965,10 +2066,8 @@ func (m Model) modelReadinessLines() []string {
 
 func modelActionLines() []string {
 	return []string{
-		"Create runners",
-		"m Main llama.cpp -> main-llamacpp /v1/chat/completions",
-		"e Embedding llama.cpp -> embedding-llamacpp /v1/embeddings",
-		"r Rerank llama.cpp -> rerank-llamacpp /v1/rerank",
+		"Open Launch Wizard",
+		"w Launch wizard with runtime, variant, role, and downloaded model filters",
 		"RunnerController.CreateRunner",
 		"POST /sidecar/v1/runners",
 		"",
@@ -2307,7 +2406,7 @@ func settingsActionMapLines() []string {
 		"POST /sidecar/v1/runners/{id}/start|stop|restart",
 		"Runner edits -> RunnerController.UpdateRunner -> PATCH /sidecar/v1/runners/{id}",
 		"Models d -> Catalog.Download -> POST /sidecar/v1/models/download",
-		"Models m/e/r -> RunnerController.CreateRunner -> POST /sidecar/v1/runners",
+		"Wizard Enter -> RunnerController.CreateRunner -> POST /sidecar/v1/runners",
 	}
 }
 
@@ -2417,19 +2516,19 @@ func (m Model) runtimeActionCmd(action string, mode server.RuntimeMode) tea.Cmd 
 	}
 }
 
-func (m Model) runnerCreateCmd(role string) tea.Cmd {
+func (m Model) wizardCreateCmd() tea.Cmd {
 	return func() tea.Msg {
 		if m.runnerController == nil {
 			return runnerCreateMsg{
-				label: role,
+				label: m.wizardRole,
 				err:   fmt.Errorf("runner controller is not configured"),
 			}
 		}
 
-		spec, label, err := m.runnerSpecForRole(role)
+		spec, entry, err := m.wizardRunnerSpec()
 		if err != nil {
 			return runnerCreateMsg{
-				label: label,
+				label: m.wizardRole,
 				err:   err,
 			}
 		}
@@ -2439,7 +2538,7 @@ func (m Model) runnerCreateCmd(role string) tea.Cmd {
 
 		runner, err := m.runnerController.CreateRunner(ctx, spec)
 		return runnerCreateMsg{
-			label:  label,
+			label:  entry.ID,
 			runner: runner,
 			err:    err,
 		}
@@ -2810,53 +2909,307 @@ func postChatCompletion(
 	return content, nil
 }
 
-func (m Model) runnerSpecForRole(role string) (server.RunnerSpec, string, error) {
-	switch role {
-	case "main":
-		entry, ok := m.catalogEntry("gemma4-gguf")
-		if !ok {
-			return server.RunnerSpec{}, role, fmt.Errorf("catalog entry gemma4-gguf is not available")
+func (m *Model) toggleWizardRuntime() {
+	if m.wizardRuntime == "litert" {
+		m.wizardRuntime = "llamacpp"
+	} else {
+		m.wizardRuntime = "litert"
+	}
+	m.wizardVariantSelection = 0
+	m.wizardModelSelection = 0
+	m.normalizeWizardSelection()
+}
+
+func (m *Model) cycleWizardVariant() {
+	if m.wizardRuntime == "llamacpp" {
+		if len(m.llamaRuntimeVariants) > 0 {
+			m.wizardVariantSelection = (m.wizardVariantSelection + 1) % len(m.llamaRuntimeVariants)
 		}
-		return catalogRunnerSpec(entry, runnerPreset{
-			id:      "main-llamacpp",
-			role:    "main",
-			modelID: "gemma4-gguf",
-			port:    9482,
-		}), role, nil
-	case "embedding":
-		entry, ok := m.catalogEntry("qwen3-embedding-gguf")
-		if !ok {
-			return server.RunnerSpec{}, role, fmt.Errorf("catalog entry qwen3-embedding-gguf is not available")
+		m.normalizeWizardSelection()
+		return
+	}
+
+	options := litertBackendOptions()
+	current := 0
+	for index, option := range options {
+		if option == m.wizardBackend {
+			current = index
+			break
 		}
-		return catalogRunnerSpec(entry, runnerPreset{
-			id:      "embedding-llamacpp",
-			role:    "embedding",
-			modelID: "qwen3-embedding",
-			port:    9483,
-		}), role, nil
-	case "reranking":
-		entry, ok := m.catalogEntry("qwen3-embedding-gguf")
-		if !ok {
-			return server.RunnerSpec{}, role, fmt.Errorf("catalog entry qwen3-embedding-gguf is not available")
-		}
-		return catalogRunnerSpec(entry, runnerPreset{
-			id:      "rerank-llamacpp",
-			role:    "reranking",
-			modelID: "qwen3-rerank-probe",
-			port:    9484,
-		}), role, nil
-	default:
-		return server.RunnerSpec{}, role, fmt.Errorf("unknown runner role %q", role)
+	}
+	m.wizardBackend = options[(current+1)%len(options)]
+	m.normalizeWizardSelection()
+}
+
+func (m *Model) setWizardRole(role string) {
+	m.wizardRole = role
+	m.wizardModelSelection = 0
+	m.normalizeWizardSelection()
+}
+
+func (m *Model) cycleWizardModel(delta int) {
+	candidates := m.wizardCandidateModels()
+	if len(candidates) == 0 {
+		m.wizardModelSelection = 0
+		return
+	}
+	m.wizardModelSelection = (m.wizardModelSelection + delta) % len(candidates)
+	if m.wizardModelSelection < 0 {
+		m.wizardModelSelection += len(candidates)
 	}
 }
 
-func (m Model) catalogEntry(id string) (catalog.Entry, bool) {
+func (m *Model) normalizeWizardSelection() {
+	if m.wizardRuntime != "litert" && m.wizardRuntime != "llamacpp" {
+		m.wizardRuntime = "litert"
+	}
+	if !isWizardRole(m.wizardRole) {
+		m.wizardRole = "main"
+	}
+	if m.wizardRuntime == "litert" && !containsString(litertBackendOptions(), m.wizardBackend) {
+		m.wizardBackend = "cpu"
+	}
+	if len(m.llamaRuntimeVariants) == 0 {
+		m.wizardVariantSelection = 0
+	} else {
+		m.wizardVariantSelection = clampInt(m.wizardVariantSelection, 0, len(m.llamaRuntimeVariants)-1)
+	}
+	candidates := m.wizardCandidateModels()
+	if len(candidates) == 0 {
+		m.wizardModelSelection = 0
+		return
+	}
+	m.wizardModelSelection = clampInt(m.wizardModelSelection, 0, len(candidates)-1)
+}
+
+func isWizardRole(role string) bool {
+	return role == "main" || role == "embedding" || role == "reranking"
+}
+
+func (m Model) wizardVariantLabel() string {
+	if m.wizardRuntime == "llamacpp" {
+		if variant, ok := m.selectedLlamaRuntimeVariant(); ok {
+			return variant.Name
+		}
+		return "no installed llama runtimes"
+	}
+	return m.wizardBackend
+}
+
+func (m Model) selectedLlamaRuntimeVariant() (llamaRuntimeVariant, bool) {
+	if len(m.llamaRuntimeVariants) == 0 {
+		return llamaRuntimeVariant{}, false
+	}
+	index := clampInt(m.wizardVariantSelection, 0, len(m.llamaRuntimeVariants)-1)
+	return m.llamaRuntimeVariants[index], true
+}
+
+func (m Model) wizardCandidateModels() []catalog.Entry {
+	entries := make([]catalog.Entry, 0, len(m.models))
 	for _, entry := range m.models {
-		if entry.ID == id {
-			return entry, true
+		if entry.State != catalog.StatePresent {
+			continue
+		}
+		if entry.Runtime != m.wizardRuntime || entry.Role != m.wizardRole {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func (m Model) wizardSelectedEntry() (catalog.Entry, error) {
+	candidates := m.wizardCandidateModels()
+	if len(candidates) == 0 {
+		return catalog.Entry{}, fmt.Errorf(
+			"no downloaded %s/%s models are available",
+			m.wizardRuntime,
+			m.wizardRole,
+		)
+	}
+	index := clampInt(m.wizardModelSelection, 0, len(candidates)-1)
+	return candidates[index], nil
+}
+
+func (m Model) wizardRunnerSpec() (server.RunnerSpec, catalog.Entry, error) {
+	entry, err := m.wizardSelectedEntry()
+	if err != nil {
+		return server.RunnerSpec{}, catalog.Entry{}, err
+	}
+
+	backend := m.wizardBackend
+	executable := ""
+	if entry.Runtime == "llamacpp" {
+		variant, ok := m.selectedLlamaRuntimeVariant()
+		if !ok {
+			return server.RunnerSpec{}, catalog.Entry{}, fmt.Errorf(
+				"no installed llama runtime variants under native/llama-runtimes",
+			)
+		}
+		backend = variant.Backend
+		executable = variant.Executable
+	}
+
+	spec := catalogRunnerSpec(entry, runnerPreset{
+		id:      runnerIDForCatalogEntry(entry),
+		role:    entry.Role,
+		backend: backend,
+		exe:     executable,
+		modelID: modelIDForCatalogEntry(entry),
+		port:    m.nextWizardPort(entry.Role),
+	})
+	return spec, entry, nil
+}
+
+func runnerIDForCatalogEntry(entry catalog.Entry) string {
+	return strings.Join([]string{entry.Role, entry.Runtime, entry.ID}, "-")
+}
+
+func modelIDForCatalogEntry(entry catalog.Entry) string {
+	switch entry.ID {
+	case "gemma4-litert":
+		return "gemma4-e2b"
+	default:
+		return entry.ID
+	}
+}
+
+func (m Model) nextWizardPort(role string) int {
+	port := defaultPortForRole(role)
+	used := map[int]bool{}
+	for _, runner := range m.snapshot.Runners {
+		if runner.Port > 0 {
+			used[runner.Port] = true
 		}
 	}
-	return catalog.Entry{}, false
+	for used[port] {
+		port++
+	}
+	return port
+}
+
+func defaultPortForRole(role string) int {
+	switch role {
+	case "embedding":
+		return 9483
+	case "reranking":
+		return 9484
+	default:
+		return 9482
+	}
+}
+
+func litertBackendOptions() []string {
+	return []string{"cpu", "gpu", "npu"}
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func discoverLlamaRuntimeVariants(root string) []llamaRuntimeVariant {
+	root = resolveLlamaRuntimeRoot(root)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return []llamaRuntimeVariant{}
+	}
+
+	variants := make([]llamaRuntimeVariant, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
+		executable := findLlamaServerExecutable(dir)
+		if executable == "" {
+			continue
+		}
+		variants = append(variants, llamaRuntimeVariant{
+			Name:       entry.Name(),
+			Backend:    backendForLlamaRuntime(entry.Name()),
+			Executable: executable,
+		})
+	}
+	sort.Slice(variants, func(left int, right int) bool {
+		return variants[left].Name < variants[right].Name
+	})
+	return variants
+}
+
+func resolveLlamaRuntimeRoot(root string) string {
+	if strings.TrimSpace(root) != "" {
+		return root
+	}
+	if envRoot := os.Getenv("LLAMA_RUNTIME_ROOT"); strings.TrimSpace(envRoot) != "" {
+		return envRoot
+	}
+	if repoRoot := findRepoRoot(); repoRoot != "" {
+		return filepath.Join(repoRoot, "native", "llama-runtimes")
+	}
+	return filepath.Join("native", "llama-runtimes")
+}
+
+func findRepoRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if stat, err := os.Stat(filepath.Join(dir, "native", "llama-runtimes")); err == nil && stat.IsDir() {
+			return dir
+		}
+		if stat, err := os.Stat(filepath.Join(dir, "package.json")); err == nil && !stat.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+func findLlamaServerExecutable(root string) string {
+	var found string
+	_ = filepath.WalkDir(root, func(path string, dirEntry os.DirEntry, err error) error {
+		if err != nil || found != "" || dirEntry.IsDir() {
+			return nil
+		}
+		name := dirEntry.Name()
+		if name == "llama-server" || name == "llama-server.exe" {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+func backendForLlamaRuntime(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "cuda"):
+		return "cuda"
+	case strings.Contains(lower, "vulkan"):
+		return "vulkan"
+	case strings.Contains(lower, "openvino"):
+		return "openvino"
+	case strings.Contains(lower, "sycl"):
+		return "sycl"
+	case strings.Contains(lower, "hip") || strings.Contains(lower, "radeon"):
+		return "gpu"
+	case strings.Contains(lower, "opencl"):
+		return "gpu"
+	case strings.Contains(lower, "macos"):
+		return "metal"
+	default:
+		return "cpu"
+	}
 }
 
 func (m Model) nextDownloadEntry() (catalog.Entry, bool) {
@@ -2874,15 +3227,16 @@ func (m Model) nextDownloadEntry() (catalog.Entry, bool) {
 
 func catalogRunnerSpec(entry catalog.Entry, preset runnerPreset) server.RunnerSpec {
 	return server.RunnerSpec{
-		ID:        preset.id,
-		Runtime:   entry.Runtime,
-		Role:      preset.role,
-		Backend:   "cpu",
-		ModelPath: entry.TargetPath,
-		ModelID:   preset.modelID,
-		Host:      "127.0.0.1",
-		Port:      preset.port,
-		Launch:    true,
+		ID:         preset.id,
+		Runtime:    entry.Runtime,
+		Role:       preset.role,
+		Backend:    fallback(preset.backend, "cpu"),
+		Executable: preset.exe,
+		ModelPath:  entry.TargetPath,
+		ModelID:    preset.modelID,
+		Host:       "127.0.0.1",
+		Port:       preset.port,
+		Launch:     true,
 	}
 }
 

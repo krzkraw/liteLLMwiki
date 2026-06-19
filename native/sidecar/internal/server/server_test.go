@@ -276,8 +276,8 @@ func TestModelsEndpointListsCatalog(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode models: %v", err)
 	}
-	if len(body.Models) != 4 {
-		t.Fatalf("models = %d, want 4", len(body.Models))
+	if len(body.Models) != 9 {
+		t.Fatalf("models = %d, want 9", len(body.Models))
 	}
 	if body.Models[0].ID == "" || body.Models[0].TargetPath == "" {
 		t.Fatalf("first model is incomplete: %#v", body.Models[0])
@@ -347,7 +347,7 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 			"role": "embedding",
 			"backend": "cpu",
 			"executable": "/opt/llama-server",
-			"modelPath": "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+			"modelPath": "models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf",
 			"modelId": "qwen3-embedding",
 			"host": "127.0.0.1",
 			"port": 9492,
@@ -490,8 +490,8 @@ func TestWebSocketAPIRequestControlsRunner(t *testing.T) {
 		"runtime": "llamacpp",
 		"role": "reranking",
 		"backend": "cpu",
-		"modelPath": "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
-		"modelId": "qwen3-rerank-probe",
+		"modelPath": "models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf",
+		"modelId": "qwen3-reranker-q4km",
 		"host": "127.0.0.1",
 		"port": 9493,
 		"launch": false,
@@ -1006,8 +1006,8 @@ func TestWebSocketAPIRequestListsModelCatalog(t *testing.T) {
 	if err := json.Unmarshal(body, &response); err != nil {
 		t.Fatalf("decode models response: %v", err)
 	}
-	if len(response.Models) != 4 {
-		t.Fatalf("models = %d, want 4", len(response.Models))
+	if len(response.Models) != 9 {
+		t.Fatalf("models = %d, want 9", len(response.Models))
 	}
 }
 

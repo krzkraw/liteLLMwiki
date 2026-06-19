@@ -101,14 +101,18 @@ share paths such as `litert/...`.
 
 The installer checks local tools, Bun dependencies, sidecar artifacts, and known
 model paths. It prints an up-front task list and marks already satisfied items
-with a green checkmark when terminal color is available. For every missing
-system dependency or model download it prints a boxed task prompt with the
-command or browser URL, the expected result, and `Y`/`N`/`M` choices. Answer
-`Y` to let the script run the action, `M` to do it manually while the installer
+with a green checkmark when terminal color is available. It then shows checkbox
+selectors for llama.cpp runtime folders and model downloads. The default model
+selection is `gemma4-litert`, `gemma4-web-litert`,
+`embeddinggemma-litert`, and `qwen3-reranker-q4km`; optional llama.cpp main and
+embedding models can be toggled on from the same list. For every missing system
+dependency or selected model download it prints a boxed task prompt with the
+command or browser URL, the expected result, and `Y`/`N`/`M` choices. Answer `Y`
+to let the script run the action, `M` to do it manually while the installer
 waits and re-checks, or `N` to stop. If an attempted install or download fails,
-it prints the command or URL again and waits for you to complete it. Hugging
-Face tokens are prompted only for downloads that may need one and are kept in
-the current process environment.
+it prints the command or URL again and waits for you to complete it. Hugging Face
+tokens are prompted only for downloads that may need one and are kept in the
+current process environment.
 The installer also offers selectable llama.cpp runtime downloads for the
 current platform. Runtime archives are verified by SHA256 and extracted under
 `native/llama-runtimes/` into folders such as `llama-win-cpu-x64`,
@@ -152,13 +156,23 @@ bun run smoke:model
 You can also choose the `.litertlm` from disk with the `Choose local .litertlm`
 control. Use the `gemma-4-E2B-it-web.litertlm` web model for browser WebGPU.
 
-## Native Model
+## Native Models
 
-The native executable model is hosted outside this repository. Place the
-externally hosted file at the path expected by the sidecar:
+Native executable models are hosted outside this repository. The required model
+catalog includes LiteRT, browser LiteRT, llama.cpp main, llama.cpp embedding,
+and llama.cpp reranking artifacts. Place selected external files at the paths
+expected by the sidecar, for example:
 
 ```text
 models/litert/gemma-4-E2B-it.litertlm
+models/litert/gemma-4-E2B-it-web.litertlm
+models/litert/embeddinggemma-300M_seq2048_mixed-precision.tflite
+models/llamacpp/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
+models/llamacpp/Qwen3.5-2B-IQ4_NL.gguf
+models/llamacpp/Qwen3.5-0.8B-UD-Q8_K_XL.gguf
+models/llamacpp/Qwen3-Embedding-0.6B-q8_0.gguf
+models/llamacpp/Qwen3-Embedding-0.6B-iq4_nl.gguf
+models/llamacpp/Qwen3-Reranker-0.6B-Q4_K_M.gguf
 ```
 
 Model binaries, partial downloads, and split model chunks are ignored by Git.
@@ -194,6 +208,13 @@ The sidecar opens an interactive terminal dashboard by default. Use
 The sidecar searches for `litert-lm`, imports
 `models/litert/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
 `litert-lm serve --host 127.0.0.1 --port 9381`.
+The TUI Launch Wizard creates additional runners from downloaded catalog models.
+It first toggles `litert` versus `llamacpp`; when `llamacpp` is selected it
+lists installed runtime folders from `native/llama-runtimes` such as
+`llama-win-cpu-x64` or `llama-win-cuda-13.3-x64` and passes that folder's
+`llama-server` executable to the runner. It then filters model choices by role
+(`main`, `embedding`, or `reranking`) and only shows downloaded applicable
+models.
 
 The sidecar still exposes HTTP endpoints for manual checks and smoke scripts,
 including status:

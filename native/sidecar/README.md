@@ -30,10 +30,12 @@ Its dashboard lists runtime specs, a visual topology graph, route authority,
 runnable backend cards, runtime topology, route maps, recent activity, and a
 signal board with readiness meters for runtime, runners, routes, required model
 artifacts, and logs.
-Each configured runner gets its own tab with health, endpoint, control surface,
-operation flow, runtime command, capability matrix, settings, process details,
-and recent log panels. The operation flow shows the runner state, model file,
-runtime/backend, upstream, role route, controller methods, and matching
+Each configured runner gets its own tab with health, a per-runner readiness
+signal board, endpoint, control surface, operation flow, runtime command,
+capability matrix, settings, process details, and recent log panels. The signal
+board summarizes runner state, route, process, model, capabilities, log cache,
+and the next useful action. The operation flow shows the runner state, model
+file, runtime/backend, upstream, role route, controller methods, and matching
 WebSocket `api.request` paths. Runner controls use `s` start, `x` stop, and
 `r` restart. Runner tabs include a settings matrix that lists each edit key,
 current value, `PATCH` field, and `RunnerController.UpdateRunner` method.

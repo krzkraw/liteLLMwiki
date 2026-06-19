@@ -1035,6 +1035,7 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 
 	return joinPanels(
 		renderPanel("Runner "+runner.ID+" / Runner health", m.runnerHealthLines(runner), "82"),
+		renderPanel("Runner signal board / Readiness", m.runnerSignalLines(runner), "82"),
 		renderPanel("Endpoint map", m.runnerEndpointLines(runner), "45"),
 		renderPanel("Operation flow", runnerOperationLines(runner), "214"),
 		renderPanel("Control surface", m.runnerControlLines(runner), "39"),
@@ -1046,6 +1047,62 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		renderPanel("Details", details, "214"),
 		renderPanel("Recent runner logs", m.runnerLogLines(runner.ID, 6), "244"),
 	)
+}
+
+func (m Model) runnerSignalLines(runner server.RunnerSnapshot) []string {
+	logCount := m.runnerLogCount(runner.ID)
+
+	return []string{
+		formatSignalLine(
+			"State",
+			runnerStateGlyph(runner.State),
+			fallback(runner.State, "unknown"),
+			runnerHealthMeter(runner),
+		),
+		formatSignalLine(
+			"Route",
+			runnerRouteGlyph(runner),
+			fallback(runner.Role, "unknown"),
+			runnerRoleRoute(runner.Role)+" -> "+fallback(runner.Upstream, "unavailable"),
+		),
+		formatSignalLine(
+			"Process",
+			runnerProcessGlyph(runner),
+			runnerProcessState(runner),
+			runnerLaunchMode(runner),
+		),
+		formatSignalLine(
+			"Model",
+			runnerModelGlyph(runner),
+			fallback(runner.ModelID, "model"),
+			fallback(runner.ModelPath, "not configured"),
+		),
+		formatSignalLine(
+			"Caps",
+			runnerCapabilitiesGlyph(runner),
+			fmt.Sprintf("%d advertised", len(runner.Capabilities)),
+			capabilitiesLine(runner.Capabilities),
+		),
+		formatSignalLine(
+			"Logs",
+			runnerLogsGlyph(runner, logCount),
+			"seq "+fallbackUint(runner.LogSequence, "none"),
+			fmt.Sprintf("cached entries: %d", logCount),
+		),
+		"Next action  " + runnerNextAction(runner),
+		"Legend      ● ready  ◐ configured  ! attention",
+	}
+}
+
+func (m Model) runnerLogCount(runnerID string) int {
+	count := 0
+	source := "runner:" + runnerID
+	for _, entry := range m.logEntries {
+		if entry.Source == source {
+			count++
+		}
+	}
+	return count
 }
 
 func (m Model) runnerHealthLines(runner server.RunnerSnapshot) []string {
@@ -2179,6 +2236,75 @@ func logSignalGlyph(count int) string {
 		return "●"
 	}
 	return "◐"
+}
+
+func runnerRouteGlyph(runner server.RunnerSnapshot) string {
+	if strings.TrimSpace(runner.Upstream) == "" {
+		return "!"
+	}
+	if runnerRoleRoute(runner.Role) == "/v1/*" {
+		return "◐"
+	}
+	return "●"
+}
+
+func runnerProcessGlyph(runner server.RunnerSnapshot) string {
+	if runner.PID > 0 {
+		return "●"
+	}
+	if runner.Launch {
+		return "◐"
+	}
+	return "!"
+}
+
+func runnerProcessState(runner server.RunnerSnapshot) string {
+	if runner.PID > 0 {
+		return "pid " + strconv.Itoa(runner.PID)
+	}
+	if runner.Launch {
+		return "not running"
+	}
+	return "external"
+}
+
+func runnerModelGlyph(runner server.RunnerSnapshot) string {
+	if strings.TrimSpace(runner.ModelID) != "" && strings.TrimSpace(runner.ModelPath) != "" {
+		return "●"
+	}
+	if strings.TrimSpace(runner.ModelID) != "" || strings.TrimSpace(runner.ModelPath) != "" {
+		return "◐"
+	}
+	return "!"
+}
+
+func runnerCapabilitiesGlyph(runner server.RunnerSnapshot) string {
+	if len(runner.Capabilities) > 0 {
+		return "●"
+	}
+	return "◐"
+}
+
+func runnerLogsGlyph(runner server.RunnerSnapshot, cached int) string {
+	if runner.LogSequence > 0 || cached > 0 {
+		return "●"
+	}
+	return "◐"
+}
+
+func runnerNextAction(runner server.RunnerSnapshot) string {
+	switch strings.ToLower(runner.State) {
+	case "running":
+		return "use x/r for process control or edit b/p/h/i/m/e/u/f/l/v/t/o"
+	case "starting":
+		return "wait for health, then inspect logs if it stalls"
+	case "created", "stopped", "exited":
+		return "press s to start or edit b/p/h/i/m/e/u/f/l/v/t/o"
+	case "unavailable", "error", "missing":
+		return "inspect Last error, model path, executable, and logs"
+	default:
+		return "review settings, route, and logs"
+	}
 }
 
 func runnerHealthMeter(runner server.RunnerSnapshot) string {

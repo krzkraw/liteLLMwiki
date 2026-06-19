@@ -454,6 +454,37 @@ func TestRunnerTabRendersRichOperationalPanels(t *testing.T) {
 	}
 }
 
+func TestRunnerTabRendersSignalBoardWithRunnerReadiness(t *testing.T) {
+	t.Parallel()
+
+	logs := server.NewLogBroadcaster(8)
+	logs.Publish("runner:main-litert", "stdout", "loaded model")
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              logs,
+	})
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated := next.(Model)
+	view := updated.View()
+
+	for _, expected := range []string{
+		"Runner signal board / Readiness",
+		"State       ● running     [##########] serving",
+		"Route       ● main        /v1/chat/completions -> http://127.0.0.1:9381",
+		"Process     ● pid 1234    managed by sidecar",
+		"Model       ● gemma4-e2b  /models/litert/gemma-4-E2B-it.litertlm",
+		"Caps        ● 2 advertised chat=openai-compatible, multimodal=litert-run",
+		"Logs        ● seq 41      cached entries: 1",
+		"Next action  use x/r for process control or edit b/p/h/i/m/e/u/f/l/v/t/o",
+		"Legend      ● ready  ◐ configured  ! attention",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("runner signal board missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestRunnerTabShowsOperationFlowAndSharedMethodParity(t *testing.T) {
 	t.Parallel()
 

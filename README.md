@@ -12,6 +12,9 @@ Gemma provider when available, and renders a deterministic knowledge graph.
 
 ## Run
 
+This project is Bun-only for JavaScript tooling. Use Bun directly for install,
+test, build, smoke, and script commands.
+
 Install dependencies from the repository root:
 
 ```bash

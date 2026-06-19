@@ -7,6 +7,8 @@ const oldPackageRunner = "n" + "pm";
 const oldBundler = "v" + "ite";
 const oldTestRunner = "v" + "itest";
 const oldLockfile = ["package", "lock"].join("-") + ".json";
+const forbiddenPackageRunnerCommand =
+  /\b(?:npm|npx|pnpm|yarn)\s+(?:install|run|test|exec|x|dlx)\b/i;
 
 function readRootFile(name: string): string {
   return readFileSync(join(repoRoot, name), "utf8");
@@ -44,6 +46,26 @@ describe("Bun and Rspack toolchain contract", () => {
   it("uses a Bun lockfile instead of the old package-manager lockfile", () => {
     expect(existsSync(join(repoRoot, "bun.lock"))).toBe(true);
     expect(existsSync(join(repoRoot, oldLockfile))).toBe(false);
+  });
+
+  it("documents Bun as the only JavaScript command runner", () => {
+    expect(readRootFile("AGENTS.md")).toContain("Do not use npm");
+
+    for (const fileName of [
+      "AGENTS.md",
+      "README.md",
+      "install.sh",
+      "install.ps1",
+      "launch-webui.sh",
+      "launch-webui.ps1",
+      "launch-sidecar.sh",
+      "launch-sidecar.ps1",
+      "launch-all.sh",
+      "launch-all.ps1",
+      "package.json",
+    ]) {
+      expect(readRootFile(fileName)).not.toMatch(forbiddenPackageRunnerCommand);
+    }
   });
 
   it("uses the platform WebSocket client for the mock sidecar smoke test", () => {

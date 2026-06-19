@@ -44,6 +44,9 @@ selected from disk in the UI.
 
 Run from the repository root unless noted.
 
+Use Bun directly for all JavaScript and web commands. Do not use npm, npx,
+yarn, or pnpm as command runners in this repository.
+
 ```bash
 # Web tests
 bun test
@@ -94,6 +97,8 @@ native runtime smoke requires `LITERT_LM_BIN=/path/to/litert-lm`.
 
 - Prefer existing project patterns over new abstractions.
 - Keep changes scoped to the user request.
+- Use Bun directly for JavaScript tasks; do not wrap Bun scripts through other
+  package-manager command runners.
 - Update `README.md` and this file when setup, commands, structure, or model
   policy changes.
 - Use exact commands for verification evidence; do not rely on summaries when

@@ -76,6 +76,22 @@ exits, or is reconfigured. Text generation still uses the OpenAI-compatible
 HTTP `/v1/chat/completions` endpoint; native multimodal prompts use
 `/sidecar/v1/multimodal`.
 
+Runner management is also exposed over HTTP:
+
+```text
+GET  /sidecar/v1/runners
+POST /sidecar/v1/runners
+POST /sidecar/v1/runners/{id}/start
+POST /sidecar/v1/runners/{id}/restart
+POST /sidecar/v1/runners/{id}/stop
+```
+
+`POST /sidecar/v1/runners` accepts runner fields such as `id`, `runtime`,
+`role`, `backend`, `executable`, `modelPath`, `modelId`, `host`, `port`,
+`launch`, and `upstream`. The same routes are available through WebSocket
+`api.request` frames. Long-lived start and restart operations are detached from
+the request context, while stop operations still honor the caller timeout.
+
 `/sidecar/v1/status` probes the upstream `/v1/models` endpoint when the runtime
 is available. The base `gemma4-e2b` model means the default CPU/base path is
 available; `gemma4-e2b,gpu` and `gemma4-e2b,npu` advertise concrete GPU and NPU

@@ -22,6 +22,7 @@ import (
 
 	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/proxy"
+	"litert-sidecar/internal/supervisor"
 )
 
 func TestStatusReturnsBackendEvidence(t *testing.T) {
@@ -320,6 +321,157 @@ func TestModelDownloadEndpointDownloadsCatalogEntry(t *testing.T) {
 	}
 	if body.Model.ID != "gemma4-gguf" || body.Model.State != catalog.StatePresent {
 		t.Fatalf("model = %#v, want downloaded gemma4-gguf", body.Model)
+	}
+}
+
+func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DefaultLiteRT: supervisor.LiteRTConfig{
+			Launch:   false,
+			ModelID:  "gemma4-e2b",
+			Upstream: "http://127.0.0.1:9381",
+		},
+	})
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/sidecar/v1/runners",
+		strings.NewReader(`{
+			"id": "embedding-llamacpp",
+			"runtime": "llamacpp",
+			"role": "embedding",
+			"backend": "cpu",
+			"executable": "/opt/llama-server",
+			"modelPath": "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+			"modelId": "qwen3-embedding",
+			"host": "127.0.0.1",
+			"port": 9492,
+			"launch": false,
+			"upstream": "http://127.0.0.1:9492"
+		}`),
+	)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf(
+			"create status = %d, want %d: %s",
+			createRec.Code,
+			http.StatusCreated,
+			createRec.Body.String(),
+		)
+	}
+	var createBody struct {
+		Runner RunnerSnapshot `json:"runner"`
+	}
+	if err := json.NewDecoder(createRec.Body).Decode(&createBody); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createBody.Runner.ID != "embedding-llamacpp" {
+		t.Fatalf("runner id = %q", createBody.Runner.ID)
+	}
+	if createBody.Runner.State != "external" {
+		t.Fatalf("runner state = %q, want external", createBody.Runner.State)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/sidecar/v1/runners", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+	var listBody RunnerSnapshotResponse
+	if err := json.NewDecoder(listRec.Body).Decode(&listBody); err != nil {
+		t.Fatalf("decode runner list: %v", err)
+	}
+	if len(listBody.Runners) != 2 {
+		t.Fatalf("runner count = %d, want 2", len(listBody.Runners))
+	}
+	if listBody.Routes["embedding"] != "embedding-llamacpp" {
+		t.Fatalf("embedding route = %q", listBody.Routes["embedding"])
+	}
+
+	for _, action := range []string{"start", "restart", "stop"} {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/sidecar/v1/runners/embedding-llamacpp/"+action,
+			nil,
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf(
+				"%s status = %d, want %d: %s",
+				action,
+				rec.Code,
+				http.StatusOK,
+				rec.Body.String(),
+			)
+		}
+	}
+}
+
+func TestWebSocketAPIRequestControlsRunner(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DefaultLiteRT: supervisor.LiteRTConfig{
+			Launch:   false,
+			ModelID:  "gemma4-e2b",
+			Upstream: "http://127.0.0.1:9381",
+		},
+	})
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	client := dialTestWebSocket(t, httpServer.URL, "/sidecar/v1/ws")
+	defer client.Close()
+
+	createBody := `{
+		"id": "rerank-llamacpp",
+		"runtime": "llamacpp",
+		"role": "reranking",
+		"backend": "cpu",
+		"modelPath": "models/llamacpp/Qwen3-Embedding-0.6B-Q8_0.gguf",
+		"modelId": "qwen3-rerank-probe",
+		"host": "127.0.0.1",
+		"port": 9493,
+		"launch": false,
+		"upstream": "http://127.0.0.1:9493"
+	}`
+	client.WriteJSON(t, map[string]any{
+		"type":       "api.request",
+		"id":         "create-runner",
+		"method":     "POST",
+		"path":       "/sidecar/v1/runners",
+		"headers":    map[string]string{"content-type": "application/json"},
+		"bodyBase64": base64.StdEncoding.EncodeToString([]byte(createBody)),
+	})
+	createResponse := readAPIResponse(t, client, "create-runner")
+	if createResponse.status != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createResponse.status, http.StatusCreated)
+	}
+
+	client.WriteJSON(t, map[string]any{
+		"type":   "api.request",
+		"id":     "start-runner",
+		"method": "POST",
+		"path":   "/sidecar/v1/runners/rerank-llamacpp/start",
+	})
+	startResponse := readAPIResponse(t, client, "start-runner")
+	if startResponse.status != http.StatusOK {
+		t.Fatalf("start status = %d, want %d", startResponse.status, http.StatusOK)
+	}
+	if got, ok := runtimeSupervisor.UpstreamForPath("/v1/rerank"); !ok || got != "http://127.0.0.1:9493" {
+		t.Fatalf("rerank upstream = %q/%v, want created runner", got, ok)
 	}
 }
 
@@ -1183,4 +1335,170 @@ func readLogMessage(t *testing.T, client *testWebSocket) LogEntry {
 		t.Fatalf("message type = %q, want log", envelope.Type)
 	}
 	return envelope.Entry
+}
+
+type testRunnerController struct {
+	supervisor *supervisor.Supervisor
+}
+
+func (c testRunnerController) Snapshot() RunnerSnapshotResponse {
+	return testRunnerSnapshotResponse(c.supervisor.Snapshot())
+}
+
+func (c testRunnerController) CreateRunner(
+	ctx context.Context,
+	spec RunnerSpec,
+) (RunnerSnapshot, error) {
+	id, err := c.supervisor.CreateRunner(testSupervisorRunnerSpec(spec))
+	if err != nil {
+		return RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c testRunnerController) StartRunner(
+	ctx context.Context,
+	id string,
+) (RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.StartRunner(ctx, id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c testRunnerController) StopRunner(
+	ctx context.Context,
+	id string,
+) (RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.StopRunner(ctx, id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c testRunnerController) RestartRunner(
+	ctx context.Context,
+	id string,
+) (RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.RestartRunner(ctx, id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c testRunnerController) runner(id string) (RunnerSnapshot, error) {
+	runner, ok := c.supervisor.Runner(id)
+	if !ok {
+		return RunnerSnapshot{}, fmt.Errorf("%w: %s", ErrRunnerNotFound, id)
+	}
+	return testRunnerSnapshot(runner), nil
+}
+
+func testSupervisorRunnerSpec(spec RunnerSpec) supervisor.RunnerSpec {
+	return supervisor.RunnerSpec{
+		ID:               spec.ID,
+		Runtime:          supervisor.Runtime(spec.Runtime),
+		Role:             supervisor.Role(spec.Role),
+		Backend:          supervisor.Backend(spec.Backend),
+		Executable:       spec.Executable,
+		ModelPath:        spec.ModelPath,
+		ModelID:          spec.ModelID,
+		Host:             spec.Host,
+		Port:             spec.Port,
+		Launch:           spec.Launch,
+		Upstream:         spec.Upstream,
+		HuggingFaceToken: spec.HuggingFaceToken,
+		Verbose:          spec.Verbose,
+	}
+}
+
+func testRunnerSnapshotResponse(snapshot supervisor.Snapshot) RunnerSnapshotResponse {
+	runners := make([]RunnerSnapshot, 0, len(snapshot.Runners))
+	for _, runner := range snapshot.Runners {
+		runners = append(runners, testRunnerSnapshot(runner))
+	}
+	routes := make(map[string]string, len(snapshot.Routes))
+	for role, id := range snapshot.Routes {
+		routes[string(role)] = id
+	}
+	return RunnerSnapshotResponse{
+		Runners: runners,
+		Routes:  routes,
+	}
+}
+
+func testRunnerSnapshot(snapshot supervisor.RunnerSnapshot) RunnerSnapshot {
+	return RunnerSnapshot{
+		ID:           snapshot.ID,
+		Runtime:      string(snapshot.Runtime),
+		Role:         string(snapshot.Role),
+		Backend:      string(snapshot.Backend),
+		Executable:   snapshot.Executable,
+		Version:      snapshot.Version,
+		ModelPath:    snapshot.ModelPath,
+		ModelID:      snapshot.ModelID,
+		Host:         snapshot.Host,
+		Port:         snapshot.Port,
+		State:        string(snapshot.State),
+		PID:          snapshot.PID,
+		Upstream:     snapshot.Upstream,
+		Command:      snapshot.Command,
+		Capabilities: snapshot.Capabilities,
+		LastError:    snapshot.LastError,
+		LogSequence:  snapshot.LogSequence,
+		Detail:       snapshot.Detail,
+	}
+}
+
+type apiResponse struct {
+	status int
+	body   []byte
+}
+
+func readAPIResponse(t *testing.T, client *testWebSocket, id string) apiResponse {
+	t.Helper()
+
+	var start struct {
+		Type   string `json:"type"`
+		ID     string `json:"id"`
+		Status int    `json:"status"`
+	}
+	client.ReadJSON(t, &start)
+	if start.Type != "api.response.start" || start.ID != id {
+		t.Fatalf("api start envelope = %#v, want id %q", start, id)
+	}
+
+	var body []byte
+	for {
+		var envelope struct {
+			Type       string `json:"type"`
+			ID         string `json:"id"`
+			DataBase64 string `json:"dataBase64"`
+		}
+		client.ReadJSON(t, &envelope)
+		if envelope.ID != id {
+			t.Fatalf("api envelope id = %q, want %q", envelope.ID, id)
+		}
+		switch envelope.Type {
+		case "api.response.chunk":
+			chunk, err := base64.StdEncoding.DecodeString(envelope.DataBase64)
+			if err != nil {
+				t.Fatalf("decode api chunk: %v", err)
+			}
+			body = append(body, chunk...)
+		case "api.response.end":
+			return apiResponse{status: start.Status, body: body}
+		default:
+			t.Fatalf("api envelope type = %q, want chunk/end", envelope.Type)
+		}
+	}
 }

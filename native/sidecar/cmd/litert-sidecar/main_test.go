@@ -4,7 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"litert-sidecar/internal/proxy"
 	"litert-sidecar/internal/server"
@@ -96,6 +100,111 @@ func TestSupervisorRuntimeControllerMapsLegacyExternalConfig(t *testing.T) {
 	}
 }
 
+func TestSupervisorRunnerControllerCreatesAndControlsRunner(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DefaultLiteRT: supervisor.LiteRTConfig{
+			Launch:   false,
+			ModelID:  "gemma4-e2b",
+			Upstream: "http://127.0.0.1:9381",
+		},
+	})
+	controller := supervisorRunnerController{supervisor: runtimeSupervisor}
+
+	runner, err := controller.CreateRunner(context.Background(), server.RunnerSpec{
+		ID:       "embedding-llamacpp",
+		Runtime:  "llamacpp",
+		Role:     "embedding",
+		Backend:  "cpu",
+		ModelID:  "qwen3-embedding",
+		Host:     "127.0.0.1",
+		Port:     9492,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9492",
+	})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	if runner.ID != "embedding-llamacpp" || runner.State != "external" {
+		t.Fatalf("runner = %#v, want external embedding runner", runner)
+	}
+
+	if _, err := controller.StartRunner(context.Background(), runner.ID); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+	if got, ok := runtimeSupervisor.UpstreamForPath("/v1/embeddings"); !ok || got != "http://127.0.0.1:9492" {
+		t.Fatalf("embedding upstream = %q/%v", got, ok)
+	}
+	if _, err := controller.RestartRunner(context.Background(), runner.ID); err != nil {
+		t.Fatalf("restart runner: %v", err)
+	}
+	if _, err := controller.StopRunner(context.Background(), runner.ID); err != nil {
+		t.Fatalf("stop runner: %v", err)
+	}
+
+	snapshot := controller.Snapshot()
+	if snapshot.Routes["embedding"] != runner.ID {
+		t.Fatalf("embedding route = %q", snapshot.Routes["embedding"])
+	}
+}
+
+func TestSupervisorRunnerControllerStartOutlivesRequestContext(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper uses POSIX signals")
+	}
+
+	exe := writeLongRunningLlamaHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "model.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DefaultLiteRT: supervisor.LiteRTConfig{
+			Launch: false,
+		},
+	})
+	controller := supervisorRunnerController{supervisor: runtimeSupervisor}
+
+	runner, err := controller.CreateRunner(context.Background(), server.RunnerSpec{
+		ID:         "main-llamacpp-context",
+		Runtime:    "llamacpp",
+		Role:       "main",
+		Backend:    "cpu",
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "context-model",
+		Host:       "127.0.0.1",
+		Port:       9497,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+
+	startCtx, cancelStart := context.WithCancel(context.Background())
+	if _, err := controller.StartRunner(startCtx, runner.ID); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+	cancelStart()
+	time.Sleep(200 * time.Millisecond)
+
+	afterCancel, ok := runtimeSupervisor.Runner(runner.ID)
+	if !ok {
+		t.Fatalf("runner %q not found", runner.ID)
+	}
+	if afterCancel.State != supervisor.StateRunning {
+		t.Fatalf("state after request cancel = %q, want running", afterCancel.State)
+	}
+
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelStop()
+	if _, err := controller.StopRunner(stopCtx, runner.ID); err != nil {
+		t.Fatalf("stop runner: %v", err)
+	}
+}
+
 func TestProxyTargetResolverUsesSupervisorRoutes(t *testing.T) {
 	t.Parallel()
 
@@ -115,6 +224,27 @@ func TestProxyTargetResolverUsesSupervisorRoutes(t *testing.T) {
 	if got := upstreamProxy.TargetForPath("/v1/chat/completions"); got != "http://127.0.0.1:9481" {
 		t.Fatalf("proxy target = %q, want initial runtime port", got)
 	}
+}
+
+func writeLongRunningLlamaHelper(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "llama-server")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'llama helper version\n'
+  exit 0
+fi
+trap 'exit 0' INT TERM
+while true; do
+  sleep 1
+done
+`
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+	return path
 }
 
 func TestToLiteRTConfigPatchForwardsHuggingFaceToken(t *testing.T) {

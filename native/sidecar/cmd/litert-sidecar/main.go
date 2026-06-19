@@ -89,9 +89,13 @@ func main() {
 	runtimeController := supervisorRuntimeController{
 		supervisor: runtimeSupervisor,
 	}
+	runnerController := supervisorRunnerController{
+		supervisor: runtimeSupervisor,
+	}
 	handler := server.New(server.Options{
 		Proxy:             upstreamProxy,
 		RuntimeController: runtimeController,
+		RunnerController:  runnerController,
 		Logs:              logs,
 		StatusEvents:      statusEvents,
 		ModelCatalog:      modelCatalog,
@@ -180,7 +184,7 @@ func (c supervisorRuntimeController) Start(
 	config server.RuntimeControlConfig,
 ) error {
 	return c.supervisor.StartDefaultLiteRT(
-		ctx,
+		context.WithoutCancel(ctx),
 		toSupervisorRuntimeMode(mode),
 		toSupervisorLiteRTPatch(config),
 	)
@@ -196,7 +200,7 @@ func (c supervisorRuntimeController) Restart(
 	config server.RuntimeControlConfig,
 ) error {
 	return c.supervisor.RestartDefaultLiteRT(
-		ctx,
+		context.WithoutCancel(ctx),
 		toSupervisorRuntimeMode(mode),
 		toSupervisorLiteRTPatch(config),
 	)
@@ -204,6 +208,72 @@ func (c supervisorRuntimeController) Restart(
 
 func (c supervisorRuntimeController) Status() server.RuntimeStatus {
 	return toServerRuntimeStatus(c.supervisor.LegacyStatus())
+}
+
+type supervisorRunnerController struct {
+	supervisor *supervisor.Supervisor
+}
+
+func (c supervisorRunnerController) Snapshot() server.RunnerSnapshotResponse {
+	return toServerRunnerSnapshotResponse(c.supervisor.Snapshot())
+}
+
+func (c supervisorRunnerController) CreateRunner(
+	ctx context.Context,
+	spec server.RunnerSpec,
+) (server.RunnerSnapshot, error) {
+	id, err := c.supervisor.CreateRunner(toSupervisorRunnerSpec(spec))
+	if err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c supervisorRunnerController) StartRunner(
+	ctx context.Context,
+	id string,
+) (server.RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.StartRunner(context.WithoutCancel(ctx), id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c supervisorRunnerController) StopRunner(
+	ctx context.Context,
+	id string,
+) (server.RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.StopRunner(ctx, id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c supervisorRunnerController) RestartRunner(
+	ctx context.Context,
+	id string,
+) (server.RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	if err := c.supervisor.RestartRunner(context.WithoutCancel(ctx), id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	return c.runner(id)
+}
+
+func (c supervisorRunnerController) runner(id string) (server.RunnerSnapshot, error) {
+	runner, ok := c.supervisor.Runner(id)
+	if !ok {
+		return server.RunnerSnapshot{}, fmt.Errorf("%w: %s", server.ErrRunnerNotFound, id)
+	}
+	return toServerRunnerSnapshot(runner), nil
 }
 
 func proxyTargetResolver(runtimeSupervisor *supervisor.Supervisor) proxy.TargetResolver {
@@ -246,6 +316,62 @@ func toServerRuntimeStatus(status supervisor.RuntimeStatus) server.RuntimeStatus
 		Mode:        status.Mode,
 		LogSequence: status.LogSequence,
 		Detail:      status.Detail,
+	}
+}
+
+func toSupervisorRunnerSpec(spec server.RunnerSpec) supervisor.RunnerSpec {
+	return supervisor.RunnerSpec{
+		ID:               spec.ID,
+		Runtime:          supervisor.Runtime(spec.Runtime),
+		Role:             supervisor.Role(spec.Role),
+		Backend:          supervisor.Backend(spec.Backend),
+		Executable:       spec.Executable,
+		ModelPath:        spec.ModelPath,
+		ModelID:          spec.ModelID,
+		Host:             spec.Host,
+		Port:             spec.Port,
+		Launch:           spec.Launch,
+		Upstream:         spec.Upstream,
+		HuggingFaceToken: spec.HuggingFaceToken,
+		Verbose:          spec.Verbose,
+	}
+}
+
+func toServerRunnerSnapshotResponse(snapshot supervisor.Snapshot) server.RunnerSnapshotResponse {
+	runners := make([]server.RunnerSnapshot, 0, len(snapshot.Runners))
+	for _, runner := range snapshot.Runners {
+		runners = append(runners, toServerRunnerSnapshot(runner))
+	}
+	routes := make(map[string]string, len(snapshot.Routes))
+	for role, id := range snapshot.Routes {
+		routes[string(role)] = id
+	}
+	return server.RunnerSnapshotResponse{
+		Runners: runners,
+		Routes:  routes,
+	}
+}
+
+func toServerRunnerSnapshot(snapshot supervisor.RunnerSnapshot) server.RunnerSnapshot {
+	return server.RunnerSnapshot{
+		ID:           snapshot.ID,
+		Runtime:      string(snapshot.Runtime),
+		Role:         string(snapshot.Role),
+		Backend:      string(snapshot.Backend),
+		Executable:   snapshot.Executable,
+		Version:      snapshot.Version,
+		ModelPath:    snapshot.ModelPath,
+		ModelID:      snapshot.ModelID,
+		Host:         snapshot.Host,
+		Port:         snapshot.Port,
+		State:        string(snapshot.State),
+		PID:          snapshot.PID,
+		Upstream:     snapshot.Upstream,
+		Command:      snapshot.Command,
+		Capabilities: snapshot.Capabilities,
+		LastError:    snapshot.LastError,
+		LogSequence:  snapshot.LogSequence,
+		Detail:       snapshot.Detail,
 	}
 }
 

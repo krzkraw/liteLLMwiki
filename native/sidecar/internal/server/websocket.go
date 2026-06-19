@@ -335,6 +335,17 @@ func (s *Server) handleWebSocketAPIRequest(
 				Model: entry,
 			},
 		)
+	case requestPath.Path == "/sidecar/v1/runners" ||
+		strings.HasPrefix(requestPath.Path, "/sidecar/v1/runners/"):
+		response := s.runnerAPIResponse(ctx, method, requestPath.Path, body)
+		if err := writer.sendAPIResponse(
+			message.ID,
+			response.status,
+			map[string]string{"content-type": response.contentType},
+			response.body,
+		); err != nil {
+			_ = writer.sendAPIError(message.ID, err.Error())
+		}
 	case requestPath.Path == "/sidecar/v1/multimodal":
 		if method != http.MethodPost {
 			_ = writer.sendAPITextResponse(

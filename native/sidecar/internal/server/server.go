@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +61,58 @@ type RuntimeController interface {
 	Stop(context.Context) error
 	Restart(context.Context, RuntimeMode, RuntimeControlConfig) error
 	Status() RuntimeStatus
+}
+
+var ErrRunnerNotFound = errors.New("runner not found")
+
+type RunnerSpec struct {
+	ID               string `json:"id,omitempty"`
+	Runtime          string `json:"runtime,omitempty"`
+	Role             string `json:"role,omitempty"`
+	Backend          string `json:"backend,omitempty"`
+	Executable       string `json:"executable,omitempty"`
+	ModelPath        string `json:"modelPath,omitempty"`
+	ModelID          string `json:"modelId,omitempty"`
+	Host             string `json:"host,omitempty"`
+	Port             int    `json:"port,omitempty"`
+	Launch           bool   `json:"launch"`
+	Upstream         string `json:"upstream,omitempty"`
+	HuggingFaceToken string `json:"huggingfaceToken,omitempty"`
+	Verbose          bool   `json:"verbose,omitempty"`
+}
+
+type RunnerSnapshot struct {
+	ID           string            `json:"id"`
+	Runtime      string            `json:"runtime"`
+	Role         string            `json:"role"`
+	Backend      string            `json:"backend"`
+	Executable   string            `json:"executable,omitempty"`
+	Version      string            `json:"version,omitempty"`
+	ModelPath    string            `json:"modelPath,omitempty"`
+	ModelID      string            `json:"modelId,omitempty"`
+	Host         string            `json:"host,omitempty"`
+	Port         int               `json:"port,omitempty"`
+	State        string            `json:"state"`
+	PID          int               `json:"pid,omitempty"`
+	Upstream     string            `json:"upstream,omitempty"`
+	Command      []string          `json:"command,omitempty"`
+	Capabilities map[string]string `json:"capabilities,omitempty"`
+	LastError    string            `json:"lastError,omitempty"`
+	LogSequence  uint64            `json:"logSequence,omitempty"`
+	Detail       string            `json:"detail,omitempty"`
+}
+
+type RunnerSnapshotResponse struct {
+	Runners []RunnerSnapshot  `json:"runners"`
+	Routes  map[string]string `json:"routes"`
+}
+
+type RunnerController interface {
+	Snapshot() RunnerSnapshotResponse
+	CreateRunner(context.Context, RunnerSpec) (RunnerSnapshot, error)
+	StartRunner(context.Context, string) (RunnerSnapshot, error)
+	StopRunner(context.Context, string) (RunnerSnapshot, error)
+	RestartRunner(context.Context, string) (RunnerSnapshot, error)
 }
 
 type RuntimeControlConfig struct {
@@ -162,6 +216,7 @@ type Options struct {
 	AllowedOrigins    []string
 	RuntimeReporter   func() RuntimeStatus
 	RuntimeController RuntimeController
+	RunnerController  RunnerController
 	Logs              *LogBroadcaster
 	StatusEvents      *StatusBroadcaster
 	BackendReporter   BackendReporter
@@ -174,6 +229,7 @@ type Server struct {
 	allowedOrigins    map[string]struct{}
 	runtimeReporter   func() RuntimeStatus
 	runtimeController RuntimeController
+	runnerController  RunnerController
 	logs              *LogBroadcaster
 	statusEvents      *StatusBroadcaster
 	backendReporter   BackendReporter
@@ -209,6 +265,7 @@ func New(options Options) *Server {
 		allowedOrigins:    originSet,
 		runtimeReporter:   options.RuntimeReporter,
 		runtimeController: options.RuntimeController,
+		runnerController:  options.RunnerController,
 		logs:              logs,
 		statusEvents:      statusEvents,
 		backendReporter:   options.BackendReporter,
@@ -224,6 +281,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/sidecar/v1/multimodal", s.handleMultimodal)
 	mux.HandleFunc("/sidecar/v1/models/download", s.handleModelDownload)
 	mux.HandleFunc("/sidecar/v1/models", s.handleModels)
+	mux.HandleFunc("/sidecar/v1/runners/", s.handleRunnerAction)
+	mux.HandleFunc("/sidecar/v1/runners", s.handleRunners)
 	mux.HandleFunc("/v1/", s.handleProxy)
 	mux.HandleFunc("/v1", s.handleProxy)
 
@@ -248,6 +307,179 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		http.Error(w, "encode model catalog", http.StatusInternalServerError)
 	}
+}
+
+func (s *Server) handleRunners(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read runner request", http.StatusBadRequest)
+		return
+	}
+
+	writeRawAPIResponse(
+		w,
+		s.runnerAPIResponse(r.Context(), r.Method, r.URL.Path, body),
+	)
+}
+
+func (s *Server) handleRunnerAction(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read runner request", http.StatusBadRequest)
+		return
+	}
+
+	writeRawAPIResponse(
+		w,
+		s.runnerAPIResponse(r.Context(), r.Method, r.URL.Path, body),
+	)
+}
+
+type rawAPIResponse struct {
+	status      int
+	contentType string
+	body        []byte
+}
+
+func (s *Server) runnerAPIResponse(
+	ctx context.Context,
+	method string,
+	path string,
+	body []byte,
+) rawAPIResponse {
+	if s.runnerController == nil {
+		return textAPIResponse(
+			http.StatusServiceUnavailable,
+			"runner controller is not configured\n",
+		)
+	}
+
+	switch {
+	case path == "/sidecar/v1/runners":
+		return s.runnerCollectionAPIResponse(ctx, method, body)
+	case strings.HasPrefix(path, "/sidecar/v1/runners/"):
+		return s.runnerActionAPIResponse(ctx, method, path)
+	default:
+		return textAPIResponse(http.StatusNotFound, "not found\n")
+	}
+}
+
+func (s *Server) runnerCollectionAPIResponse(
+	ctx context.Context,
+	method string,
+	body []byte,
+) rawAPIResponse {
+	switch method {
+	case http.MethodGet:
+		return jsonAPIResponse(http.StatusOK, s.runnerController.Snapshot())
+	case http.MethodPost:
+		var spec RunnerSpec
+		if err := json.Unmarshal(body, &spec); err != nil {
+			return textAPIResponse(http.StatusBadRequest, "decode runner request\n")
+		}
+		runner, err := s.runnerController.CreateRunner(ctx, spec)
+		if err != nil {
+			return textAPIResponse(http.StatusBadRequest, err.Error()+"\n")
+		}
+		return jsonAPIResponse(
+			http.StatusCreated,
+			struct {
+				Runner RunnerSnapshot `json:"runner"`
+			}{
+				Runner: runner,
+			},
+		)
+	default:
+		return textAPIResponse(http.StatusMethodNotAllowed, "method not allowed\n")
+	}
+}
+
+func (s *Server) runnerActionAPIResponse(
+	ctx context.Context,
+	method string,
+	path string,
+) rawAPIResponse {
+	if method != http.MethodPost {
+		return textAPIResponse(http.StatusMethodNotAllowed, "method not allowed\n")
+	}
+
+	id, action, ok := parseRunnerActionPath(path)
+	if !ok {
+		return textAPIResponse(http.StatusNotFound, "not found\n")
+	}
+
+	var (
+		runner RunnerSnapshot
+		err    error
+	)
+	switch action {
+	case "start":
+		runner, err = s.runnerController.StartRunner(ctx, id)
+	case "stop":
+		runner, err = s.runnerController.StopRunner(ctx, id)
+	case "restart":
+		runner, err = s.runnerController.RestartRunner(ctx, id)
+	default:
+		return textAPIResponse(http.StatusNotFound, "not found\n")
+	}
+	if err != nil {
+		if errors.Is(err, ErrRunnerNotFound) {
+			return textAPIResponse(http.StatusNotFound, err.Error()+"\n")
+		}
+		return textAPIResponse(http.StatusBadGateway, err.Error()+"\n")
+	}
+
+	return jsonAPIResponse(
+		http.StatusOK,
+		struct {
+			Runner RunnerSnapshot `json:"runner"`
+		}{
+			Runner: runner,
+		},
+	)
+}
+
+func parseRunnerActionPath(path string) (string, string, bool) {
+	trimmed := strings.TrimPrefix(path, "/sidecar/v1/runners/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+
+	id, err := url.PathUnescape(parts[0])
+	if err != nil || strings.TrimSpace(id) == "" {
+		return "", "", false
+	}
+	return id, parts[1], true
+}
+
+func jsonAPIResponse(status int, value any) rawAPIResponse {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return textAPIResponse(http.StatusInternalServerError, "encode response\n")
+	}
+	return rawAPIResponse{
+		status:      status,
+		contentType: "application/json",
+		body:        append(body, '\n'),
+	}
+}
+
+func textAPIResponse(status int, body string) rawAPIResponse {
+	return rawAPIResponse{
+		status:      status,
+		contentType: "text/plain; charset=utf-8",
+		body:        []byte(body),
+	}
+}
+
+func writeRawAPIResponse(w http.ResponseWriter, response rawAPIResponse) {
+	w.Header().Set("content-type", response.contentType)
+	w.WriteHeader(response.status)
+	if len(response.body) == 0 {
+		return
+	}
+	_, _ = w.Write(response.body)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

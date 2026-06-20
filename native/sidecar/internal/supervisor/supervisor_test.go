@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -401,6 +403,104 @@ func TestSupervisorStartsLlamaCPPRerankRunner(t *testing.T) {
 	}
 }
 
+func TestSupervisorRejectsLlamaRunnerThatExitsBeforeServing(t *testing.T) {
+	t.Parallel()
+
+	exe := writeLlamaExitHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "broken.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{Launch: false, Host: "127.0.0.1", Port: 9381},
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:         "broken-llamacpp",
+		Runtime:    RuntimeLlamaCPP,
+		Role:       RoleMain,
+		Backend:    BackendCPU,
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "broken",
+		Host:       "127.0.0.1",
+		Port:       9494,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create llama runner: %v", err)
+	}
+
+	err = supervisor.StartRunner(context.Background(), runnerID)
+	if err == nil {
+		t.Fatal("start llama runner error = nil, want process exit error")
+	}
+	if !strings.Contains(err.Error(), "exited before serving") {
+		t.Fatalf("start llama runner error = %v, want exited before serving", err)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/chat/completions"); ok {
+		t.Fatalf("chat upstream = %q/%v, want no route for exited runner", got, ok)
+	}
+	runner, ok := supervisor.Runner(runnerID)
+	if !ok {
+		t.Fatalf("runner %q not found", runnerID)
+	}
+	if runner.State != StateExited {
+		t.Fatalf("runner state = %q, want exited", runner.State)
+	}
+}
+
+func TestSupervisorKeepsManagedRunnerAliveAfterCallerContextCancel(t *testing.T) {
+	t.Parallel()
+
+	exe, _ := writeLlamaHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "gemma.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	supervisor := New(Config{
+		DefaultLiteRT: LiteRTConfig{Launch: false, Host: "127.0.0.1", Port: 9381},
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:         "context-llamacpp",
+		Runtime:    RuntimeLlamaCPP,
+		Role:       RoleMain,
+		Backend:    BackendCPU,
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "context-test",
+		Host:       "127.0.0.1",
+		Port:       9495,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create llama runner: %v", err)
+	}
+
+	startCtx, cancelStart := context.WithCancel(context.Background())
+	if err := supervisor.StartRunner(startCtx, runnerID); err != nil {
+		t.Fatalf("start llama runner: %v", err)
+	}
+	cancelStart()
+	time.Sleep(200 * time.Millisecond)
+
+	runner, ok := supervisor.Runner(runnerID)
+	if !ok {
+		t.Fatalf("runner %q not found", runnerID)
+	}
+	if runner.State != StateRunning {
+		t.Fatalf("runner state after caller context cancel = %q, want running", runner.State)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/chat/completions"); !ok || got != "http://127.0.0.1:9495" {
+		t.Fatalf("chat upstream after caller context cancel = %q/%v, want live route", got, ok)
+	}
+
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelStop()
+	if err := supervisor.StopRunner(stopCtx, runnerID); err != nil {
+		t.Fatalf("stop llama runner: %v", err)
+	}
+}
+
 func TestSupervisorStartsDefaultLiteRTWithControlPatch(t *testing.T) {
 	t.Parallel()
 
@@ -546,6 +646,27 @@ func writeLlamaHelper(t *testing.T) (string, string) {
 	return exe, argsFile
 }
 
+func writeLlamaExitHelper(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("SUPERVISOR_LLAMA_EXIT_HELPER") == "1" {
+		t.Fatal("helper should not run in parent test process")
+	}
+	if isWindows() {
+		t.Skip("shell helper is unix-specific")
+	}
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "llama-server-exit-test")
+	script := "#!/bin/sh\n" +
+		"SUPERVISOR_LLAMA_EXIT_HELPER=1 exec " +
+		shellQuote(os.Args[0]) + " -test.run=TestSupervisorLlamaExitHelperProcess -- \"$@\"\n"
+	if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+
+	return exe
+}
+
 func readHelperArgs(t *testing.T, path string, output *bytes.Buffer, wantLines int) string {
 	t.Helper()
 
@@ -609,9 +730,7 @@ func TestSupervisorLiteRTHelperProcess(t *testing.T) {
 	}
 
 	if len(args) > 0 && args[0] == "serve" {
-		signals := make(chan os.Signal, 1)
-		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-		<-signals
+		serveHelperModelsEndpoint(args)
 	}
 }
 
@@ -645,9 +764,89 @@ func TestSupervisorLlamaHelperProcess(t *testing.T) {
 		os.Exit(2)
 	}
 
+	serveHelperModelsEndpoint(args)
+}
+
+func TestSupervisorLlamaExitHelperProcess(t *testing.T) {
+	if os.Getenv("SUPERVISOR_LLAMA_EXIT_HELPER") != "1" {
+		return
+	}
+
+	args := helperArgs()
+	if len(args) > 0 && args[0] == "--version" {
+		fmt.Fprintln(os.Stdout, "llama-exit-helper-version")
+		return
+	}
+
+	fmt.Fprintln(os.Stderr, "helper exited before serving")
+	os.Exit(7)
+}
+
+func serveHelperModelsEndpoint(args []string) {
+	host, port := helperHostPort(args)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		fmt.Fprintln(os.Stderr, "--port is required")
+		os.Exit(2)
+	}
+
+	server := &http.Server{
+		Addr: net.JoinHostPort(host, port),
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/models" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"object":"list","data":[]}`)
+		}),
+	}
+	listenErr := make(chan error, 1)
+	go func() {
+		err := server.ListenAndServe()
+		if err == http.ErrServerClosed {
+			err = nil
+		}
+		listenErr <- err
+	}()
+
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	<-signals
+	select {
+	case <-signals:
+	case err := <-listenErr:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "serve helper: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = server.Shutdown(ctx)
+}
+
+func helperHostPort(args []string) (string, string) {
+	var host string
+	var port string
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--host":
+			if index+1 < len(args) {
+				host = args[index+1]
+				index++
+			}
+		case "--port":
+			if index+1 < len(args) {
+				port = args[index+1]
+				index++
+			}
+		}
+	}
+	return host, port
 }
 
 func helperArgs() []string {

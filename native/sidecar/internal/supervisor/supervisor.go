@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -21,6 +22,11 @@ import (
 )
 
 const DefaultMainRunnerID = "main-litert"
+
+const (
+	runnerStartupTimeout      = 3 * time.Minute
+	runnerStartupPollInterval = 250 * time.Millisecond
+)
 
 const DefaultLlamaExecutableName = "llama-server"
 
@@ -636,7 +642,8 @@ func (s *Supervisor) startLlamaRunner(ctx context.Context, record *runnerRecord)
 		next.LastError = ""
 	})
 
-	cmd := buildLlamaServerCommand(ctx, exe, snapshot)
+	processCtx := context.WithoutCancel(ctx)
+	cmd := buildLlamaServerCommand(processCtx, exe, snapshot)
 	cmd.Stdout = s.writer(record.snapshot.ID, "stdout", s.stdoutTee)
 	cmd.Stderr = s.writer(record.snapshot.ID, "stderr", s.stderrTee)
 	if err := cmd.Start(); err != nil {
@@ -646,20 +653,30 @@ func (s *Supervisor) startLlamaRunner(ctx context.Context, record *runnerRecord)
 	}
 
 	done := make(chan error, 1)
+	upstream := litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
 	s.mu.Lock()
 	record.cmd = cmd
 	record.done = done
 	record.stopped = false
-	record.snapshot.State = StateRunning
+	record.snapshot.State = StateStarting
 	record.snapshot.PID = cmd.Process.Pid
 	record.snapshot.Command = append([]string(nil), cmd.Args...)
-	record.snapshot.Upstream = litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
-	record.snapshot.Detail = "llama.cpp server process is running."
+	record.snapshot.Upstream = upstream
+	record.snapshot.Detail = "Waiting for llama.cpp OpenAI-compatible server."
 	record.snapshot.LastError = ""
 	s.mu.Unlock()
 	s.publishStatusChange()
 
-	go s.wait(ctx, record.snapshot.ID, cmd, done)
+	go s.wait(processCtx, record.snapshot.ID, cmd, done)
+	if err := s.waitForRunnerReady(ctx, upstream, done); err != nil {
+		s.handleStartupFailure(record, done, err)
+		return err
+	}
+	s.updateRecord(record, func(next *RunnerSnapshot) {
+		next.State = StateRunning
+		next.Detail = "llama.cpp server process is serving."
+		next.LastError = ""
+	})
 	return nil
 }
 
@@ -703,7 +720,8 @@ func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord
 	}
 
 	serveVerbose := record.mode == RuntimeModeDebug || record.verbose
-	cmd := litert.BuildServeCommandContext(ctx, exe, snapshot.Host, snapshot.Port, serveVerbose)
+	processCtx := context.WithoutCancel(ctx)
+	cmd := litert.BuildServeCommandContext(processCtx, exe, snapshot.Host, snapshot.Port, serveVerbose)
 	cmd.Stdout = s.writer(record.snapshot.ID, "stdout", s.stdoutTee)
 	cmd.Stderr = s.writer(record.snapshot.ID, "stderr", s.stderrTee)
 	if err := cmd.Start(); err != nil {
@@ -713,21 +731,113 @@ func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord
 	}
 
 	done := make(chan error, 1)
+	upstream := litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
 	s.mu.Lock()
 	record.cmd = cmd
 	record.done = done
 	record.stopped = false
-	record.snapshot.State = StateRunning
+	record.snapshot.State = StateStarting
 	record.snapshot.PID = cmd.Process.Pid
 	record.snapshot.Command = append([]string(nil), cmd.Args...)
-	record.snapshot.Upstream = litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
-	record.snapshot.Detail = "LiteRT-LM server process is running."
+	record.snapshot.Upstream = upstream
+	record.snapshot.Detail = "Waiting for LiteRT-LM OpenAI-compatible server."
 	record.snapshot.LastError = ""
 	s.mu.Unlock()
 	s.publishStatusChange()
 
-	go s.wait(ctx, record.snapshot.ID, cmd, done)
+	go s.wait(processCtx, record.snapshot.ID, cmd, done)
+	if err := s.waitForRunnerReady(ctx, upstream, done); err != nil {
+		s.handleStartupFailure(record, done, err)
+		return err
+	}
+	s.updateRecord(record, func(next *RunnerSnapshot) {
+		next.State = StateRunning
+		next.Detail = "LiteRT-LM server process is serving."
+		next.LastError = ""
+	})
 	return nil
+}
+
+func (s *Supervisor) waitForRunnerReady(ctx context.Context, upstream string, done chan error) error {
+	if upstream == "" {
+		return errors.New("runner upstream is empty")
+	}
+
+	startupCtx, cancel := context.WithTimeout(ctx, runnerStartupTimeout)
+	defer cancel()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	ticker := time.NewTicker(runnerStartupPollInterval)
+	defer ticker.Stop()
+
+	var lastProbeErr error
+	for {
+		if err, exited := preserveDoneError(done); exited {
+			if err != nil {
+				return fmt.Errorf("runner process exited before serving: %w", err)
+			}
+			return errors.New("runner process exited before serving")
+		}
+
+		if err := probeOpenAIModels(startupCtx, client, upstream); err == nil {
+			return nil
+		} else {
+			lastProbeErr = err
+		}
+
+		select {
+		case <-startupCtx.Done():
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if lastProbeErr != nil {
+				return fmt.Errorf("runner did not serve %s before startup timeout: %w", upstream, lastProbeErr)
+			}
+			return fmt.Errorf("runner did not serve %s before startup timeout", upstream)
+		case <-ticker.C:
+		}
+	}
+}
+
+func probeOpenAIModels(ctx context.Context, client *http.Client, upstream string) error {
+	endpoint := strings.TrimRight(upstream, "/") + "/v1/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("GET %s returned %s", endpoint, resp.Status)
+	}
+	return nil
+}
+
+func preserveDoneError(done chan error) (error, bool) {
+	select {
+	case err := <-done:
+		done <- err
+		return err, true
+	default:
+		return nil, false
+	}
+}
+
+func (s *Supervisor) handleStartupFailure(record *runnerRecord, done chan error, startupErr error) {
+	if _, exited := preserveDoneError(done); exited {
+		return
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.stopRecord(stopCtx, record); err != nil {
+		startupErr = fmt.Errorf("%w; stop runner: %v", startupErr, err)
+	}
+	s.markUnavailable(record, startupErr)
 }
 
 func (s *Supervisor) stopRecord(ctx context.Context, record *runnerRecord) error {

@@ -2,11 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -257,23 +262,108 @@ func TestProxyTargetResolverUsesSupervisorRoutes(t *testing.T) {
 
 func writeLongRunningLlamaHelper(t *testing.T) string {
 	t.Helper()
+	if os.Getenv("MAIN_LLAMA_HELPER") == "1" {
+		t.Fatal("helper should not run in parent test process")
+	}
 
 	path := filepath.Join(t.TempDir(), "llama-server")
-	script := `#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "--version" ]]; then
-  printf 'llama helper version\n'
-  exit 0
-fi
-trap 'exit 0' INT TERM
-while true; do
-  sleep 1
-done
-`
+	script := "#!/bin/sh\n" +
+		"MAIN_LLAMA_HELPER=1 exec " +
+		shellQuote(os.Args[0]) + " -test.run=TestLongRunningLlamaHelperProcess -- \"$@\"\n"
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
 	return path
+}
+
+func TestLongRunningLlamaHelperProcess(t *testing.T) {
+	if os.Getenv("MAIN_LLAMA_HELPER") != "1" {
+		return
+	}
+
+	args := helperArgs()
+	if len(args) > 0 && args[0] == "--version" {
+		fmt.Fprintln(os.Stdout, "llama helper version")
+		return
+	}
+
+	host, port := helperHostPort(args)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		fmt.Fprintln(os.Stderr, "--port is required")
+		os.Exit(2)
+	}
+
+	server := &http.Server{
+		Addr: net.JoinHostPort(host, port),
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/models" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"object":"list","data":[]}`)
+		}),
+	}
+	listenErr := make(chan error, 1)
+	go func() {
+		err := server.ListenAndServe()
+		if err == http.ErrServerClosed {
+			err = nil
+		}
+		listenErr <- err
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	select {
+	case <-signals:
+	case err := <-listenErr:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "serve helper: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = server.Shutdown(ctx)
+}
+
+func helperArgs() []string {
+	for index, arg := range os.Args {
+		if arg == "--" {
+			return os.Args[index+1:]
+		}
+	}
+	return nil
+}
+
+func helperHostPort(args []string) (string, string) {
+	var host string
+	var port string
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--host":
+			if index+1 < len(args) {
+				host = args[index+1]
+				index++
+			}
+		case "--port":
+			if index+1 < len(args) {
+				port = args[index+1]
+				index++
+			}
+		}
+	}
+	return host, port
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func TestToLiteRTConfigPatchForwardsHuggingFaceToken(t *testing.T) {

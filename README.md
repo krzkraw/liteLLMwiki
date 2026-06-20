@@ -257,6 +257,10 @@ Then start the sidecar manually from the same directory tree the web UI uses:
 The sidecar opens an interactive terminal dashboard by default. Use
 `--headless` for browser automation, scripts, CI, or any non-interactive launch:
 
+The dashboard Launch Wizard includes runtime/backend, local-model, CLI-option,
+and command-preview panels. Clicking a CLI option opens a detail modal, and
+START creates the runner from the previewed argv.
+
 ```bash
 ./native/sidecar-artifacts/litert-sidecar-darwin-arm64/litert-sidecar \
   --headless \

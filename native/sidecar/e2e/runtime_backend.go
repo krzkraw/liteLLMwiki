@@ -84,6 +84,7 @@ func RunRuntimeBackendCombo(
 	})
 
 	runnerID := comboRunnerID(combo)
+	command := runtimeBackendCommand(combo, "127.0.0.1", port)
 	createdID, err := runtimeSupervisor.CreateRunner(supervisor.RunnerSpec{
 		ID:         runnerID,
 		Runtime:    supervisor.Runtime(combo.Runtime),
@@ -95,53 +96,62 @@ func RunRuntimeBackendCombo(
 		Host:       "127.0.0.1",
 		Port:       port,
 		Launch:     true,
+		Command:    command,
 	})
 	if err != nil {
 		return RuntimeBackendResult{}, fmt.Errorf("create runner: %w", err)
 	}
 	runnerID = createdID
 
+	var result RuntimeBackendResult
 	if err := withOptionalIsolatedHome(combo, func() error {
-		return runtimeSupervisor.StartRunner(ctx, runnerID)
+		if err := runtimeSupervisor.StartRunner(ctx, runnerID); err != nil {
+			return fmt.Errorf("start runner: %w", err)
+		}
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			_, _ = runtimeSupervisor.CloseRunner(closeCtx, runnerID)
+		}()
+
+		upstream, ok := runtimeSupervisor.UpstreamForPath("/v1/chat/completions")
+		if !ok || strings.TrimSpace(upstream) == "" {
+			return fmt.Errorf("runner did not register chat route")
+		}
+		upstreamProxy, err := proxy.New(upstream)
+		if err != nil {
+			return fmt.Errorf("create proxy: %w", err)
+		}
+		upstreamProxy.SetTargetResolver(func(r *http.Request) (string, bool) {
+			return runtimeSupervisor.UpstreamForPath(r.URL.Path)
+		})
+
+		handler := server.New(server.Options{
+			Proxy: upstreamProxy,
+			Logs:  server.NewLogBroadcaster(128),
+		}).Handler()
+		httpServer := httptest.NewServer(handler)
+		defer httpServer.Close()
+
+		endpoint := httpServer.URL + "/v1/chat/completions"
+		responseText, err := postChatCompletion(ctx, endpoint, combo.ModelID)
+		if err != nil {
+			return err
+		}
+
+		result = RuntimeBackendResult{
+			RunnerID:     runnerID,
+			Endpoint:     endpoint,
+			ResponseText: responseText,
+		}
+		return nil
 	}); err != nil {
-		return RuntimeBackendResult{}, fmt.Errorf("start runner: %w", err)
-	}
-	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_, _ = runtimeSupervisor.CloseRunner(closeCtx, runnerID)
-	}()
-
-	upstream, ok := runtimeSupervisor.UpstreamForPath("/v1/chat/completions")
-	if !ok || strings.TrimSpace(upstream) == "" {
-		return RuntimeBackendResult{}, fmt.Errorf("runner did not register chat route")
-	}
-	upstreamProxy, err := proxy.New(upstream)
-	if err != nil {
-		return RuntimeBackendResult{}, fmt.Errorf("create proxy: %w", err)
-	}
-	upstreamProxy.SetTargetResolver(func(r *http.Request) (string, bool) {
-		return runtimeSupervisor.UpstreamForPath(r.URL.Path)
-	})
-
-	handler := server.New(server.Options{
-		Proxy: upstreamProxy,
-		Logs:  server.NewLogBroadcaster(128),
-	}).Handler()
-	httpServer := httptest.NewServer(handler)
-	defer httpServer.Close()
-
-	endpoint := httpServer.URL + "/v1/chat/completions"
-	responseText, err := postChatCompletion(ctx, endpoint, combo.ModelID)
-	if err != nil {
 		return RuntimeBackendResult{}, err
 	}
-
-	return RuntimeBackendResult{
-		RunnerID:     runnerID,
-		Endpoint:     endpoint,
-		ResponseText: responseText,
-	}, nil
+	return result, nil
 }
 
 func postChatCompletion(ctx context.Context, endpoint string, modelID string) (string, error) {
@@ -199,6 +209,42 @@ func postChatCompletion(ctx context.Context, endpoint string, modelID string) (s
 		return "", fmt.Errorf("chat response had empty assistant content: %s", strings.TrimSpace(string(responseBody)))
 	}
 	return content, nil
+}
+
+func runtimeBackendCommand(combo RuntimeBackendCombo, host string, port int) []string {
+	if combo.Runtime != "llamacpp" {
+		return nil
+	}
+	modelID := combo.ModelID
+	if modelID == "" {
+		modelID = comboRunnerID(combo)
+	}
+	command := []string{
+		combo.Executable,
+		"-m",
+		combo.ModelPath,
+		"--alias",
+		modelID,
+		"--host",
+		host,
+		"--port",
+		strconv.Itoa(port),
+		"--reasoning",
+		"off",
+	}
+	if llamaBackendUsesGPU(combo.RunnerBackend) {
+		command = append(command, "--n-gpu-layers", "999")
+	}
+	return command
+}
+
+func llamaBackendUsesGPU(backend string) bool {
+	switch backend {
+	case "gpu", "metal", "vulkan", "cuda", "openvino", "sycl", "npu":
+		return true
+	default:
+		return false
+	}
 }
 
 func comboRunnerID(combo RuntimeBackendCombo) string {

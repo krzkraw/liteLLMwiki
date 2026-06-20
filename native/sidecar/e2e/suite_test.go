@@ -185,3 +185,43 @@ func TestPlanRuntimeBackendCombosPrefersConfiguredModel(t *testing.T) {
 		t.Fatal("configured model combo should keep a non-empty model id")
 	}
 }
+
+func TestRuntimeBackendCommandDisablesLlamaReasoning(t *testing.T) {
+	t.Parallel()
+
+	command := runtimeBackendCommand(RuntimeBackendCombo{
+		Runtime:       "llamacpp",
+		ConfigBackend: "metal",
+		RunnerBackend: "metal",
+		Role:          "main",
+		ModelID:       "qwen35-08b-gguf",
+		ModelPath:     "/models/qwen.gguf",
+		Executable:    "/bin/llama-server",
+	}, "127.0.0.1", 9482)
+
+	if !stringSliceContainsSequence(command, "--reasoning", "off") {
+		t.Fatalf("command = %#v, want --reasoning off", command)
+	}
+	if !stringSliceContainsSequence(command, "--n-gpu-layers", "999") {
+		t.Fatalf("command = %#v, want metal GPU offload", command)
+	}
+}
+
+func stringSliceContainsSequence(values []string, want ...string) bool {
+	if len(want) == 0 || len(values) < len(want) {
+		return false
+	}
+	for index := 0; index <= len(values)-len(want); index++ {
+		matches := true
+		for offset := range want {
+			if values[index+offset] != want[offset] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}

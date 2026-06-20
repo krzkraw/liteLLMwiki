@@ -45,16 +45,27 @@ shortcut for terminals that expose function keys. Runner tab action labels in
 the bottom bar are clickable and call the same start, stop, restart, and close
 controller methods as the keyboard shortcuts.
 
-The Launch Wizard is a compact configuration screen. It lets the user click or
+The Launch Wizard is a compact four-panel configuration screen: runtime/backend,
+local models, CLI options, and command preview. It lets the user click or
 key-select the runtime (`litert` or `llamacpp`), a runtime variant, model role
 (`main`, `embedding`, or `reranking`), and one locally installed matching model.
 LiteRT variants are `cpu`, `gpu`, and `npu`. llama.cpp variants are discovered
 from installed folders under `native/llama-runtimes` and grouped as `cpu`,
 `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, and `sycl` only when matching
 runtime folders are present. Variants disabled in the Setup tab are hidden
-immediately. Pressing Enter or clicking `START` creates and starts a runner.
-New runner tabs are inserted after the Setup tab and are named by runtime and
-role, such as `LR-M-1`, `LM-E-1`, or `LM-R-1`; numbering is per role.
+immediately.
+
+The CLI options panel shows only options that apply to the selected runtime,
+backend, and role. LiteRT server launches expose only `--host`, `--port`, and
+`--verbose`. llama.cpp launches expose low-memory/GPU controls, KV cache
+quantization, speculative decoding, embedding/reranking, reasoning, and timeout
+flags. Clicking an option opens a small modal with the short flag, full flag,
+description, default, enum values when known, input, Save, Clear, and X close.
+The command preview is generated from the same argv used for runner creation.
+Pressing Enter or clicking `START` creates and starts a runner with that command
+override. New runner tabs are inserted after the Setup tab and are named by
+runtime and role, such as `LR-M-1`, `LM-E-1`, or `LM-R-1`; numbering is per
+role.
 
 The Setup tab shows LiteRT backends (`cpu`, `gpu`, `npu`) and discovered
 llama.cpp backend types with their current enabled or disabled state from
@@ -65,14 +76,13 @@ does not exist.
 
 Runner tabs show basic status and route/control panels with runtime, role,
 backend, model, upstream, PID, the command argv that will be used for the next
-managed start, `s`/`x`/`r` start/stop/restart actions, `C`/`Edit Cmd` command
-editing, and an `X Close` bottom action that stops a running runner and removes
-its tab. Each runner tab also has a bottom terminal/log panel with the command
-line and recent stdout/stderr entries for that runner. Launch Wizard and runner
-tabs use the same responsive body layout: small terminals render full-width
-stacked panels, and wide terminals render two masonry-balanced columns so the
-right side of the terminal is used without bringing back the old cluster of
-diagnostic boxes.
+managed start, clickable body controls for Start, Stop, Restart, Edit Cmd, and
+Close, and matching bottom-bar actions. Each runner tab also has a bottom
+terminal/log panel with the command line and recent stdout/stderr entries for
+that runner. Launch Wizard and runner tabs use the same responsive body layout:
+small terminals render full-width stacked panels, and wide terminals render two
+masonry-balanced columns so the right side of the terminal is used without
+bringing back the old cluster of diagnostic boxes.
 
 In headless mode, the sidecar still:
 

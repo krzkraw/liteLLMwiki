@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/server"
@@ -34,16 +34,16 @@ func TestTUIStartsAndCreatesRunnerThroughLaunchWizard(t *testing.T) {
 		t.Fatalf("window size update returned unexpected command")
 	}
 	model = next.(tui.Model)
-	next, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	next, cmd = model.Update(textKey("2"))
 	if cmd != nil {
 		t.Fatalf("wizard tab key returned unexpected command")
 	}
 	model = next.(tui.Model)
-	if !strings.Contains(model.View(), "Launch Wizard") {
-		t.Fatalf("wizard tab did not render:\n%s", model.View())
+	if !strings.Contains(model.View().Content, "Launch Wizard") {
+		t.Fatalf("wizard tab did not render:\n%s", model.View().Content)
 	}
 
-	next, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = model.Update(specialKey(tea.KeyEnter))
 	if cmd == nil {
 		t.Fatalf("wizard enter returned no create command")
 	}
@@ -54,8 +54,8 @@ func TestTUIStartsAndCreatesRunnerThroughLaunchWizard(t *testing.T) {
 	if got := strings.Join(controller.calls, ","); got != "create:LR-M-1:litert:main:gemma4-litert,start:LR-M-1" {
 		t.Fatalf("controller calls = %q", got)
 	}
-	if !strings.Contains(model.View(), "4 ● LR-M-1") {
-		t.Fatalf("created runner tab did not render:\n%s", model.View())
+	if !strings.Contains(model.View().Content, "4 ● LR-M-1") {
+		t.Fatalf("created runner tab did not render:\n%s", model.View().Content)
 	}
 }
 
@@ -85,6 +85,18 @@ func assertBubbleTeaProgramStarts(t *testing.T, model tui.Model) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Bubble Tea program did not stop after start/quit")
 	}
+}
+
+func specialKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
+}
+
+func textKey(value string) tea.KeyPressMsg {
+	code := tea.KeyExtended
+	if runes := []rune(value); len(runes) == 1 {
+		code = runes[0]
+	}
+	return tea.KeyPressMsg{Text: value, Code: code}
 }
 
 func harnessCatalogWithPresentModels(t *testing.T, ids ...string) *catalog.Catalog {

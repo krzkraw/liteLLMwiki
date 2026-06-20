@@ -15,8 +15,10 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/runtimeconfig"
@@ -119,6 +121,19 @@ type runtimeEdit struct {
 	secret  bool
 }
 
+type optionModal struct {
+	option wizardCLIOption
+	input  textinput.Model
+}
+
+type buttonHit struct {
+	action  string
+	row     int
+	start   int
+	end     int
+	payload string
+}
+
 type chatMessage struct {
 	role    string
 	content string
@@ -175,6 +190,8 @@ type Model struct {
 	wizardRole             string
 	wizardVariantSelection int
 	wizardModelSelection   int
+	wizardOptionOverrides  map[string]string
+	optionModal            *optionModal
 	llamaRuntimeRoot       string
 	llamaRuntimeVariants   []llamaRuntimeVariant
 	backendConfigPath      string
@@ -329,20 +346,21 @@ func NewModel(options ModelOptions) Model {
 		chatEndpoint = defaultChatEndpoint
 	}
 	model := Model{
-		runtimeController: options.RuntimeController,
-		runnerController:  options.RunnerController,
-		logs:              options.Logs,
-		catalog:           options.Catalog,
-		ctx:               ctx,
-		chatEndpoint:      chatEndpoint,
-		active:            0,
-		managedScreen:     options.ManagedScreen,
-		wizardRuntime:     "litert",
-		wizardBackend:     "cpu",
-		wizardRole:        "main",
-		llamaRuntimeRoot:  options.LlamaRuntimeRoot,
-		backendConfigPath: resolveBackendConfigPath(options.BackendConfigPath),
-		paletteID:         "neon",
+		runtimeController:     options.RuntimeController,
+		runnerController:      options.RunnerController,
+		logs:                  options.Logs,
+		catalog:               options.Catalog,
+		ctx:                   ctx,
+		chatEndpoint:          chatEndpoint,
+		active:                0,
+		managedScreen:         options.ManagedScreen,
+		wizardRuntime:         "litert",
+		wizardBackend:         "cpu",
+		wizardRole:            "main",
+		wizardOptionOverrides: map[string]string{},
+		llamaRuntimeRoot:      options.LlamaRuntimeRoot,
+		backendConfigPath:     resolveBackendConfigPath(options.BackendConfigPath),
+		paletteID:             "neon",
 	}
 	model.refresh()
 	model.normalizeWizardSelection()
@@ -366,8 +384,6 @@ func Run(
 			ManagedScreen:     true,
 		}),
 		tea.WithContext(ctx),
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 	_, err := program.Run()
 	return err
@@ -383,7 +399,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.clampScrollOffset()
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
+		if m.optionModal != nil {
+			return m.updateOptionModalKey(msg)
+		}
 		if m.runtimeEdit != nil {
 			return m.updateRuntimeEditKey(msg)
 		}
@@ -391,7 +410,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateEditKey(msg)
 		}
 		return m.updateKey(msg)
-	case tea.MouseMsg:
+	case tea.MouseClickMsg:
+		if m.optionModal != nil {
+			return m.updateOptionModalMouse(msg)
+		}
 		return m.updateMouse(msg)
 	case tickMsg:
 		m.refresh()
@@ -433,11 +455,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if msg.Type != tea.MouseLeft || msg.Action != tea.MouseActionPress {
+func (m Model) updateMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
 
+	if hit, ok := m.buttonHitAt(msg.X, msg.Y); ok {
+		if next, cmd, handled := m.handleButtonHit(hit); handled {
+			return next, cmd
+		}
+	}
 	if next, cmd, ok := m.handleBottomBarAction(msg.X, msg.Y); ok {
 		return next, cmd
 	}
@@ -456,6 +483,9 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case "setup":
 		return m.updateSetupMouse(msg.X, msg.Y), nil
 	default:
+		if runner, ok := m.activeRunner(); ok {
+			return m.updateRunnerBodyMouse(runner, msg.X, msg.Y)
+		}
 		return m, nil
 	}
 }
@@ -515,6 +545,197 @@ func (m Model) bottomActionAt(x int) (bottomActionSegment, bool) {
 		}
 	}
 	return bottomActionSegment{}, false
+}
+
+func (m Model) buttonHitAt(x int, y int) (buttonHit, bool) {
+	for _, hit := range m.buttonHitRegistry() {
+		if y == hit.row && x >= hit.start && x < hit.end {
+			return hit, true
+		}
+	}
+	return buttonHit{}, false
+}
+
+func (m Model) buttonHitRegistry() []buttonHit {
+	view := m.viewContent()
+	var hits []buttonHit
+	addTextHit := func(text string, action string, payload string) {
+		if hit, ok := renderedTextHit(view, text, action, payload); ok {
+			hits = append(hits, hit)
+		}
+	}
+	addTokenHit := func(text string, action string, payload string) {
+		if hit, ok := renderedTokenHit(view, text, action, payload); ok {
+			hits = append(hits, hit)
+		}
+	}
+	addTextHitOnRow := func(row int, text string, action string, payload string) {
+		if hit, ok := renderedTextHitOnRow(view, row, text, action, payload); ok {
+			hits = append(hits, hit)
+		}
+	}
+	addTokenHitOnRow := func(row int, text string, action string, payload string) {
+		if hit, ok := renderedTokenHitOnRow(view, row, text, action, payload); ok {
+			hits = append(hits, hit)
+		}
+	}
+	addTokenHitOnVisibleLine := func(lineNeedle string, text string, action string, payload string) {
+		row := lineNumberContainingText(view, lineNeedle)
+		addTokenHitOnRow(row, text, action, payload)
+	}
+	addTextHitOnVisibleLine := func(lineNeedle string, text string, action string, payload string) {
+		row := lineNumberContainingText(view, lineNeedle)
+		addTextHitOnRow(row, text, action, payload)
+	}
+
+	if footerRow := lastLineNumberContainingText(view, "Menu"); footerRow >= 0 {
+		for _, segment := range m.bottomActionSegments() {
+			payload := segment.label
+			if strings.HasPrefix(segment.id, "runner-") {
+				payload = m.activeRunnerID()
+			}
+			hits = append(hits, buttonHit{
+				action:  segment.id,
+				row:     footerRow,
+				start:   segment.start,
+				end:     segment.end,
+				payload: payload,
+			})
+		}
+	}
+
+	if m.optionModal != nil {
+		addTextHit("[ Save ]", "modal-save", "")
+		addTextHit("[ Clear ]", "modal-clear", "")
+		addTextHit("[ X ]", "modal-close", "")
+		return hits
+	}
+
+	if runner, ok := m.activeRunner(); ok {
+		actionRow := lineNumberContainingText(view, "Actions")
+		addTextHitOnRow(actionRow, "Start", "runner-start", runner.ID)
+		addTextHitOnRow(actionRow, "Stop", "runner-stop", runner.ID)
+		addTextHitOnRow(actionRow, "Restart", "runner-restart", runner.ID)
+		addTextHitOnRow(actionRow, "Edit Cmd", "runner-edit-command", runner.ID)
+		addTextHitOnRow(actionRow, "Close", "runner-close", runner.ID)
+	}
+
+	if m.activeTabID() == "wizard" {
+		for _, runtimeName := range []string{"litert", "llama.cpp"} {
+			addTokenHitOnVisibleLine("runtime", selectedToken(runtimeName, (runtimeName == "litert" && m.wizardRuntime == "litert") || (runtimeName == "llama.cpp" && m.wizardRuntime == "llamacpp")), "wizard-runtime", runtimeName)
+		}
+		backendOptions := m.litertBackendOptions()
+		backendLine := "LiteRT backend"
+		if m.wizardRuntime == "llamacpp" {
+			backendOptions = m.llamaTypeOptions()
+			backendLine = "llama type"
+		}
+		for _, backend := range backendOptions {
+			addTokenHitOnVisibleLine(backendLine, selectedToken(backend, backend == m.wizardBackend), "wizard-backend", backend)
+		}
+		for _, role := range []string{"main", "embedding", "reranking"} {
+			addTokenHitOnVisibleLine("model role", selectedToken(role, role == m.wizardRole), "wizard-role", role)
+		}
+		for index, entry := range m.wizardCandidateModels() {
+			addTextHit(entry.Filename, "wizard-model", strconv.Itoa(index))
+		}
+		for _, option := range applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole) {
+			addTokenHit(optionLabel(option), "wizard-option", option.ID)
+		}
+		addTextHitOnVisibleLine("[ START ]", "[ START ]", "wizard-start", "")
+	}
+
+	return hits
+}
+
+func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
+	switch hit.action {
+	case "menu", "next", "previous", "quit", "runner-start", "runner-stop", "runner-restart", "runner-edit-command", "runner-close":
+		return m.handleBottomBarOrRunnerHit(hit)
+	case "wizard-runtime":
+		if hit.payload == "llama.cpp" {
+			m.wizardRuntime = "llamacpp"
+			m.wizardBackend = m.firstAvailableLlamaType()
+		} else {
+			m.wizardRuntime = "litert"
+			m.wizardBackend = "cpu"
+		}
+		m.wizardModelSelection = 0
+		m.normalizeWizardSelection()
+		return m, nil, true
+	case "wizard-backend":
+		m.wizardBackend = hit.payload
+		m.normalizeWizardSelection()
+		return m, nil, true
+	case "wizard-role":
+		m.setWizardRole(hit.payload)
+		return m, nil, true
+	case "wizard-model":
+		index, _ := strconv.Atoi(hit.payload)
+		m.setWizardModelSelection(index)
+		return m, nil, true
+	case "wizard-option":
+		if option, ok := wizardOptionByID(hit.payload); ok {
+			m.openOptionModal(option)
+			return m, nil, true
+		}
+	case "wizard-start":
+		return m, m.wizardCreateCmd(), true
+	case "modal-save":
+		m.saveOptionModal()
+		return m, nil, true
+	case "modal-clear":
+		if m.optionModal != nil {
+			delete(m.wizardOptionOverrides, m.optionModal.option.ID)
+			m.optionModal = nil
+		}
+		return m, nil, true
+	case "modal-close":
+		m.optionModal = nil
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+func (m Model) handleBottomBarOrRunnerHit(hit buttonHit) (Model, tea.Cmd, bool) {
+	switch hit.action {
+	case "menu":
+		m.globalMenuOpen = !m.globalMenuOpen
+		m.globalPaletteMenuOpen = false
+		return m, nil, true
+	case "next":
+		m.active = (m.active + 1) % len(m.tabs())
+		m.resetScroll()
+		return m, nil, true
+	case "previous":
+		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+		m.resetScroll()
+		return m, nil, true
+	case "quit":
+		return m, tea.Quit, true
+	case "runner-start":
+		if runner, ok := m.runnerByID(fallback(hit.payload, m.activeRunnerID())); ok {
+			return m, m.runnerActionCmd("start", runner.ID), true
+		}
+	case "runner-stop":
+		if runner, ok := m.runnerByID(fallback(hit.payload, m.activeRunnerID())); ok {
+			return m, m.runnerActionCmd("stop", runner.ID), true
+		}
+	case "runner-restart":
+		if runner, ok := m.runnerByID(fallback(hit.payload, m.activeRunnerID())); ok {
+			return m, m.runnerActionCmd("restart", runner.ID), true
+		}
+	case "runner-edit-command":
+		if runner, ok := m.runnerByID(fallback(hit.payload, m.activeRunnerID())); ok {
+			m.edit = newCommandLineRunnerEdit(runner)
+			return m, nil, true
+		}
+	case "runner-close":
+		if runner, ok := m.runnerByID(fallback(hit.payload, m.activeRunnerID())); ok {
+			return m, m.runnerActionCmd("close", runner.ID), true
+		}
+	}
+	return m, nil, false
 }
 
 func (m Model) handleGlobalMenuClick(x int, y int) (Model, tea.Cmd, bool) {
@@ -603,6 +824,10 @@ func (m Model) updateDashboardMouse(x int, y int) Model {
 }
 
 func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
+	if option, ok := m.wizardOptionFromMouse(x, y); ok {
+		m.openOptionModal(option)
+		return m, nil
+	}
 	if index, ok := m.wizardModelIndexFromMouse(x, y); ok {
 		m.setWizardModelSelection(index)
 		return m, nil
@@ -634,6 +859,24 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 		if x >= wizardStartX && x < wizardStartX+12 {
 			return m, m.wizardCreateCmd()
 		}
+	}
+	return m, nil
+}
+
+func (m Model) updateRunnerBodyMouse(runner server.RunnerSnapshot, x int, y int) (tea.Model, tea.Cmd) {
+	view := m.viewContent()
+	switch {
+	case renderedPointHitsText(view, x, y, "Start"):
+		return m, m.runnerActionCmd("start", runner.ID)
+	case renderedPointHitsText(view, x, y, "Stop"):
+		return m, m.runnerActionCmd("stop", runner.ID)
+	case renderedPointHitsText(view, x, y, "Restart"):
+		return m, m.runnerActionCmd("restart", runner.ID)
+	case renderedPointHitsText(view, x, y, "Edit Cmd"):
+		m.edit = newCommandLineRunnerEdit(runner)
+		return m, nil
+	case renderedPointHitsText(view, x, y, "Close"):
+		return m, m.runnerActionCmd("close", runner.ID)
 	}
 	return m, nil
 }
@@ -716,7 +959,7 @@ func panelContentRow(panelTop int, line int) int {
 	return panelTop + 2 + line
 }
 
-func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.activeTabID() == "setup" {
 		if next, cmd, ok := m.updateSetupKey(msg); ok {
 			return next, cmd
@@ -728,212 +971,233 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlC, tea.KeyEsc:
+	key := msg.Key()
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	switch key.Code {
+	case tea.KeyEsc:
 		return m, tea.Quit
 	case tea.KeyF1:
 		m.globalMenuOpen = !m.globalMenuOpen
 		m.globalPaletteMenuOpen = false
 		return m, nil
-	case tea.KeyRight, tea.KeyTab:
+	case tea.KeyRight:
 		m.active = (m.active + 1) % len(m.tabs())
 		m.resetScroll()
 		return m, nil
-	case tea.KeyLeft, tea.KeyShiftTab:
+	case tea.KeyTab:
+		if key.Mod.Contains(tea.ModShift) {
+			m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+		} else {
+			m.active = (m.active + 1) % len(m.tabs())
+		}
+		m.resetScroll()
+		return m, nil
+	case tea.KeyLeft:
 		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
 		m.resetScroll()
 		return m, nil
-	case tea.KeyBackspace, tea.KeyCtrlH, tea.KeyEnter:
-		if m.activeTabID() == "wizard" && msg.Type == tea.KeyEnter {
+	case tea.KeyBackspace, tea.KeyEnter:
+		if m.activeTabID() == "wizard" && key.Code == tea.KeyEnter {
 			return m, m.wizardCreateCmd()
 		}
 		if m.activeTabID() == "chat" {
 			return m.updateChatKey(msg)
 		}
-	case tea.KeyRunes:
-		value := msg.String()
-		if m.selectRuneTab(value) {
-			return m, nil
-		}
+	}
+
+	if msg.String() == "ctrl+h" {
 		if m.activeTabID() == "chat" {
 			return m.updateChatKey(msg)
 		}
-		if m.activeTabID() == "wizard" {
-			switch strings.ToLower(value) {
-			case "t":
-				m.toggleWizardRuntime()
-				return m, nil
-			case "b":
-				m.cycleWizardVariant()
-				return m, nil
-			case "m":
-				m.setWizardRole("main")
-				return m, nil
-			case "e":
-				m.setWizardRole("embedding")
-				return m, nil
-			case "r":
-				m.setWizardRole("reranking")
-				return m, nil
-			case "n":
-				m.cycleWizardModel(1)
-				return m, nil
-			case "p":
-				m.cycleWizardModel(-1)
-				return m, nil
-			}
+		return m, nil
+	}
+	value := key.Text
+	if value == "" {
+		return m, nil
+	}
+	if m.selectRuneTab(value) {
+		return m, nil
+	}
+	if m.activeTabID() == "chat" {
+		return m.updateChatKey(msg)
+	}
+	if m.activeTabID() == "wizard" {
+		switch strings.ToLower(value) {
+		case "t":
+			m.toggleWizardRuntime()
+			return m, nil
+		case "b":
+			m.cycleWizardVariant()
+			return m, nil
+		case "m":
+			m.setWizardRole("main")
+			return m, nil
+		case "e":
+			m.setWizardRole("embedding")
+			return m, nil
+		case "r":
+			m.setWizardRole("reranking")
+			return m, nil
+		case "n":
+			m.cycleWizardModel(1)
+			return m, nil
+		case "p":
+			m.cycleWizardModel(-1)
+			return m, nil
 		}
-		if m.activeTabID() == "settings" {
-			switch strings.ToLower(value) {
-			case "s":
-				return m, m.runtimeActionCmd("start", server.RuntimeModeRelease)
-			case "d":
-				return m, m.runtimeActionCmd("start", server.RuntimeModeDebug)
-			case "x":
-				return m, m.runtimeActionCmd("stop", "")
-			case "r":
-				return m, m.runtimeActionCmd("restart", server.RuntimeModeRelease)
-			case "g":
-				return m, m.runtimeActionCmd("restart", server.RuntimeModeDebug)
-			case "e":
-				m.runtimeEdit = m.newRuntimeEdit("runtimeExe", "Runtime exe", m.runtimeConfigValue("runtimeExe"), false)
-				return m, nil
-			case "h":
-				m.runtimeEdit = m.newRuntimeEdit("runtimeHost", "Runtime host", m.runtimeConfigValue("runtimeHost"), false)
-				return m, nil
-			case "p":
-				m.runtimeEdit = m.newRuntimeEdit("runtimePort", "Runtime port", m.runtimeConfigValue("runtimePort"), true)
-				return m, nil
-			case "m":
-				m.runtimeEdit = m.newRuntimeEdit("modelFile", "Model file", m.runtimeConfigValue("modelFile"), false)
-				return m, nil
-			case "i":
-				m.runtimeEdit = m.newRuntimeEdit("modelId", "Model ID", m.runtimeConfigValue("modelId"), false)
-				return m, nil
-			case "u":
-				m.runtimeEdit = m.newRuntimeEdit("upstream", "Upstream", m.runtimeConfigValue("upstream"), false)
-				return m, nil
-			case "f":
-				m.runtimeEdit = m.newSecretRuntimeEdit("huggingFaceToken", "HF token", m.runtimeConfigValue("huggingFaceToken"))
-				return m, nil
-			case "l":
-				current := boolPointerValue(m.runtimeDraft.LaunchRuntime, true)
-				next := !current
-				m.runtimeDraft.LaunchRuntime = &next
-				m.notice = "runtime config launchRuntime " + strconv.FormatBool(next)
-				return m, nil
-			case "a":
-				current := boolPointerValue(m.runtimeDraft.ImportModel, true)
-				next := !current
-				m.runtimeDraft.ImportModel = &next
-				m.notice = "runtime config importModel " + strconv.FormatBool(next)
-				return m, nil
-			case "v":
-				current := boolPointerValue(m.runtimeDraft.RuntimeVerbose, false)
-				next := !current
-				m.runtimeDraft.RuntimeVerbose = &next
-				m.notice = "runtime config runtimeVerbose " + strconv.FormatBool(next)
-				return m, nil
-			}
+	}
+	if m.activeTabID() == "settings" {
+		switch strings.ToLower(value) {
+		case "s":
+			return m, m.runtimeActionCmd("start", server.RuntimeModeRelease)
+		case "d":
+			return m, m.runtimeActionCmd("start", server.RuntimeModeDebug)
+		case "x":
+			return m, m.runtimeActionCmd("stop", "")
+		case "r":
+			return m, m.runtimeActionCmd("restart", server.RuntimeModeRelease)
+		case "g":
+			return m, m.runtimeActionCmd("restart", server.RuntimeModeDebug)
+		case "e":
+			m.runtimeEdit = m.newRuntimeEdit("runtimeExe", "Runtime exe", m.runtimeConfigValue("runtimeExe"), false)
+			return m, nil
+		case "h":
+			m.runtimeEdit = m.newRuntimeEdit("runtimeHost", "Runtime host", m.runtimeConfigValue("runtimeHost"), false)
+			return m, nil
+		case "p":
+			m.runtimeEdit = m.newRuntimeEdit("runtimePort", "Runtime port", m.runtimeConfigValue("runtimePort"), true)
+			return m, nil
+		case "m":
+			m.runtimeEdit = m.newRuntimeEdit("modelFile", "Model file", m.runtimeConfigValue("modelFile"), false)
+			return m, nil
+		case "i":
+			m.runtimeEdit = m.newRuntimeEdit("modelId", "Model ID", m.runtimeConfigValue("modelId"), false)
+			return m, nil
+		case "u":
+			m.runtimeEdit = m.newRuntimeEdit("upstream", "Upstream", m.runtimeConfigValue("upstream"), false)
+			return m, nil
+		case "f":
+			m.runtimeEdit = m.newSecretRuntimeEdit("huggingFaceToken", "HF token", m.runtimeConfigValue("huggingFaceToken"))
+			return m, nil
+		case "l":
+			current := boolPointerValue(m.runtimeDraft.LaunchRuntime, true)
+			next := !current
+			m.runtimeDraft.LaunchRuntime = &next
+			m.notice = "runtime config launchRuntime " + strconv.FormatBool(next)
+			return m, nil
+		case "a":
+			current := boolPointerValue(m.runtimeDraft.ImportModel, true)
+			next := !current
+			m.runtimeDraft.ImportModel = &next
+			m.notice = "runtime config importModel " + strconv.FormatBool(next)
+			return m, nil
+		case "v":
+			current := boolPointerValue(m.runtimeDraft.RuntimeVerbose, false)
+			next := !current
+			m.runtimeDraft.RuntimeVerbose = &next
+			m.notice = "runtime config runtimeVerbose " + strconv.FormatBool(next)
+			return m, nil
 		}
-		if m.activeTabID() == "models" {
-			switch strings.ToLower(value) {
-			case "d":
-				return m, m.modelDownloadCmd()
-			case "w":
-				m.setActiveTab("wizard")
-				m.resetScroll()
-				return m, nil
-			}
+	}
+	if m.activeTabID() == "models" {
+		switch strings.ToLower(value) {
+		case "d":
+			return m, m.modelDownloadCmd()
+		case "w":
+			m.setActiveTab("wizard")
+			m.resetScroll()
+			return m, nil
 		}
-		if runner, ok := m.activeRunner(); ok {
-			if value == "C" {
-				m.edit = newCommandLineRunnerEdit(runner)
-				return m, nil
+	}
+	if runner, ok := m.activeRunner(); ok {
+		if value == "C" {
+			m.edit = newCommandLineRunnerEdit(runner)
+			return m, nil
+		}
+		switch strings.ToLower(value) {
+		case "b":
+			backend := nextBackend(runner.Backend)
+			return m, m.runnerUpdateCmd(
+				runner,
+				"backend",
+				backend,
+				server.RunnerPatch{Backend: backend},
+			)
+		case "p":
+			m.edit = newRunnerEdit(runner, "port", "Port", fallbackInt(runner.Port, ""), true)
+			return m, nil
+		case "h":
+			m.edit = newRunnerEdit(runner, "host", "Host", runner.Host, false)
+			return m, nil
+		case "i":
+			m.edit = newRunnerEdit(runner, "modelId", "Model ID", runner.ModelID, false)
+			return m, nil
+		case "m":
+			m.edit = newRunnerEdit(runner, "modelPath", "Model path", runner.ModelPath, false)
+			return m, nil
+		case "e":
+			m.edit = newRunnerEdit(runner, "executable", "Executable", runner.Executable, false)
+			return m, nil
+		case "u":
+			m.edit = newRunnerEdit(runner, "upstream", "Upstream", runner.Upstream, false)
+			return m, nil
+		case "f":
+			m.edit = newSecretRunnerEdit(runner, "huggingFaceToken", "HF token", "not shown")
+			return m, nil
+		case "l":
+			launch := !runner.Launch
+			value := "external"
+			if launch {
+				value = "managed"
 			}
-			switch strings.ToLower(value) {
-			case "b":
-				backend := nextBackend(runner.Backend)
-				return m, m.runnerUpdateCmd(
-					runner,
-					"backend",
-					backend,
-					server.RunnerPatch{Backend: backend},
-				)
-			case "p":
-				m.edit = newRunnerEdit(runner, "port", "Port", fallbackInt(runner.Port, ""), true)
-				return m, nil
-			case "h":
-				m.edit = newRunnerEdit(runner, "host", "Host", runner.Host, false)
-				return m, nil
-			case "i":
-				m.edit = newRunnerEdit(runner, "modelId", "Model ID", runner.ModelID, false)
-				return m, nil
-			case "m":
-				m.edit = newRunnerEdit(runner, "modelPath", "Model path", runner.ModelPath, false)
-				return m, nil
-			case "e":
-				m.edit = newRunnerEdit(runner, "executable", "Executable", runner.Executable, false)
-				return m, nil
-			case "u":
-				m.edit = newRunnerEdit(runner, "upstream", "Upstream", runner.Upstream, false)
-				return m, nil
-			case "f":
-				m.edit = newSecretRunnerEdit(runner, "huggingFaceToken", "HF token", "not shown")
-				return m, nil
-			case "l":
-				launch := !runner.Launch
-				value := "external"
-				if launch {
-					value = "managed"
-				}
-				return m, m.runnerUpdateCmd(
-					runner,
-					"launch",
-					value,
-					server.RunnerPatch{Launch: &launch},
-				)
-			case "v":
-				verbose := !runner.Verbose
-				return m, m.runnerUpdateCmd(
-					runner,
-					"verbose",
-					strconv.FormatBool(verbose),
-					server.RunnerPatch{Verbose: &verbose},
-				)
-			case "t":
-				runtimeName := nextRuntime(runner.Runtime)
-				return m, m.runnerUpdateCmd(
-					runner,
-					"runtime",
-					runtimeName,
-					server.RunnerPatch{Runtime: runtimeName},
-				)
-			case "o":
-				role := nextRole(runner.Role)
-				return m, m.runnerUpdateCmd(
-					runner,
-					"role",
-					role,
-					server.RunnerPatch{Role: role},
-				)
-			case "s":
-				return m, m.runnerActionCmd("start", runner.ID)
-			case "x":
-				return m, m.runnerActionCmd("stop", runner.ID)
-			case "r":
-				return m, m.runnerActionCmd("restart", runner.ID)
-			case "c":
-				return m, m.runnerActionCmd("close", runner.ID)
-			}
+			return m, m.runnerUpdateCmd(
+				runner,
+				"launch",
+				value,
+				server.RunnerPatch{Launch: &launch},
+			)
+		case "v":
+			verbose := !runner.Verbose
+			return m, m.runnerUpdateCmd(
+				runner,
+				"verbose",
+				strconv.FormatBool(verbose),
+				server.RunnerPatch{Verbose: &verbose},
+			)
+		case "t":
+			runtimeName := nextRuntime(runner.Runtime)
+			return m, m.runnerUpdateCmd(
+				runner,
+				"runtime",
+				runtimeName,
+				server.RunnerPatch{Runtime: runtimeName},
+			)
+		case "o":
+			role := nextRole(runner.Role)
+			return m, m.runnerUpdateCmd(
+				runner,
+				"role",
+				role,
+				server.RunnerPatch{Role: role},
+			)
+		case "s":
+			return m, m.runnerActionCmd("start", runner.ID)
+		case "x":
+			return m, m.runnerActionCmd("stop", runner.ID)
+		case "r":
+			return m, m.runnerActionCmd("restart", runner.ID)
+		case "c":
+			return m, m.runnerActionCmd("close", runner.ID)
 		}
 	}
 
 	return m, nil
 }
 
-func (m Model) updateSetupKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	switch msg.Type {
+func (m Model) updateSetupKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	switch msg.Key().Code {
 	case tea.KeyUp:
 		m.setupSelection--
 		m.clampSetupSelection()
@@ -944,16 +1208,16 @@ func (m Model) updateSetupKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case tea.KeyEnter, tea.KeySpace:
 		return m.toggleSelectedSetupBackend(), nil, true
-	case tea.KeyRunes:
-		if msg.String() == " " {
+	default:
+		if msg.Key().Text == " " {
 			return m.toggleSelectedSetupBackend(), nil, true
 		}
 	}
 	return m, nil, false
 }
 
-func (m Model) updateScrollKey(msg tea.KeyMsg) (Model, bool) {
-	switch msg.Type {
+func (m Model) updateScrollKey(msg tea.KeyPressMsg) (Model, bool) {
+	switch msg.Key().Code {
 	case tea.KeyUp:
 		m.scrollOffset--
 	case tea.KeyDown:
@@ -973,15 +1237,17 @@ func (m Model) updateScrollKey(msg tea.KeyMsg) (Model, bool) {
 	return m, true
 }
 
-func (m Model) updateEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	edit := *m.edit
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	key := msg.Key()
+	switch key.Code {
 	case tea.KeyEsc:
 		m.edit = nil
 		return m, nil
-	case tea.KeyBackspace, tea.KeyCtrlH:
+	case tea.KeyBackspace:
 		if len(m.edit.value) > 0 {
 			m.edit.value = m.edit.value[:len(m.edit.value)-1]
 		}
@@ -1000,27 +1266,33 @@ func (m Model) updateEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.runnerUpdateCmd(edit.runner, edit.field, value, patch)
-	case tea.KeyRunes:
-		input := msg.String()
-		if edit.numeric && !isDigits(input) {
+	default:
+		if msg.String() == "ctrl+h" {
+			if len(m.edit.value) > 0 {
+				m.edit.value = m.edit.value[:len(m.edit.value)-1]
+			}
+			return m, nil
+		}
+		input := key.Text
+		if input == "" || edit.numeric && !isDigits(input) {
 			return m, nil
 		}
 		m.edit.value += input
 		return m, nil
-	default:
-		return m, nil
 	}
 }
 
-func (m Model) updateRuntimeEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateRuntimeEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	edit := *m.runtimeEdit
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	key := msg.Key()
+	switch key.Code {
 	case tea.KeyEsc:
 		m.runtimeEdit = nil
 		return m, nil
-	case tea.KeyBackspace, tea.KeyCtrlH:
+	case tea.KeyBackspace:
 		if len(m.runtimeEdit.value) > 0 {
 			m.runtimeEdit.value = m.runtimeEdit.value[:len(m.runtimeEdit.value)-1]
 		}
@@ -1034,21 +1306,71 @@ func (m Model) updateRuntimeEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.notice = fmt.Sprintf("runtime config %s %s", edit.field, value)
 		return m, nil
-	case tea.KeyRunes:
-		input := msg.String()
-		if edit.numeric && !isDigits(input) {
+	default:
+		if msg.String() == "ctrl+h" {
+			if len(m.runtimeEdit.value) > 0 {
+				m.runtimeEdit.value = m.runtimeEdit.value[:len(m.runtimeEdit.value)-1]
+			}
+			return m, nil
+		}
+		input := key.Text
+		if input == "" || edit.numeric && !isDigits(input) {
 			return m, nil
 		}
 		m.runtimeEdit.value += input
 		return m, nil
-	default:
-		return m, nil
 	}
 }
 
-func (m Model) updateChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyBackspace, tea.KeyCtrlH:
+func (m Model) updateOptionModalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	switch msg.Key().Code {
+	case tea.KeyEsc:
+		m.optionModal = nil
+		return m, nil
+	case tea.KeyEnter:
+		m.saveOptionModal()
+		return m, nil
+	}
+	input, cmd := m.optionModal.input.Update(msg)
+	m.optionModal.input = input
+	return m, cmd
+}
+
+func (m Model) updateOptionModalMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+	if hit, ok := m.buttonHitAt(msg.X, msg.Y); ok {
+		next, cmd, _ := m.handleButtonHit(hit)
+		return next, cmd
+	}
+	return m, nil
+}
+
+func (m *Model) saveOptionModal() {
+	if m.optionModal == nil {
+		return
+	}
+	value := strings.TrimSpace(m.optionModal.input.Value())
+	if m.wizardOptionOverrides == nil {
+		m.wizardOptionOverrides = map[string]string{}
+	}
+	m.wizardOptionOverrides[m.optionModal.option.ID] = value
+	m.optionModal = nil
+}
+
+func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+h" {
+		if len(m.chatDraft) > 0 {
+			m.chatDraft = m.chatDraft[:len(m.chatDraft)-1]
+		}
+		return m, nil
+	}
+	switch msg.Key().Code {
+	case tea.KeyBackspace:
 		if len(m.chatDraft) > 0 {
 			m.chatDraft = m.chatDraft[:len(m.chatDraft)-1]
 		}
@@ -1070,15 +1392,23 @@ func (m Model) updateChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			content: prompt,
 		})
 		return m, m.chatCompletionCmd(prompt, runner)
-	case tea.KeyRunes:
-		m.chatDraft += msg.String()
-		return m, nil
 	default:
+		if msg.Key().Text == "" {
+			return m, nil
+		}
+		m.chatDraft += msg.Key().Text
 		return m, nil
 	}
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	view := tea.NewView(m.viewContent())
+	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
+	return view
+}
+
+func (m Model) viewContent() string {
 	if m.managedScreen {
 		if m.height <= 0 {
 			return m.managedStartupView()
@@ -1100,6 +1430,10 @@ func (m Model) fullView() string {
 	}
 
 	builder.WriteString(m.activeContentView())
+	if m.optionModal != nil {
+		builder.WriteString("\n")
+		builder.WriteString(renderPanelSpec(m.optionModalSpec(), m.width))
+	}
 	builder.WriteString("\n\n")
 	builder.WriteString(m.footerView())
 
@@ -1119,6 +1453,9 @@ func (m Model) managedScreenView() string {
 	}
 
 	body := m.activeContentView()
+	if m.optionModal != nil {
+		body = joinPanels(body, renderPanelSpec(m.optionModalSpec(), m.width))
+	}
 	visibleBody := sliceRenderedLines(body, m.scrollOffset, bodyHeight)
 	if strings.TrimSpace(visibleBody) == "" {
 		visibleBody = mutedStyle.Render("No content in this pane.")
@@ -1348,6 +1685,13 @@ func (m Model) activeRunner() (server.RunnerSnapshot, bool) {
 	return m.runnerByID(id)
 }
 
+func (m Model) activeRunnerID() string {
+	if runner, ok := m.activeRunner(); ok {
+		return runner.ID
+	}
+	return ""
+}
+
 func (m Model) palette() tuiPalette {
 	palettes := tuiPalettes()
 	for _, palette := range palettes {
@@ -1374,7 +1718,7 @@ func (m Model) headerView() string {
 		BorderForeground(lipgloss.Color(m.palette().header)).
 		Padding(0, 1)
 	if m.width > 2 {
-		style = style.Width(m.width - 2)
+		style = style.Width(m.width)
 	}
 	return style.Render(strings.Join(parts, "  "))
 }
@@ -2612,6 +2956,8 @@ func (m Model) wizardView() string {
 	return m.panelGrid(
 		panelSpec{"Launch Wizard", m.wizardChoiceLines(), "214"},
 		panelSpec{"Local Models", m.wizardLocalModelLines(), "45"},
+		panelSpec{"CLI Options", m.wizardCLIOptionLines(), "82"},
+		panelSpec{"Command Preview", m.wizardCommandPreviewLines(), "244"},
 	)
 }
 
@@ -2681,6 +3027,136 @@ func (m Model) wizardLocalModelLines() []string {
 	return lines
 }
 
+func (m Model) wizardCLIOptionLines() []string {
+	options := applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole)
+	if len(options) == 0 {
+		return []string{"no options for selected runtime/backend/role"}
+	}
+	lines := make([]string, 0, len(options))
+	for _, option := range options {
+		label := optionLabel(option)
+		if value, ok := m.wizardOptionOverrides[option.ID]; ok {
+			if value == "" {
+				label += "=on"
+			} else {
+				label += "=" + value
+			}
+		}
+		lines = append(lines, label+"  "+option.Description)
+	}
+	return lines
+}
+
+func (m Model) wizardCommandPreviewLines() []string {
+	spec, _, err := m.wizardRunnerSpec()
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return []string{wizardCommandPreview(spec)}
+}
+
+func (m Model) optionModalSpec() panelSpec {
+	if m.optionModal == nil {
+		return panelSpec{}
+	}
+	option := m.optionModal.option
+	lines := []string{
+		formatKV("Short", fallback(option.Short, "none")),
+		formatKV("Full", option.Long),
+		option.Description,
+		formatKV("Default", fallback(option.DefaultText, "none")),
+	}
+	if len(option.Enums) > 0 {
+		lines = append(lines, formatKV("Enum", strings.Join(option.Enums, ", ")))
+	}
+	lines = append(lines,
+		"",
+		"Input",
+		m.optionModal.input.View(),
+		"",
+		"[ Save ]  [ Clear ]  [ X ]",
+	)
+	return panelSpec{
+		title: "CLI Option " + optionLabel(option),
+		lines: lines,
+		color: "205",
+	}
+}
+
+func (m Model) wizardOptionFromMouse(x int, y int) (wizardCLIOption, bool) {
+	view := m.viewContent()
+	for _, option := range applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole) {
+		if renderedPointHitsToken(view, x, y, optionLabel(option)) {
+			return option, true
+		}
+	}
+	return wizardCLIOption{}, false
+}
+
+func (m *Model) openOptionModal(option wizardCLIOption) {
+	input := textinput.New()
+	input.SetValue(m.wizardOptionOverrides[option.ID])
+	input.Focus()
+	m.optionModal = &optionModal{option: option, input: input}
+}
+
+func optionLabel(option wizardCLIOption) string {
+	if option.Short != "" {
+		return option.Short
+	}
+	return option.Long
+}
+
+func appendWizardOptionOverrides(
+	args []string,
+	runtimeName string,
+	backend string,
+	role string,
+	overrides map[string]string,
+) []string {
+	if len(overrides) == 0 {
+		return args
+	}
+	for _, option := range applicableWizardOptions(runtimeName, backend, role) {
+		value, ok := overrides[option.ID]
+		if !ok {
+			continue
+		}
+		flag := optionLabel(option)
+		args = removeFlag(args, flag, option.Long, option.Kind != "bool")
+		if option.Kind == "bool" && strings.TrimSpace(value) == "" {
+			args = append(args, flag)
+			continue
+		}
+		args = append(args, flag, strings.TrimSpace(value))
+	}
+	return args
+}
+
+func removeFlag(args []string, shortFlag string, longFlag string, hasValue bool) []string {
+	out := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == shortFlag || arg == longFlag {
+			if hasValue && index+1 < len(args) {
+				index++
+			}
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func usesWizardGPUBackend(backend string) bool {
+	switch backend {
+	case "gpu", "metal", "cuda13", "cuda12", "sycl":
+		return true
+	default:
+		return false
+	}
+}
+
 func selectedToken(label string, selected bool) string {
 	if selected {
 		return "[" + label + "]"
@@ -2691,6 +3167,116 @@ func selectedToken(label string, selected bool) string {
 type wizardOption struct {
 	label    string
 	selected bool
+}
+
+type wizardCLIOption struct {
+	ID          string
+	Runtime     string
+	Backends    []string
+	Roles       []string
+	Short       string
+	Long        string
+	Kind        string
+	DefaultText string
+	Enums       []string
+	Description string
+}
+
+func wizardOptionCatalog() []wizardCLIOption {
+	// Catalog is static by design; source list lives in docs/superpowers/specs/2026-06-20-sidecar-tui-cli-options-design.md.
+	kvEnums := []string{"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"}
+	gpuBackends := []string{"gpu", "metal", "cuda13", "cuda12", "sycl"}
+	return []wizardCLIOption{
+		{ID: "host", Runtime: "litert", Long: "--host", Kind: "string", DefaultText: "0.0.0.0", Description: "Server bind host for litert-lm serve."},
+		{ID: "port", Runtime: "litert", Long: "--port", Kind: "int", DefaultText: "9379", Description: "Server bind port for litert-lm serve."},
+		{ID: "verbose", Runtime: "litert", Long: "--verbose", Kind: "bool", DefaultText: "off", Description: "Enable verbose LiteRT-LM server logging."},
+		{ID: "ctx-size", Runtime: "llamacpp", Short: "-c", Long: "--ctx-size", Kind: "int", DefaultText: "model default", Description: "Context size. Lower values reduce KV cache memory."},
+		{ID: "cache-type-k", Runtime: "llamacpp", Short: "-ctk", Long: "--cache-type-k", Kind: "enum", DefaultText: "f16", Enums: kvEnums, Description: "KV cache K quantization type."},
+		{ID: "cache-type-v", Runtime: "llamacpp", Short: "-ctv", Long: "--cache-type-v", Kind: "enum", DefaultText: "f16", Enums: kvEnums, Description: "KV cache V quantization type."},
+		{ID: "flash-attn", Runtime: "llamacpp", Short: "-fa", Long: "--flash-attn", Kind: "enum", DefaultText: "auto", Enums: []string{"on", "off", "auto"}, Description: "Flash Attention mode."},
+		{ID: "gpu-layers", Runtime: "llamacpp", Backends: gpuBackends, Short: "-ngl", Long: "--gpu-layers", Kind: "string", DefaultText: "auto", Description: "Layers to offload. Use integer, auto, or all."},
+		{ID: "fit", Runtime: "llamacpp", Short: "-fit", Long: "--fit", Kind: "enum", DefaultText: "on", Enums: []string{"on", "off"}, Description: "Memory fitting mode."},
+		{ID: "fit-target", Runtime: "llamacpp", Short: "-fitt", Long: "--fit-target", Kind: "int", DefaultText: "1024", Description: "Per-device MiB margin for memory fitting."},
+		{ID: "fit-ctx", Runtime: "llamacpp", Short: "-fitc", Long: "--fit-ctx", Kind: "int", DefaultText: "4096", Description: "Minimum context size fit may use."},
+		{ID: "batch-size", Runtime: "llamacpp", Short: "-b", Long: "--batch-size", Kind: "int", DefaultText: "2048", Description: "Logical batch size."},
+		{ID: "ubatch-size", Runtime: "llamacpp", Short: "-ub", Long: "--ubatch-size", Kind: "int", DefaultText: "512", Description: "Physical batch size."},
+		{ID: "parallel", Runtime: "llamacpp", Short: "-np", Long: "--parallel", Kind: "int", DefaultText: "-1", Description: "Server slots."},
+		{ID: "kv-offload", Runtime: "llamacpp", Backends: gpuBackends, Short: "-kvo", Long: "--kv-offload", Kind: "bool", DefaultText: "on", Description: "KV cache offload."},
+		{ID: "no-kv-offload", Runtime: "llamacpp", Backends: gpuBackends, Long: "--no-kv-offload", Kind: "bool", DefaultText: "off", Description: "Keep KV cache off device when GPU memory is tight."},
+		{ID: "no-mmap", Runtime: "llamacpp", Long: "--no-mmap", Kind: "bool", DefaultText: "off", Description: "Disable memory-mapped model loading."},
+		{ID: "mlock", Runtime: "llamacpp", Long: "--mlock", Kind: "bool", DefaultText: "off", Description: "Keep model in RAM instead of swap or compression."},
+		{ID: "cache-ram", Runtime: "llamacpp", Short: "-cram", Long: "--cache-ram", Kind: "int", DefaultText: "8192", Description: "Prompt cache RAM MiB."},
+		{ID: "cache-prompt", Runtime: "llamacpp", Long: "--cache-prompt", Kind: "bool", DefaultText: "on", Description: "Prompt caching."},
+		{ID: "cache-reuse", Runtime: "llamacpp", Long: "--cache-reuse", Kind: "int", DefaultText: "0", Description: "KV shifting reuse chunk size."},
+		{ID: "device", Runtime: "llamacpp", Backends: gpuBackends, Short: "-dev", Long: "--device", Kind: "string", DefaultText: "all", Description: "Restrict offload devices."},
+		{ID: "list-devices", Runtime: "llamacpp", Backends: gpuBackends, Long: "--list-devices", Kind: "bool", DefaultText: "off", Description: "Print visible devices and exit."},
+		{ID: "main-gpu", Runtime: "llamacpp", Backends: gpuBackends, Short: "-mg", Long: "--main-gpu", Kind: "int", DefaultText: "0", Description: "Primary GPU index."},
+		{ID: "split-mode", Runtime: "llamacpp", Backends: gpuBackends, Short: "-sm", Long: "--split-mode", Kind: "enum", DefaultText: "layer", Enums: []string{"none", "layer", "row", "tensor"}, Description: "Multi-GPU split mode."},
+		{ID: "tensor-split", Runtime: "llamacpp", Backends: gpuBackends, Short: "-ts", Long: "--tensor-split", Kind: "string", DefaultText: "none", Description: "Comma-separated split proportions."},
+		{ID: "no-host", Runtime: "llamacpp", Backends: gpuBackends, Long: "--no-host", Kind: "bool", DefaultText: "off", Description: "Bypass host buffer."},
+		{ID: "op-offload", Runtime: "llamacpp", Backends: gpuBackends, Long: "--op-offload", Kind: "bool", DefaultText: "on", Description: "Host operation offload."},
+		{ID: "no-op-offload", Runtime: "llamacpp", Backends: gpuBackends, Long: "--no-op-offload", Kind: "bool", DefaultText: "off", Description: "Disable host operation offload."},
+		{ID: "cpu-moe", Runtime: "llamacpp", Backends: gpuBackends, Short: "-cmoe", Long: "--cpu-moe", Kind: "bool", DefaultText: "off", Description: "Keep all MoE weights on CPU."},
+		{ID: "n-cpu-moe", Runtime: "llamacpp", Backends: gpuBackends, Short: "-ncmoe", Long: "--n-cpu-moe", Kind: "int", DefaultText: "0", Description: "Keep first N MoE layers on CPU."},
+		{ID: "spec-type", Runtime: "llamacpp", Long: "--spec-type", Kind: "enum", DefaultText: "none", Enums: []string{"none", "draft-simple", "draft-mtp", "ngram-cache", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod"}, Description: "Speculative decoding type."},
+		{ID: "spec-default", Runtime: "llamacpp", Long: "--spec-default", Kind: "bool", DefaultText: "off", Description: "Use default speculative decoding config."},
+		{ID: "spec-draft-n-max", Runtime: "llamacpp", Long: "--spec-draft-n-max", Kind: "int", DefaultText: "3", Description: "Max draft tokens."},
+		{ID: "spec-draft-n-min", Runtime: "llamacpp", Long: "--spec-draft-n-min", Kind: "int", DefaultText: "0", Description: "Minimum draft tokens."},
+		{ID: "model-draft", Runtime: "llamacpp", Short: "-md", Long: "--model-draft", Kind: "string", DefaultText: "none", Description: "Local draft model path."},
+		{ID: "spec-draft-hf", Runtime: "llamacpp", Long: "--spec-draft-hf", Kind: "string", DefaultText: "none", Description: "Hugging Face draft model repo."},
+		{ID: "gpu-layers-draft", Runtime: "llamacpp", Backends: gpuBackends, Short: "-ngld", Long: "--gpu-layers-draft", Kind: "string", DefaultText: "auto", Description: "Draft model GPU layers."},
+		{ID: "device-draft", Runtime: "llamacpp", Backends: gpuBackends, Short: "-devd", Long: "--device-draft", Kind: "string", DefaultText: "all", Description: "Draft model offload devices."},
+		{ID: "cache-type-k-draft", Runtime: "llamacpp", Short: "-ctkd", Long: "--cache-type-k-draft", Kind: "enum", DefaultText: "f16", Enums: kvEnums, Description: "Draft K cache type."},
+		{ID: "cache-type-v-draft", Runtime: "llamacpp", Short: "-ctvd", Long: "--cache-type-v-draft", Kind: "enum", DefaultText: "f16", Enums: kvEnums, Description: "Draft V cache type."},
+		{ID: "spec-ngram-mod-n-match", Runtime: "llamacpp", Long: "--spec-ngram-mod-n-match", Kind: "int", DefaultText: "24", Description: "ngram-mod lookup length."},
+		{ID: "spec-ngram-mod-n-min", Runtime: "llamacpp", Long: "--spec-ngram-mod-n-min", Kind: "int", DefaultText: "48", Description: "ngram-mod minimum tokens."},
+		{ID: "spec-ngram-mod-n-max", Runtime: "llamacpp", Long: "--spec-ngram-mod-n-max", Kind: "int", DefaultText: "64", Description: "ngram-mod maximum tokens."},
+		{ID: "embedding", Runtime: "llamacpp", Roles: []string{"embedding", "reranking"}, Long: "--embedding", Kind: "bool", DefaultText: "role default", Description: "Enable embedding mode."},
+		{ID: "pooling", Runtime: "llamacpp", Roles: []string{"embedding", "reranking"}, Long: "--pooling", Kind: "enum", DefaultText: "role default", Enums: []string{"none", "mean", "cls", "last", "rank"}, Description: "Embedding pooling mode."},
+		{ID: "reranking", Runtime: "llamacpp", Roles: []string{"reranking"}, Long: "--reranking", Kind: "bool", DefaultText: "role default", Description: "Enable reranking endpoint."},
+		{ID: "embd-normalize", Runtime: "llamacpp", Long: "--embd-normalize", Kind: "int", DefaultText: "2", Description: "Embedding normalization mode."},
+		{ID: "reasoning", Runtime: "llamacpp", Short: "-rea", Long: "--reasoning", Kind: "enum", DefaultText: "auto", Enums: []string{"on", "off", "auto"}, Description: "Reasoning mode."},
+		{ID: "reasoning-budget", Runtime: "llamacpp", Long: "--reasoning-budget", Kind: "int", DefaultText: "-1", Description: "Thinking token budget."},
+		{ID: "timeout", Runtime: "llamacpp", Short: "-to", Long: "--timeout", Kind: "int", DefaultText: "3600", Description: "Server read/write timeout seconds."},
+	}
+}
+
+func wizardOptionIDsFor(runtimeName string, backend string, role string) []string {
+	options := applicableWizardOptions(runtimeName, backend, role)
+	ids := make([]string, 0, len(options))
+	for _, option := range options {
+		ids = append(ids, option.ID)
+	}
+	return ids
+}
+
+func wizardOptionByID(id string) (wizardCLIOption, bool) {
+	for _, option := range wizardOptionCatalog() {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return wizardCLIOption{}, false
+}
+
+func applicableWizardOptions(runtimeName string, backend string, role string) []wizardCLIOption {
+	var options []wizardCLIOption
+	for _, option := range wizardOptionCatalog() {
+		if option.Runtime != runtimeName {
+			continue
+		}
+		if len(option.Backends) > 0 && !containsString(option.Backends, backend) {
+			continue
+		}
+		if len(option.Roles) > 0 && !containsString(option.Roles, role) {
+			continue
+		}
+		if runtimeName == "llamacpp" && backend == "sycl" {
+			option.Description = strings.TrimSpace(option.Description) + " SYCL depends on Intel GPU drivers and oneAPI runtime; shared memory pressure matters, and upstream generally recommends FP16 SYCL builds."
+		}
+		options = append(options, option)
+	}
+	return options
 }
 
 func (m Model) wizardOptionBar(
@@ -4061,7 +4647,78 @@ func (m Model) wizardRunnerSpec() (server.RunnerSpec, catalog.Entry, error) {
 		modelID: entry.ID,
 		port:    m.nextWizardPort(entry.Role),
 	})
+	m.applyWizardOptionSpecOverrides(&spec)
+	spec.Command = m.wizardCommandArgv(spec)
 	return spec, entry, nil
+}
+
+func (m Model) applyWizardOptionSpecOverrides(spec *server.RunnerSpec) {
+	if value, ok := m.wizardOptionOverrides["host"]; ok && strings.TrimSpace(value) != "" {
+		spec.Host = strings.TrimSpace(value)
+	}
+	if value, ok := m.wizardOptionOverrides["port"]; ok && strings.TrimSpace(value) != "" {
+		if port, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && port > 0 {
+			spec.Port = port
+		}
+	}
+	if _, ok := m.wizardOptionOverrides["verbose"]; ok {
+		spec.Verbose = true
+	}
+	spec.Upstream = fmt.Sprintf("http://%s:%d", fallback(spec.Host, "127.0.0.1"), spec.Port)
+}
+
+func (m Model) wizardCommandArgv(spec server.RunnerSpec) []string {
+	var args []string
+	switch spec.Runtime {
+	case "litert":
+		args = []string{
+			fallback(spec.Executable, "litert-lm"),
+			"serve",
+			"--host",
+			fallback(spec.Host, "127.0.0.1"),
+			"--port",
+			strconv.Itoa(spec.Port),
+		}
+	case "llamacpp":
+		args = []string{
+			fallback(spec.Executable, "llama-server"),
+			"-m",
+			spec.ModelPath,
+			"--alias",
+			fallback(spec.ModelID, spec.ID),
+			"--host",
+			fallback(spec.Host, "127.0.0.1"),
+			"--port",
+			strconv.Itoa(spec.Port),
+		}
+		if usesWizardGPUBackend(spec.Backend) && !m.hasWizardOverride("gpu-layers") {
+			args = append(args, "--n-gpu-layers", "999")
+		}
+		switch spec.Role {
+		case "embedding":
+			if !m.hasWizardOverride("embedding") {
+				args = append(args, "--embedding")
+			}
+		case "reranking":
+			if !m.hasWizardOverride("embedding") {
+				args = append(args, "--embedding")
+			}
+			if !m.hasWizardOverride("pooling") {
+				args = append(args, "--pooling", "rank")
+			}
+			if !m.hasWizardOverride("reranking") {
+				args = append(args, "--reranking")
+			}
+		}
+	default:
+		return nil
+	}
+	return appendWizardOptionOverrides(args, spec.Runtime, spec.Backend, spec.Role, m.wizardOptionOverrides)
+}
+
+func (m Model) hasWizardOverride(id string) bool {
+	_, ok := m.wizardOptionOverrides[id]
+	return ok
 }
 
 func (m Model) nextRunnerID(runtimeName string, role string) string {
@@ -4985,6 +5642,114 @@ func runnerCommandLine(command []string) string {
 	return strings.Join(parts, " ")
 }
 
+func renderedPointHitsText(view string, x int, y int, text string) bool {
+	hit, ok := renderedTextHit(view, text, "", "")
+	return ok && y == hit.row && x >= hit.start && x < hit.end
+}
+
+func renderedTextHit(view string, text string, action string, payload string) (buttonHit, bool) {
+	for row, line := range strings.Split(view, "\n") {
+		if hit, ok := textHitInLine(line, row, text, action, payload); ok {
+			return hit, true
+		}
+	}
+	return buttonHit{}, false
+}
+
+func renderedTextHitOnRow(view string, row int, text string, action string, payload string) (buttonHit, bool) {
+	lines := strings.Split(view, "\n")
+	if row < 0 || row >= len(lines) {
+		return buttonHit{}, false
+	}
+	return textHitInLine(lines[row], row, text, action, payload)
+}
+
+func textHitInLine(line string, row int, text string, action string, payload string) (buttonHit, bool) {
+	plain := ansi.Strip(line)
+	start := strings.Index(plain, text)
+	if start < 0 {
+		return buttonHit{}, false
+	}
+	cellStart := ansi.StringWidth(plain[:start])
+	cellEnd := cellStart + ansi.StringWidth(text)
+	return buttonHit{
+		action:  action,
+		row:     row,
+		start:   cellStart,
+		end:     cellEnd,
+		payload: payload,
+	}, true
+}
+
+func renderedPointHitsToken(view string, x int, y int, text string) bool {
+	hit, ok := renderedTokenHit(view, text, "", "")
+	return ok && y == hit.row && x >= hit.start && x < hit.end
+}
+
+func renderedTokenHit(view string, text string, action string, payload string) (buttonHit, bool) {
+	lines := strings.Split(view, "\n")
+	for row, line := range lines {
+		if hit, ok := tokenHitInLine(line, row, text, action, payload); ok {
+			return hit, true
+		}
+	}
+	return buttonHit{}, false
+}
+
+func renderedTokenHitOnRow(view string, row int, text string, action string, payload string) (buttonHit, bool) {
+	lines := strings.Split(view, "\n")
+	if row < 0 || row >= len(lines) {
+		return buttonHit{}, false
+	}
+	return tokenHitInLine(lines[row], row, text, action, payload)
+}
+
+func tokenHitInLine(line string, row int, text string, action string, payload string) (buttonHit, bool) {
+	plain := ansi.Strip(line)
+	searchFrom := 0
+	for {
+		start := strings.Index(plain[searchFrom:], text)
+		if start < 0 {
+			return buttonHit{}, false
+		}
+		start += searchFrom
+		end := start + len(text)
+		beforeOK := start == 0 || plain[start-1] == ' '
+		afterOK := end >= len(plain) || plain[end] == ' ' || plain[end] == '='
+		if beforeOK && afterOK {
+			cellStart := ansi.StringWidth(plain[:start])
+			cellEnd := cellStart + ansi.StringWidth(text)
+			return buttonHit{
+				action:  action,
+				row:     row,
+				start:   cellStart,
+				end:     cellEnd,
+				payload: payload,
+			}, true
+		}
+		searchFrom = end
+	}
+}
+
+func lineNumberContainingText(view string, text string) int {
+	for row, line := range strings.Split(view, "\n") {
+		if strings.Contains(ansi.Strip(line), text) {
+			return row
+		}
+	}
+	return -1
+}
+
+func lastLineNumberContainingText(view string, text string) int {
+	lines := strings.Split(view, "\n")
+	for row := len(lines) - 1; row >= 0; row-- {
+		if strings.Contains(ansi.Strip(lines[row]), text) {
+			return row
+		}
+	}
+	return -1
+}
+
 func shellQuoteArg(arg string) string {
 	if !strings.ContainsAny(arg, " \t\n\r'\"\\") {
 		return arg
@@ -4993,24 +5758,7 @@ func shellQuoteArg(arg string) string {
 }
 
 func wizardCommandPreview(spec server.RunnerSpec) string {
-	executable := fallback(spec.Executable, "llama-server")
-	args := []string{
-		executable,
-		"--host",
-		fallback(spec.Host, "127.0.0.1"),
-		"--port",
-		strconv.Itoa(spec.Port),
-	}
-	if spec.ModelPath != "" {
-		args = append(args, "--model", spec.ModelPath)
-	}
-	switch spec.Role {
-	case "embedding":
-		args = append(args, "--embedding")
-	case "reranking":
-		args = append(args, "--embedding", "--pooling", "rank", "--reranking")
-	}
-	return strings.Join(args, " ")
+	return runnerCommandLine(spec.Command)
 }
 
 func runnerRoleRoute(role string) string {

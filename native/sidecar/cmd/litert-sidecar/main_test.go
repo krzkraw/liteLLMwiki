@@ -200,6 +200,49 @@ func TestSupervisorRunnerControllerCreatesAndControlsRunner(t *testing.T) {
 	}
 }
 
+func TestSupervisorRunnerControllerMapsCommandOverrides(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DisableDefaultLiteRT: true,
+	})
+	controller := supervisorRunnerController{supervisor: runtimeSupervisor}
+
+	runner, err := controller.CreateRunner(context.Background(), server.RunnerSpec{
+		ID:       "main-llamacpp-command",
+		Runtime:  "llamacpp",
+		Role:     "main",
+		Backend:  "cpu",
+		ModelID:  "gemma4-gguf",
+		Host:     "127.0.0.1",
+		Port:     9491,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9491",
+		Command:  []string{"custom-runner", "--host", "127.0.0.1", "--port", "9491"},
+	})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	if got := strings.Join(runner.Command, "\x00"); got != "custom-runner\x00--host\x00127.0.0.1\x00--port\x009491" {
+		t.Fatalf("created command = %#v", runner.Command)
+	}
+
+	commandLine := "edited-runner --host 127.0.0.1 --port 9491 --alias edited"
+	updated, err := controller.UpdateRunner(
+		context.Background(),
+		runner.ID,
+		server.RunnerPatch{
+			CommandLine: &commandLine,
+		},
+	)
+	if err != nil {
+		t.Fatalf("update runner command: %v", err)
+	}
+	if got := strings.Join(updated.Command, " "); got != "edited-runner --host 127.0.0.1 --port 9491 --alias edited" {
+		t.Fatalf("updated command = %q", got)
+	}
+}
+
 func TestSupervisorRunnerControllerStartOutlivesRequestContext(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

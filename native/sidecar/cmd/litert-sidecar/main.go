@@ -380,6 +380,8 @@ func toSupervisorRunnerSpec(spec server.RunnerSpec) supervisor.RunnerSpec {
 		Port:             spec.Port,
 		Launch:           spec.Launch,
 		Upstream:         spec.Upstream,
+		Command:          append([]string(nil), spec.Command...),
+		CommandLine:      spec.CommandLine,
 		HuggingFaceToken: spec.HuggingFaceToken,
 		Verbose:          spec.Verbose,
 	}
@@ -397,6 +399,8 @@ func toSupervisorRunnerPatch(patch server.RunnerPatch) supervisor.RunnerPatch {
 		Port:             patch.Port,
 		Launch:           patch.Launch,
 		Upstream:         patch.Upstream,
+		Command:          append([]string(nil), patch.Command...),
+		CommandLine:      patch.CommandLine,
 		HuggingFaceToken: patch.HuggingFaceToken,
 		Verbose:          patch.Verbose,
 	}

@@ -770,6 +770,88 @@ func TestRunnerBottomBarMouseActionsUseSharedController(t *testing.T) {
 	}
 }
 
+func TestRunnerTabRendersAndEditsCommandPreview(t *testing.T) {
+	t.Parallel()
+
+	runner := testRunner("LR-M-1", "litert", "main", "created")
+	runner.Command = []string{
+		"litert-lm",
+		"serve",
+		"--host",
+		"127.0.0.1",
+		"--port",
+		"9381",
+	}
+	controller := newFakeRunnerController([]server.RunnerSnapshot{runner})
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 180
+	model.height = 34
+	model.setActiveTab("runner:LR-M-1")
+
+	view := model.View()
+	for _, expected := range []string{
+		"Command",
+		"litert-lm serve --host 127.0.0.1 --port 9381",
+		"Edit Cmd",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("runner view missing %q:\n%s", expected, view)
+		}
+	}
+
+	var editSegment bottomActionSegment
+	for _, segment := range model.bottomActionSegments() {
+		if segment.label == "Edit Cmd" {
+			editSegment = segment
+			break
+		}
+	}
+	if editSegment.label == "" {
+		t.Fatalf("runner bottom action segments missing Edit Cmd: %#v", model.bottomActionSegments())
+	}
+
+	next, cmd := model.Update(leftClick(editSegment.start, model.height-1))
+	if cmd != nil {
+		t.Fatalf("edit command click returned unexpected command")
+	}
+	editing := next.(Model)
+	if editing.edit == nil || editing.edit.field != "commandLine" {
+		t.Fatalf("edit state = %#v, want commandLine editor", editing.edit)
+	}
+	if !strings.Contains(editing.View(), "Editing Command") {
+		t.Fatalf("runner command editor is not visible:\n%s", editing.View())
+	}
+
+	editedLine := "litert-lm serve --host 127.0.0.1 --port 9488 --verbose"
+	next, cmd = editing.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(editedLine)})
+	if cmd != nil {
+		t.Fatalf("typing command returned unexpected command")
+	}
+	editing = next.(Model)
+	next, cmd = editing.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("saving command edit returned no command")
+	}
+	message := cmd()
+	afterUpdate, _ := next.(Model).Update(message)
+	updated := afterUpdate.(Model)
+
+	if got := controller.calls[len(controller.calls)-1]; got != "update:LR-M-1:commandLine:"+editedLine {
+		t.Fatalf("update call = %q, want commandLine edit", got)
+	}
+	updatedRunner, ok := updated.runnerByID("LR-M-1")
+	if !ok {
+		t.Fatalf("runner LR-M-1 not found after command edit")
+	}
+	if got := strings.Join(updatedRunner.Command, " "); got != editedLine {
+		t.Fatalf("updated command = %q, want %q", got, editedLine)
+	}
+}
+
 func TestRunnerCloseBottomActionCallsControllerAndRemovesTab(t *testing.T) {
 	t.Parallel()
 
@@ -1116,10 +1198,27 @@ func (c *fakeRunnerController) CreateRunner(
 }
 
 func (c *fakeRunnerController) UpdateRunner(
-	context.Context,
-	string,
-	server.RunnerPatch,
+	_ context.Context,
+	id string,
+	patch server.RunnerPatch,
 ) (server.RunnerSnapshot, error) {
+	for index := range c.runners {
+		if c.runners[index].ID != id {
+			continue
+		}
+		switch {
+		case patch.CommandLine != nil:
+			c.calls = append(c.calls, "update:"+id+":commandLine:"+*patch.CommandLine)
+			c.runners[index].Command = strings.Fields(*patch.CommandLine)
+		case patch.Command != nil:
+			c.calls = append(c.calls, "update:"+id+":command:"+strings.Join(patch.Command, " "))
+			c.runners[index].Command = append([]string(nil), patch.Command...)
+		default:
+			c.calls = append(c.calls, "update:"+id)
+		}
+		return c.runners[index], nil
+	}
+	c.calls = append(c.calls, "update:"+id)
 	return server.RunnerSnapshot{}, nil
 }
 

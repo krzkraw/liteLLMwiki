@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -294,6 +296,104 @@ func TestSupervisorUpdatesStoppedRunnerSettings(t *testing.T) {
 	}
 	if runner.Upstream != "http://127.0.0.1:9592" {
 		t.Fatalf("upstream = %q, want patched managed upstream", runner.Upstream)
+	}
+}
+
+func TestSupervisorPreviewsAndUsesEditedRunnerCommand(t *testing.T) {
+	exe, argsFile := writeLlamaHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "gemma.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	port := freeLocalPort(t)
+	supervisor := New(Config{
+		DisableDefaultLiteRT: true,
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:         "main-llamacpp-command",
+		Runtime:    RuntimeLlamaCPP,
+		Role:       RoleMain,
+		Backend:    BackendCPU,
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "gemma4-gguf",
+		Host:       "127.0.0.1",
+		Port:       port,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+
+	preview, ok := supervisor.Runner(runnerID)
+	if !ok {
+		t.Fatalf("runner %q not found", runnerID)
+	}
+	wantDefault := []string{
+		exe,
+		"-m",
+		modelPath,
+		"--alias",
+		"gemma4-gguf",
+		"--host",
+		"127.0.0.1",
+		"--port",
+		strconv.Itoa(port),
+	}
+	if len(preview.Command) < len(wantDefault) ||
+		!reflect.DeepEqual(preview.Command[:len(wantDefault)], wantDefault) {
+		t.Fatalf("default command preview = %#v, want prefix %#v", preview.Command, wantDefault)
+	}
+
+	overrideLine := fmt.Sprintf(
+		"%s --host 127.0.0.1 --port %d --alias edited --sentinel 'two words'",
+		shellQuote(exe),
+		port,
+	)
+	if err := supervisor.UpdateRunner(runnerID, RunnerPatch{CommandLine: &overrideLine}); err != nil {
+		t.Fatalf("update command override: %v", err)
+	}
+	edited, ok := supervisor.Runner(runnerID)
+	if !ok {
+		t.Fatalf("runner %q not found after command edit", runnerID)
+	}
+	wantOverride := []string{
+		exe,
+		"--host",
+		"127.0.0.1",
+		"--port",
+		strconv.Itoa(port),
+		"--alias",
+		"edited",
+		"--sentinel",
+		"two words",
+	}
+	if !reflect.DeepEqual(edited.Command, wantOverride) {
+		t.Fatalf("edited command preview = %#v, want %#v", edited.Command, wantOverride)
+	}
+
+	var childOutput bytes.Buffer
+	supervisor.stdoutTee = &childOutput
+	supervisor.stderrTee = &childOutput
+	if err := supervisor.StartRunner(context.Background(), runnerID); err != nil {
+		t.Fatalf("start runner with edited command: %v", err)
+	}
+	args := readHelperArgs(t, argsFile, &childOutput, 1)
+	if !strings.Contains(args, "--alias edited") || !strings.Contains(args, "--sentinel two words") {
+		t.Fatalf("helper args = %q, want edited command args", args)
+	}
+	running, ok := supervisor.Runner(runnerID)
+	if !ok {
+		t.Fatalf("runner %q not found after start", runnerID)
+	}
+	if !reflect.DeepEqual(running.Command, wantOverride) {
+		t.Fatalf("running command = %#v, want override %#v", running.Command, wantOverride)
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := supervisor.StopRunner(stopCtx, runnerID); err != nil {
+		t.Fatalf("stop runner: %v", err)
 	}
 }
 
@@ -804,6 +904,17 @@ func shellQuote(value string) string {
 
 func isWindows() bool {
 	return filepath.Separator == '\\'
+}
+
+func freeLocalPort(t *testing.T) int {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on free port: %v", err)
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
 }
 
 func TestSupervisorLiteRTHelperProcess(t *testing.T) {

@@ -467,6 +467,94 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 	}
 }
 
+func TestRunnerPatchAcceptsCommandOverrides(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DisableDefaultLiteRT: true,
+	})
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/sidecar/v1/runners",
+		strings.NewReader(`{
+			"id": "main-llamacpp-command",
+			"runtime": "llamacpp",
+			"role": "main",
+			"backend": "cpu",
+			"modelPath": "models/llamacpp/main/gemma.gguf",
+			"modelId": "gemma4-gguf",
+			"host": "127.0.0.1",
+			"port": 9491,
+			"launch": false,
+			"upstream": "http://127.0.0.1:9491"
+		}`),
+	)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d: %s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+
+	commandLineReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/sidecar/v1/runners/main-llamacpp-command",
+		strings.NewReader(`{
+			"commandLine": "llama-server --host 127.0.0.1 --port 9491 --alias edited-main"
+		}`),
+	)
+	commandLineRec := httptest.NewRecorder()
+	handler.ServeHTTP(commandLineRec, commandLineReq)
+	if commandLineRec.Code != http.StatusOK {
+		t.Fatalf(
+			"commandLine patch status = %d, want %d: %s",
+			commandLineRec.Code,
+			http.StatusOK,
+			commandLineRec.Body.String(),
+		)
+	}
+	var commandLineBody struct {
+		Runner RunnerSnapshot `json:"runner"`
+	}
+	if err := json.NewDecoder(commandLineRec.Body).Decode(&commandLineBody); err != nil {
+		t.Fatalf("decode commandLine patch response: %v", err)
+	}
+	if got := strings.Join(commandLineBody.Runner.Command, " "); got != "llama-server --host 127.0.0.1 --port 9491 --alias edited-main" {
+		t.Fatalf("commandLine patch command = %q", got)
+	}
+
+	commandReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/sidecar/v1/runners/main-llamacpp-command",
+		strings.NewReader(`{
+			"command": ["custom-runner", "--host", "127.0.0.1", "--port", "9491", "--flag", "two words"]
+		}`),
+	)
+	commandRec := httptest.NewRecorder()
+	handler.ServeHTTP(commandRec, commandReq)
+	if commandRec.Code != http.StatusOK {
+		t.Fatalf(
+			"command patch status = %d, want %d: %s",
+			commandRec.Code,
+			http.StatusOK,
+			commandRec.Body.String(),
+		)
+	}
+	var commandBody struct {
+		Runner RunnerSnapshot `json:"runner"`
+	}
+	if err := json.NewDecoder(commandRec.Body).Decode(&commandBody); err != nil {
+		t.Fatalf("decode command patch response: %v", err)
+	}
+	wantCommand := []string{"custom-runner", "--host", "127.0.0.1", "--port", "9491", "--flag", "two words"}
+	if got := strings.Join(commandBody.Runner.Command, "\x00"); got != strings.Join(wantCommand, "\x00") {
+		t.Fatalf("command patch command = %#v, want %#v", commandBody.Runner.Command, wantCommand)
+	}
+}
+
 func TestRunnerCloseEndpointRemovesRunnerAndRoute(t *testing.T) {
 	t.Parallel()
 
@@ -1596,6 +1684,8 @@ func testSupervisorRunnerSpec(spec RunnerSpec) supervisor.RunnerSpec {
 		Port:             spec.Port,
 		Launch:           spec.Launch,
 		Upstream:         spec.Upstream,
+		Command:          append([]string(nil), spec.Command...),
+		CommandLine:      spec.CommandLine,
 		HuggingFaceToken: spec.HuggingFaceToken,
 		Verbose:          spec.Verbose,
 	}
@@ -1613,6 +1703,8 @@ func testSupervisorRunnerPatch(patch RunnerPatch) supervisor.RunnerPatch {
 		Port:             patch.Port,
 		Launch:           patch.Launch,
 		Upstream:         patch.Upstream,
+		Command:          append([]string(nil), patch.Command...),
+		CommandLine:      patch.CommandLine,
 		HuggingFaceToken: patch.HuggingFaceToken,
 		Verbose:          patch.Verbose,
 	}

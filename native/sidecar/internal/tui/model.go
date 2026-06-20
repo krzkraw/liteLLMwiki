@@ -495,6 +495,11 @@ func (m Model) handleBottomBarAction(x int, y int) (Model, tea.Cmd, bool) {
 		if runner, ok := m.activeRunner(); ok {
 			return m, m.runnerActionCmd("restart", runner.ID), true
 		}
+	case "runner-edit-command":
+		if runner, ok := m.activeRunner(); ok {
+			m.edit = newRunnerEdit(runner, "commandLine", "Command", runnerCommandLine(runner.Command), false)
+			return m, nil, true
+		}
 	case "runner-close":
 		if runner, ok := m.activeRunner(); ok {
 			return m, m.runnerActionCmd("close", runner.ID), true
@@ -842,6 +847,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if runner, ok := m.activeRunner(); ok {
+			if value == "C" {
+				m.edit = newRunnerEdit(runner, "commandLine", "Command", runnerCommandLine(runner.Command), false)
+				return m, nil
+			}
 			switch strings.ToLower(value) {
 			case "b":
 				backend := nextBackend(runner.Backend)
@@ -1605,7 +1614,7 @@ func (m Model) bottomActionBarView() string {
 			style = style.Bold(true).
 				Foreground(lipgloss.Color(palette.actionFG)).
 				Background(lipgloss.Color(palette.actionBG))
-		case "runner-stop", "runner-restart", "runner-close":
+		case "runner-stop", "runner-restart", "runner-edit-command", "runner-close":
 			style = style.Bold(true).Foreground(lipgloss.Color(palette.variantHeader))
 		case "hint":
 			style = style.Faint(true)
@@ -1655,6 +1664,7 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 				bottomActionSegment{id: "runner-start", label: "Start"},
 				bottomActionSegment{id: "runner-stop", label: "Stop"},
 				bottomActionSegment{id: "runner-restart", label: "Restart"},
+				bottomActionSegment{id: "runner-edit-command", label: "Edit Cmd"},
 				bottomActionSegment{id: "runner-close", label: "X Close"},
 			)
 		}
@@ -1752,8 +1762,8 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 		basePath := "/sidecar/v1/runners/" + runner.ID
 		lines = append(
 			lines,
-			fmt.Sprintf("Runner %s: s Start | x Stop | r Restart | c Close", runner.ID),
-			"Edit: b/p/h/i/m/e/u/f/l/v/t/o",
+			fmt.Sprintf("Runner %s: s Start | x Stop | r Restart | C Edit Cmd | c Close", runner.ID),
+			"Edit: b/p/h/i/m/e/u/f/C/l/v/t/o",
 			"API: RunnerController + "+basePath,
 			"Route: "+runnerRoleRoute(runner.Role)+" -> "+fallback(runner.Upstream, "unavailable"),
 		)
@@ -2209,10 +2219,14 @@ func (m Model) recentActivityLines(limit int) []string {
 }
 
 func (m Model) runnerView(runner server.RunnerSnapshot) string {
-	return m.panelGrid(
+	panels := []panelSpec{
 		panelSpec{"Runner " + runner.ID, m.runnerSummaryLines(runner), "82"},
 		panelSpec{"Routes / Controls", m.runnerRouteControlLines(runner), "45"},
-	)
+	}
+	if editor := m.runnerEditorSpec(runner); editor.title != "" {
+		panels = append(panels, editor)
+	}
+	return m.panelGrid(panels...)
 }
 
 func (m Model) runnerSummaryLines(runner server.RunnerSnapshot) []string {
@@ -2225,6 +2239,7 @@ func (m Model) runnerSummaryLines(runner server.RunnerSnapshot) []string {
 		formatKV("Model ID", fallback(runner.ModelID, "not configured")),
 		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
 		formatKV("PID", fallbackInt(runner.PID, "not running")),
+		formatKV("Command", fallback(runnerCommandLine(runner.Command), "not configured")),
 	}
 	if runner.Detail != "" {
 		lines = append(lines, formatKV("Detail", runner.Detail))
@@ -2239,7 +2254,7 @@ func (m Model) runnerRouteControlLines(runner server.RunnerSnapshot) []string {
 		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
 		formatKV("Models", endpointPath(runner.Upstream, "/v1/models")),
 		"",
-		"Actions ---- s Start -- x Stop -- r Restart -- c Close",
+		"Actions ---- s Start -- x Stop -- r Restart -- C Edit Cmd -- c Close",
 		"POST " + basePath + "/start",
 		"POST " + basePath + "/stop",
 		"POST " + basePath + "/restart",
@@ -2423,6 +2438,12 @@ func runnerSettingsMatrixLines(runner server.RunnerSnapshot) []string {
 			"upstream",
 		),
 		runnerSettingsMatrixLine(
+			"C",
+			"Command",
+			fallback(runnerCommandLine(runner.Command), "not configured"),
+			"commandLine",
+		),
+		runnerSettingsMatrixLine(
 			"f",
 			"HF token",
 			"not shown",
@@ -2476,7 +2497,7 @@ func (m Model) runnerControlLines(runner server.RunnerSnapshot) []string {
 	return []string{
 		"Controls",
 		"Actions",
-		"s Start   x Stop   r Restart   c Close",
+		"s Start   x Stop   r Restart   C Edit Cmd   c Close",
 		"POST " + basePath + "/start",
 		"POST " + basePath + "/stop",
 		"POST " + basePath + "/restart",
@@ -2486,7 +2507,7 @@ func (m Model) runnerControlLines(runner server.RunnerSnapshot) []string {
 		"Settings editor",
 		"b Backend CPU/GPU   l Launch managed/external   v Verbose",
 		"t Runtime   o Role",
-		"p Port   h Host   i Model ID",
+		"p Port   h Host   i Model ID   C Command",
 		"m Model path   e Executable   u Upstream   f HF token",
 		"PATCH " + basePath,
 	}
@@ -3619,6 +3640,8 @@ func runnerEditPatch(edit runnerEdit) (server.RunnerPatch, string, error) {
 		return server.RunnerPatch{Executable: value}, value, nil
 	case "upstream":
 		return server.RunnerPatch{Upstream: value}, value, nil
+	case "commandLine":
+		return server.RunnerPatch{CommandLine: &value}, value, nil
 	case "huggingFaceToken":
 		return server.RunnerPatch{HuggingFaceToken: &value}, tokenNoticeValue(value), nil
 	default:
@@ -4847,11 +4870,11 @@ func runnerLogsGlyph(runner server.RunnerSnapshot, cached int) string {
 func runnerNextAction(runner server.RunnerSnapshot) string {
 	switch strings.ToLower(runner.State) {
 	case "running":
-		return "use x/r for process control or edit b/p/h/i/m/e/u/f/l/v/t/o"
+		return "use x/r for process control or edit b/p/h/i/m/e/u/f/C/l/v/t/o"
 	case "starting":
 		return "wait for health, then inspect logs if it stalls"
 	case "created", "stopped", "exited":
-		return "press s to start or edit b/p/h/i/m/e/u/f/l/v/t/o"
+		return "press s to start or edit b/p/h/i/m/e/u/f/C/l/v/t/o"
 	case "unavailable", "error", "missing":
 		return "inspect Last error, model path, executable, and logs"
 	default:
@@ -4888,6 +4911,27 @@ func runnerSpecLaunchMode(spec server.RunnerSpec) string {
 		return "external upstream"
 	}
 	return "managed by sidecar"
+}
+
+func runnerCommandLine(command []string) string {
+	if len(command) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(command))
+	for _, arg := range command {
+		if strings.TrimSpace(arg) == "" {
+			continue
+		}
+		parts = append(parts, shellQuoteArg(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellQuoteArg(arg string) string {
+	if !strings.ContainsAny(arg, " \t\n\r'\"\\") {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
 }
 
 func wizardCommandPreview(spec server.RunnerSpec) string {
@@ -4939,13 +4983,6 @@ func formatLogEntry(entry server.LogEntry) string {
 		entry.Stream,
 		entry.Line,
 	)
-}
-
-func commandLine(command []string) string {
-	if len(command) == 0 {
-		return "not started"
-	}
-	return strings.Join(command, " ")
 }
 
 func capabilitiesLine(capabilities map[string]string) string {

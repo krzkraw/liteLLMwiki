@@ -137,6 +137,8 @@ type RunnerSpec struct {
 	Port             int
 	Launch           bool
 	Upstream         string
+	Command          []string
+	CommandLine      string
 	HuggingFaceToken string
 	Verbose          bool
 }
@@ -152,6 +154,8 @@ type RunnerPatch struct {
 	Port             int
 	Launch           *bool
 	Upstream         string
+	Command          []string
+	CommandLine      *string
 	HuggingFaceToken *string
 	Verbose          *bool
 }
@@ -219,6 +223,7 @@ type runnerRecord struct {
 	snapshot         RunnerSnapshot
 	launch           bool
 	executable       string
+	commandOverride  []string
 	huggingFaceToken string
 	verbose          bool
 	mode             RuntimeMode
@@ -265,7 +270,7 @@ func (s *Supervisor) addDefaultLiteRTRunner(config LiteRTConfig) {
 	}
 
 	upstream := configuredUpstream(config.Launch, config.Upstream, host, port)
-	s.runners[DefaultMainRunnerID] = &runnerRecord{
+	record := &runnerRecord{
 		snapshot: RunnerSnapshot{
 			ID:         DefaultMainRunnerID,
 			Runtime:    RuntimeLiteRT,
@@ -288,6 +293,8 @@ func (s *Supervisor) addDefaultLiteRTRunner(config LiteRTConfig) {
 		verbose:          config.Verbose,
 		mode:             initialRuntimeMode(config.Verbose),
 	}
+	record.snapshot.Command = runnerCommandPreview(record)
+	s.runners[DefaultMainRunnerID] = record
 	s.routes[RoleMain] = DefaultMainRunnerID
 }
 
@@ -322,10 +329,12 @@ func (s *Supervisor) CreateRunner(spec RunnerSpec) (string, error) {
 		},
 		launch:           normalized.Launch,
 		executable:       normalized.Executable,
+		commandOverride:  append([]string(nil), normalized.Command...),
 		huggingFaceToken: strings.TrimSpace(normalized.HuggingFaceToken),
 		verbose:          normalized.Verbose,
 		mode:             initialRuntimeMode(normalized.Verbose),
 	}
+	record.snapshot.Command = runnerCommandPreview(record)
 
 	s.runners[record.snapshot.ID] = record
 	s.routes[record.snapshot.Role] = record.snapshot.ID
@@ -372,6 +381,7 @@ func (s *Supervisor) UpdateRunner(id string, patch RunnerPatch) error {
 	oldRole := record.snapshot.Role
 	record.launch = normalized.Launch
 	record.executable = normalized.Executable
+	record.commandOverride = append([]string(nil), normalized.Command...)
 	if patch.HuggingFaceToken != nil {
 		record.huggingFaceToken = strings.TrimSpace(*patch.HuggingFaceToken)
 	}
@@ -390,7 +400,6 @@ func (s *Supervisor) UpdateRunner(id string, patch RunnerPatch) error {
 	record.snapshot.Launch = normalized.Launch
 	record.snapshot.Verbose = record.verbose
 	record.snapshot.PID = 0
-	record.snapshot.Command = nil
 	record.snapshot.Upstream = configuredUpstream(
 		normalized.Launch,
 		normalized.Upstream,
@@ -400,6 +409,7 @@ func (s *Supervisor) UpdateRunner(id string, patch RunnerPatch) error {
 	record.snapshot.State = initialState(normalized.Launch)
 	record.snapshot.Detail = initialDetail(normalized.Launch)
 	record.snapshot.LastError = ""
+	record.snapshot.Command = runnerCommandPreview(record)
 	if oldRole != normalized.Role {
 		delete(s.routes, oldRole)
 	}
@@ -643,40 +653,48 @@ func (s *Supervisor) startRecord(ctx context.Context, record *runnerRecord) erro
 }
 
 func (s *Supervisor) startLlamaRunner(ctx context.Context, record *runnerRecord) error {
-	exe, err := findExecutable(record.executable, DefaultLlamaExecutableName)
-	if err != nil {
-		s.markUnavailable(record, err)
-		return err
-	}
-
 	snapshot := s.runnerSnapshot(record)
-	if strings.TrimSpace(snapshot.ModelPath) == "" {
-		err := errors.New("llama.cpp model path is required")
-		s.markUnavailable(record, err)
-		return err
-	}
-	if stat, err := os.Stat(snapshot.ModelPath); err != nil || stat.IsDir() {
-		if err == nil {
-			err = fmt.Errorf("%s is a directory", snapshot.ModelPath)
+	command := append([]string(nil), record.commandOverride...)
+	if len(command) == 0 {
+		exe, err := findExecutable(record.executable, DefaultLlamaExecutableName)
+		if err != nil {
+			s.markUnavailable(record, err)
+			return err
 		}
-		err = fmt.Errorf("llama.cpp model file %q is not usable: %w", snapshot.ModelPath, err)
-		s.markUnavailable(record, err)
-		return err
+		if strings.TrimSpace(snapshot.ModelPath) == "" {
+			err := errors.New("llama.cpp model path is required")
+			s.markUnavailable(record, err)
+			return err
+		}
+		if stat, err := os.Stat(snapshot.ModelPath); err != nil || stat.IsDir() {
+			if err == nil {
+				err = fmt.Errorf("%s is a directory", snapshot.ModelPath)
+			}
+			err = fmt.Errorf("llama.cpp model file %q is not usable: %w", snapshot.ModelPath, err)
+			s.markUnavailable(record, err)
+			return err
+		}
+		command = buildDefaultRunnerCommand(record, exe)
 	}
 
+	exe := command[0]
 	version := detectExecutableVersion(exe)
 	s.updateRecord(record, func(next *RunnerSnapshot) {
 		next.State = StateStarting
 		next.Executable = exe
 		next.Version = version
 		next.Upstream = litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
-		next.Command = nil
+		next.Command = append([]string(nil), command...)
 		next.Detail = "Starting llama.cpp OpenAI-compatible server."
 		next.LastError = ""
 	})
 
 	processCtx := context.WithoutCancel(ctx)
-	cmd := buildLlamaServerCommand(processCtx, exe, snapshot)
+	cmd, err := commandContext(processCtx, command)
+	if err != nil {
+		s.markUnavailable(record, err)
+		return err
+	}
 	cmd.Stdout = s.writer(record.snapshot.ID, "stdout", s.stdoutTee)
 	cmd.Stderr = s.writer(record.snapshot.ID, "stderr", s.stderrTee)
 	if err := cmd.Start(); err != nil {
@@ -714,17 +732,21 @@ func (s *Supervisor) startLlamaRunner(ctx context.Context, record *runnerRecord)
 }
 
 func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord) error {
-	exe, err := findLiteRTExecutable(record.executable)
-	if err != nil {
-		s.markUnavailable(record, err)
-		return err
-	}
-
 	snapshot := s.runnerSnapshot(record)
 	modelFile := snapshot.ModelPath
 	if modelFile == "" {
 		modelFile = litert.FindDefaultModelFile()
 	}
+	command := append([]string(nil), record.commandOverride...)
+	if len(command) == 0 {
+		exe, err := findLiteRTExecutable(record.executable)
+		if err != nil {
+			s.markUnavailable(record, err)
+			return err
+		}
+		command = buildDefaultRunnerCommand(record, exe)
+	}
+	exe := command[0]
 	version := litert.DetectVersion(exe)
 
 	s.updateRecord(record, func(next *RunnerSnapshot) {
@@ -733,7 +755,7 @@ func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord
 		next.Version = version
 		next.ModelPath = modelFile
 		next.Upstream = litert.BuildUpstreamURL(snapshot.Host, snapshot.Port)
-		next.Command = nil
+		next.Command = append([]string(nil), command...)
 		next.Detail = "Starting LiteRT-LM OpenAI-compatible server."
 		next.LastError = ""
 	})
@@ -754,7 +776,20 @@ func (s *Supervisor) startLiteRTRunner(ctx context.Context, record *runnerRecord
 
 	serveVerbose := record.mode == RuntimeModeDebug || record.verbose
 	processCtx := context.WithoutCancel(ctx)
-	cmd := litert.BuildServeCommandContext(processCtx, exe, snapshot.Host, snapshot.Port, serveVerbose)
+	if len(record.commandOverride) == 0 {
+		command = litert.BuildServeCommandContext(
+			processCtx,
+			exe,
+			snapshot.Host,
+			snapshot.Port,
+			serveVerbose,
+		).Args
+	}
+	cmd, err := commandContext(processCtx, command)
+	if err != nil {
+		s.markUnavailable(record, err)
+		return err
+	}
 	cmd.Stdout = s.writer(record.snapshot.ID, "stdout", s.stdoutTee)
 	cmd.Stderr = s.writer(record.snapshot.ID, "stderr", s.stderrTee)
 	if err := cmd.Start(); err != nil {
@@ -1080,6 +1115,7 @@ func recordSpec(record *runnerRecord) RunnerSpec {
 		Port:             record.snapshot.Port,
 		Launch:           record.launch,
 		Upstream:         record.snapshot.Upstream,
+		Command:          append([]string(nil), record.commandOverride...),
 		HuggingFaceToken: record.huggingFaceToken,
 		Verbose:          record.verbose,
 	}
@@ -1115,6 +1151,13 @@ func applyRunnerPatch(spec *RunnerSpec, patch RunnerPatch) {
 	}
 	if patch.Upstream != "" {
 		spec.Upstream = patch.Upstream
+	}
+	if patch.CommandLine != nil {
+		spec.Command = nil
+		spec.CommandLine = *patch.CommandLine
+	} else if patch.Command != nil {
+		spec.Command = append([]string(nil), patch.Command...)
+		spec.CommandLine = ""
 	}
 	if patch.HuggingFaceToken != nil {
 		spec.HuggingFaceToken = strings.TrimSpace(*patch.HuggingFaceToken)
@@ -1173,6 +1216,12 @@ func normalizeRunnerSpec(spec RunnerSpec, fallbackID string) (RunnerSpec, error)
 	if spec.Port == 0 {
 		return RunnerSpec{}, errors.New("runner port is required")
 	}
+	command, err := normalizedCommandOverride(spec.Command, spec.CommandLine)
+	if err != nil {
+		return RunnerSpec{}, err
+	}
+	spec.Command = command
+	spec.CommandLine = ""
 	return spec, nil
 }
 
@@ -1247,6 +1296,131 @@ func findExecutable(configured string, defaultName string) (string, error) {
 		return resolveExecutablePath(configured)
 	}
 	return resolveExecutablePath(defaultName)
+}
+
+func runnerCommandPreview(record *runnerRecord) []string {
+	if len(record.commandOverride) > 0 {
+		return append([]string(nil), record.commandOverride...)
+	}
+
+	switch record.snapshot.Runtime {
+	case RuntimeLiteRT:
+		return buildDefaultRunnerCommand(record, runnerExecutable(record, litert.DefaultExecutableName))
+	case RuntimeLlamaCPP:
+		return buildDefaultRunnerCommand(record, runnerExecutable(record, DefaultLlamaExecutableName))
+	default:
+		return nil
+	}
+}
+
+func runnerExecutable(record *runnerRecord, defaultName string) string {
+	if strings.TrimSpace(record.executable) != "" {
+		return strings.TrimSpace(record.executable)
+	}
+	if strings.TrimSpace(record.snapshot.Executable) != "" {
+		return strings.TrimSpace(record.snapshot.Executable)
+	}
+	return defaultName
+}
+
+func buildDefaultRunnerCommand(record *runnerRecord, exe string) []string {
+	snapshot := record.snapshot
+	switch snapshot.Runtime {
+	case RuntimeLiteRT:
+		serveVerbose := record.mode == RuntimeModeDebug || record.verbose
+		cmd := litert.BuildServeCommandContext(
+			context.Background(),
+			exe,
+			snapshot.Host,
+			snapshot.Port,
+			serveVerbose,
+		)
+		return append([]string(nil), cmd.Args...)
+	case RuntimeLlamaCPP:
+		cmd := buildLlamaServerCommand(context.Background(), exe, snapshot)
+		return append([]string(nil), cmd.Args...)
+	default:
+		return nil
+	}
+}
+
+func commandContext(ctx context.Context, command []string) (*exec.Cmd, error) {
+	if len(command) == 0 {
+		return nil, errors.New("runner command is empty")
+	}
+	return exec.CommandContext(ctx, command[0], command[1:]...), nil
+}
+
+func normalizedCommandOverride(command []string, commandLine string) ([]string, error) {
+	if strings.TrimSpace(commandLine) != "" {
+		parsed, err := splitCommandLine(commandLine)
+		if err != nil {
+			return nil, err
+		}
+		return normalizedCommandArgs(parsed), nil
+	}
+	return normalizedCommandArgs(command), nil
+}
+
+func normalizedCommandArgs(command []string) []string {
+	normalized := make([]string, 0, len(command))
+	for _, arg := range command {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue
+		}
+		normalized = append(normalized, arg)
+	}
+	return normalized
+}
+
+func splitCommandLine(line string) ([]string, error) {
+	var args []string
+	var builder strings.Builder
+	var inSingle bool
+	var inDouble bool
+	var escaped bool
+	var hasToken bool
+
+	flush := func() {
+		if !hasToken {
+			return
+		}
+		args = append(args, builder.String())
+		builder.Reset()
+		hasToken = false
+	}
+
+	for _, char := range line {
+		switch {
+		case escaped:
+			builder.WriteRune(char)
+			hasToken = true
+			escaped = false
+		case char == '\\' && !inSingle:
+			escaped = true
+			hasToken = true
+		case char == '\'' && !inDouble:
+			inSingle = !inSingle
+			hasToken = true
+		case char == '"' && !inSingle:
+			inDouble = !inDouble
+			hasToken = true
+		case (char == ' ' || char == '\t' || char == '\n' || char == '\r') && !inSingle && !inDouble:
+			flush()
+		default:
+			builder.WriteRune(char)
+			hasToken = true
+		}
+	}
+	if escaped {
+		return nil, errors.New("runner command has unfinished escape")
+	}
+	if inSingle || inDouble {
+		return nil, errors.New("runner command has unclosed quote")
+	}
+	flush()
+	return args, nil
 }
 
 func buildLlamaServerCommand(ctx context.Context, exe string, snapshot RunnerSnapshot) *exec.Cmd {

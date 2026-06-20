@@ -64,9 +64,10 @@ Up/Down selects a backend row, and Enter or Space toggles it. Toggling writes
 backend config file when it does not exist.
 
 Runner tabs show basic status and route/control panels with runtime, role,
-backend, model, upstream, PID, `s`/`x`/`r` start/stop/restart actions, and an
-`X Close` bottom action that stops a running runner and removes its tab. Launch
-Wizard and runner tabs use the same responsive body layout: small
+backend, model, upstream, PID, the command argv that will be used for the next
+managed start, `s`/`x`/`r` start/stop/restart actions, `C`/`Edit Cmd` command
+editing, and an `X Close` bottom action that stops a running runner and removes
+its tab. Launch Wizard and runner tabs use the same responsive body layout: small
 terminals render full-width stacked panels, and wide terminals render two
 masonry-balanced columns so the right side of the terminal is used without
 bringing back the old cluster of diagnostic boxes.
@@ -144,9 +145,12 @@ POST /sidecar/v1/runners/{id}/close
 
 `POST /sidecar/v1/runners` accepts runner fields such as `id`, `runtime`,
 `role`, `backend`, `executable`, `modelPath`, `modelId`, `host`, `port`,
-`launch`, and `upstream`. `PATCH /sidecar/v1/runners/{id}` accepts the same
-fields as a partial update for a runner that is not currently starting or
-running. The same routes are available through WebSocket `api.request` frames.
+`launch`, `upstream`, `command`, and `commandLine`. `PATCH
+/sidecar/v1/runners/{id}` accepts the same fields as a partial update for a
+runner that is not currently starting or running. `command` is structured argv;
+`commandLine` is a shell-style string for local TUI edits. When no command
+override is configured, snapshots expose the generated default command preview.
+The same routes are available through WebSocket `api.request` frames.
 Long-lived start and restart operations are detached from the request context,
 while stop and close operations still honor the caller timeout. Closing a
 runner stops a managed running process when needed, removes owned route state,

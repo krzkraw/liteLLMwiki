@@ -66,34 +66,38 @@ type RuntimeController interface {
 var ErrRunnerNotFound = errors.New("runner not found")
 
 type RunnerSpec struct {
-	ID               string `json:"id,omitempty"`
-	Runtime          string `json:"runtime,omitempty"`
-	Role             string `json:"role,omitempty"`
-	Backend          string `json:"backend,omitempty"`
-	Executable       string `json:"executable,omitempty"`
-	ModelPath        string `json:"modelPath,omitempty"`
-	ModelID          string `json:"modelId,omitempty"`
-	Host             string `json:"host,omitempty"`
-	Port             int    `json:"port,omitempty"`
-	Launch           bool   `json:"launch"`
-	Upstream         string `json:"upstream,omitempty"`
-	HuggingFaceToken string `json:"huggingfaceToken,omitempty"`
-	Verbose          bool   `json:"verbose,omitempty"`
+	ID               string   `json:"id,omitempty"`
+	Runtime          string   `json:"runtime,omitempty"`
+	Role             string   `json:"role,omitempty"`
+	Backend          string   `json:"backend,omitempty"`
+	Executable       string   `json:"executable,omitempty"`
+	ModelPath        string   `json:"modelPath,omitempty"`
+	ModelID          string   `json:"modelId,omitempty"`
+	Host             string   `json:"host,omitempty"`
+	Port             int      `json:"port,omitempty"`
+	Launch           bool     `json:"launch"`
+	Upstream         string   `json:"upstream,omitempty"`
+	Command          []string `json:"command,omitempty"`
+	CommandLine      string   `json:"commandLine,omitempty"`
+	HuggingFaceToken string   `json:"huggingfaceToken,omitempty"`
+	Verbose          bool     `json:"verbose,omitempty"`
 }
 
 type RunnerPatch struct {
-	Runtime          string  `json:"runtime,omitempty"`
-	Role             string  `json:"role,omitempty"`
-	Backend          string  `json:"backend,omitempty"`
-	Executable       string  `json:"executable,omitempty"`
-	ModelPath        string  `json:"modelPath,omitempty"`
-	ModelID          string  `json:"modelId,omitempty"`
-	Host             string  `json:"host,omitempty"`
-	Port             int     `json:"port,omitempty"`
-	Launch           *bool   `json:"launch,omitempty"`
-	Upstream         string  `json:"upstream,omitempty"`
-	HuggingFaceToken *string `json:"huggingfaceToken,omitempty"`
-	Verbose          *bool   `json:"verbose,omitempty"`
+	Runtime          string   `json:"runtime,omitempty"`
+	Role             string   `json:"role,omitempty"`
+	Backend          string   `json:"backend,omitempty"`
+	Executable       string   `json:"executable,omitempty"`
+	ModelPath        string   `json:"modelPath,omitempty"`
+	ModelID          string   `json:"modelId,omitempty"`
+	Host             string   `json:"host,omitempty"`
+	Port             int      `json:"port,omitempty"`
+	Launch           *bool    `json:"launch,omitempty"`
+	Upstream         string   `json:"upstream,omitempty"`
+	Command          []string `json:"command,omitempty"`
+	CommandLine      *string  `json:"commandLine,omitempty"`
+	HuggingFaceToken *string  `json:"huggingfaceToken,omitempty"`
+	Verbose          *bool    `json:"verbose,omitempty"`
 }
 
 type RunnerSnapshot struct {

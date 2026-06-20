@@ -324,7 +324,7 @@ func TestLaunchWizardMouseUsesVisibleTerminalCellsWithNotice(t *testing.T) {
 		t.Fatalf("visible-cell click did not select llama.cpp:\n%s", model.View().Content)
 	}
 
-	x, y = renderedCellPosition(t, model.View().Content, "-ctk")
+	x, y = renderedCellPosition(t, model.View().Content, "[ctk]")
 	next, cmd = model.Update(leftClick(x, y))
 	if cmd != nil {
 		t.Fatalf("option visible-cell click returned unexpected command")
@@ -382,7 +382,7 @@ func TestLaunchWizardScrolledManagedScreenOptionClickUsesVisibleCells(t *testing
 	model.toggleWizardRuntime()
 	model.scrollOffset = 8
 
-	x, y := renderedCellPosition(t, model.View().Content, "-ctk")
+	x, y := renderedCellPosition(t, model.View().Content, "[ctk]")
 	if hit, ok := model.buttonHitAt(x, y); !ok || hit.action != "wizard-option" || hit.payload != "cache-type-k" {
 		t.Fatalf("visible option hit = %#v ok=%v at %d,%d\n%s", hit, ok, x, y, model.View().Content)
 	}
@@ -505,7 +505,7 @@ func TestBottomBarListsGlobalMenuAndCurrentTabActions(t *testing.T) {
 	next, _ := model.Update(textKey("2"))
 	updated := next.(Model)
 	wizardBottom := lastNonEmptyLine(updated.View().Content)
-	if !strings.Contains(wizardBottom, "Wizard: click toggles | k Cache K | Enter Start") {
+	if !strings.Contains(wizardBottom, "Wizard: click toggles | k Cache K | c Command | Enter Start") {
 		t.Fatalf("wizard bottom action bar = %q:\n%s", wizardBottom, updated.View().Content)
 	}
 }
@@ -879,6 +879,59 @@ func TestLaunchWizardOptionBarsDoNotUseDecorativeDashesOrTextFainting(t *testing
 	}
 	if strings.Contains(renderer, "Faint(true)") {
 		t.Fatalf("wizard option renderer should dim colors, not text")
+	}
+}
+
+func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 180
+	model.height = 40
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+
+	lines := model.wizardCLIOptionLines()
+	if len(lines) == 0 {
+		t.Fatalf("wizard CLI options empty")
+	}
+	first := ansi.Strip(lines[0])
+	if strings.Contains(first, "-") {
+		t.Fatalf("CLI option row should not show flag prefixes: %q", first)
+	}
+	if !strings.Contains(first, "[c]") || !strings.Contains(first, "Context size") {
+		t.Fatalf("CLI option row should be button-like with description: %q", first)
+	}
+
+	x, y := renderedTextPosition(t, model.View().Content, "[ctk]")
+	next, cmd := model.Update(leftClick(x, y))
+	if cmd != nil {
+		t.Fatalf("option click returned unexpected command")
+	}
+	model = next.(Model)
+	view := model.View().Content
+
+	previewRow := lineNumberContaining(view, "Command Preview")
+	editorRow := lineNumberContaining(view, "CLI Option ctk")
+	if previewRow < 0 || editorRow <= previewRow {
+		t.Fatalf("option editor should render below command preview:\n%s", view)
+	}
+	for _, expected := range []string{
+		"--cache-type-k",
+		"KV cache K quantization type.",
+		"Input",
+		"[ Save ]",
+		"[ Reset ]",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("option editor missing %q:\n%s", expected, view)
+		}
 	}
 }
 
@@ -1395,7 +1448,7 @@ func TestLaunchWizardOptionModalSaveAndClearUpdateCommandPreview(t *testing.T) {
 	model.setActiveTab("wizard")
 	model.toggleWizardRuntime()
 
-	x, y := renderedTextPosition(t, model.View().Content, "-ctk")
+	x, y := renderedTextPosition(t, model.View().Content, "[ctk]")
 	next, cmd := model.Update(leftClick(x, y))
 	if cmd != nil {
 		t.Fatalf("option click returned unexpected command")
@@ -1410,7 +1463,7 @@ func TestLaunchWizardOptionModalSaveAndClearUpdateCommandPreview(t *testing.T) {
 		"Default",
 		"f32, f16, bf16, q8_0, q4_0",
 		"[ Save ]",
-		"[ Clear ]",
+		"[ Reset ]",
 		"[ X ]",
 	} {
 		if !strings.Contains(model.View().Content, expected) {
@@ -1433,10 +1486,10 @@ func TestLaunchWizardOptionModalSaveAndClearUpdateCommandPreview(t *testing.T) {
 		t.Fatalf("preview did not include saved override:\n%s", model.View().Content)
 	}
 
-	x, y = renderedTextPosition(t, model.View().Content, "-ctk")
+	x, y = renderedTextPosition(t, model.View().Content, "[ctk]")
 	next, _ = model.Update(leftClick(x, y))
 	model = next.(Model)
-	x, y = renderedTextPosition(t, model.View().Content, "[ Clear ]")
+	x, y = renderedTextPosition(t, model.View().Content, "[ Reset ]")
 	next, cmd = model.Update(leftClick(x, y))
 	if cmd != nil {
 		t.Fatalf("modal clear returned unexpected command")
@@ -1460,7 +1513,7 @@ func TestLaunchWizardBooleanOptionSavesBareFlag(t *testing.T) {
 	model.height = 36
 	model.setActiveTab("wizard")
 
-	x, y := renderedTextPosition(t, model.View().Content, "--verbose")
+	x, y := renderedTextPosition(t, model.View().Content, "[verbose]")
 	next, _ := model.Update(leftClick(x, y))
 	model = next.(Model)
 	x, y = renderedTextPosition(t, model.View().Content, "[ Save ]")
@@ -1471,6 +1524,75 @@ func TestLaunchWizardBooleanOptionSavesBareFlag(t *testing.T) {
 	model = next.(Model)
 	if got := wizardCommandPreviewForTest(t, model); !strings.Contains(got, "--verbose") {
 		t.Fatalf("preview = %q, want bare --verbose", got)
+	}
+}
+
+func TestLaunchWizardCommandPreviewEditSyncsOptions(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 180
+	model.height = 40
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+
+	preview := wizardCommandPreviewForTest(t, model)
+	edited := preview + " -ctk q4_0 --threads 8"
+	x, y := renderedTextPosition(t, model.View().Content, "Command Preview")
+	next, cmd := model.Update(leftClick(x, y))
+	if cmd != nil {
+		t.Fatalf("command preview click returned unexpected command")
+	}
+	model = next.(Model)
+	if model.wizardCommandEdit == nil {
+		t.Fatalf("command preview click did not open editor:\n%s", model.View().Content)
+	}
+	for range model.wizardCommandEdit.input.Value() {
+		next, _ = model.Update(specialKey(tea.KeyBackspace))
+		model = next.(Model)
+	}
+	next, _ = model.Update(textKey(edited))
+	model = next.(Model)
+	next, cmd = model.Update(specialKey(tea.KeyEnter))
+	if cmd != nil {
+		t.Fatalf("command preview save returned unexpected command")
+	}
+	model = next.(Model)
+
+	if got := wizardCommandPreviewForTest(t, model); !strings.Contains(got, "-ctk q4_0") || !strings.Contains(got, "--threads 8") {
+		t.Fatalf("preview did not keep edited args: %q", got)
+	}
+	options := strings.Join(model.wizardCLIOptionLines(), "\n")
+	if !strings.Contains(options, "[ctk]") || !strings.Contains(options, "q4_0") {
+		t.Fatalf("recognized preview flag did not update option value:\n%s", options)
+	}
+	if !strings.Contains(options, "[threads]") || !strings.Contains(options, "8") {
+		t.Fatalf("new preview flag did not appear in options:\n%s", options)
+	}
+
+	withoutDefault := strings.Replace(wizardCommandPreviewForTest(t, model), " --n-gpu-layers 999", "", 1)
+	model.openWizardCommandEdit()
+	for range model.wizardCommandEdit.input.Value() {
+		next, _ = model.Update(specialKey(tea.KeyBackspace))
+		model = next.(Model)
+	}
+	next, _ = model.Update(textKey(withoutDefault))
+	model = next.(Model)
+	next, _ = model.Update(specialKey(tea.KeyEnter))
+	model = next.(Model)
+
+	if strings.Contains(wizardCommandPreviewForTest(t, model), "--n-gpu-layers 999") {
+		t.Fatalf("preview should keep removed generated default removed:\n%s", wizardCommandPreviewForTest(t, model))
+	}
+	options = strings.Join(model.wizardCLIOptionLines(), "\n")
+	if !strings.Contains(options, "[ngl]") {
+		t.Fatalf("default option disappeared from options after removal from preview:\n%s", options)
 	}
 }
 

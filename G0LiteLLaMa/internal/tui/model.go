@@ -126,6 +126,10 @@ type optionModal struct {
 	input  textinput.Model
 }
 
+type wizardCommandEdit struct {
+	input textinput.Model
+}
+
 type buttonHit struct {
 	action  string
 	row     int
@@ -190,7 +194,11 @@ type Model struct {
 	wizardRole             string
 	wizardVariantSelection int
 	wizardModelSelection   int
+	wizardOptionPage       int
 	wizardOptionOverrides  map[string]string
+	wizardCommandExtras    []wizardCommandExtra
+	wizardRemovedDefaults  map[string]bool
+	wizardCommandEdit      *wizardCommandEdit
 	optionModal            *optionModal
 	llamaRuntimeRoot       string
 	llamaRuntimeVariants   []llamaRuntimeVariant
@@ -358,6 +366,7 @@ func NewModel(options ModelOptions) Model {
 		wizardBackend:         "cpu",
 		wizardRole:            "main",
 		wizardOptionOverrides: map[string]string{},
+		wizardRemovedDefaults: map[string]bool{},
 		llamaRuntimeRoot:      options.LlamaRuntimeRoot,
 		backendConfigPath:     resolveBackendConfigPath(options.BackendConfigPath),
 		paletteID:             "neon",
@@ -403,6 +412,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.optionModal != nil {
 			return m.updateOptionModalKey(msg)
 		}
+		if m.wizardCommandEdit != nil {
+			return m.updateWizardCommandEditKey(msg)
+		}
 		if m.runtimeEdit != nil {
 			return m.updateRuntimeEditKey(msg)
 		}
@@ -413,6 +425,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		if m.optionModal != nil {
 			return m.updateOptionModalMouse(msg)
+		}
+		if m.wizardCommandEdit != nil {
+			return m.updateWizardCommandEditMouse(msg)
 		}
 		return m.updateMouse(msg)
 	case tickMsg:
@@ -606,8 +621,13 @@ func (m Model) buttonHitRegistry() []buttonHit {
 
 	if m.optionModal != nil {
 		addTextHit("[ Save ]", "modal-save", "")
-		addTextHit("[ Clear ]", "modal-clear", "")
+		addTextHit("[ Reset ]", "modal-clear", "")
 		addTextHit("[ X ]", "modal-close", "")
+		return hits
+	}
+	if m.wizardCommandEdit != nil {
+		addTextHit("[ Save ]", "wizard-command-save", "")
+		addTextHit("[ X ]", "wizard-command-close", "")
 		return hits
 	}
 
@@ -639,9 +659,12 @@ func (m Model) buttonHitRegistry() []buttonHit {
 		for index, entry := range m.wizardCandidateModels() {
 			addTextHit(entry.Filename, "wizard-model", strconv.Itoa(index))
 		}
-		for _, option := range applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole) {
-			addTokenHit(optionLabel(option), "wizard-option", option.ID)
+		for _, option := range m.visibleWizardCLIOptions() {
+			addTokenHit(wizardOptionButtonText(option), "wizard-option", option.ID)
 		}
+		addTextHit("[ Prev ]", "wizard-options-prev", "")
+		addTextHit("[ Next ]", "wizard-options-next", "")
+		addTextHit("Command Preview", "wizard-command-edit", "")
 		addTextHitOnVisibleLine("[ START ]", "[ START ]", "wizard-start", "")
 	}
 
@@ -661,10 +684,12 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 			m.wizardBackend = "cpu"
 		}
 		m.wizardModelSelection = 0
+		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
 		return m, nil, true
 	case "wizard-backend":
 		m.wizardBackend = hit.payload
+		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
 		return m, nil, true
 	case "wizard-role":
@@ -675,10 +700,25 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 		m.setWizardModelSelection(index)
 		return m, nil, true
 	case "wizard-option":
-		if option, ok := wizardOptionByID(hit.payload); ok {
+		if option, ok := m.wizardOptionByID(hit.payload); ok {
 			m.openOptionModal(option)
 			return m, nil, true
 		}
+	case "wizard-options-prev":
+		m.pageWizardOptions(-1)
+		return m, nil, true
+	case "wizard-options-next":
+		m.pageWizardOptions(1)
+		return m, nil, true
+	case "wizard-command-edit":
+		m.openWizardCommandEdit()
+		return m, nil, true
+	case "wizard-command-save":
+		m.saveWizardCommandEdit()
+		return m, nil, true
+	case "wizard-command-close":
+		m.wizardCommandEdit = nil
+		return m, nil, true
 	case "wizard-start":
 		return m, m.wizardCreateCmd(), true
 	case "modal-save":
@@ -1047,6 +1087,9 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.openApplicableWizardOption("cache-type-k") {
 				return m, nil
 			}
+		case "c":
+			m.openWizardCommandEdit()
+			return m, nil
 		case "n":
 			m.cycleWizardModel(1)
 			return m, nil
@@ -1357,6 +1400,34 @@ func (m Model) updateOptionModalMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
+func (m Model) updateWizardCommandEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	switch msg.Key().Code {
+	case tea.KeyEsc:
+		m.wizardCommandEdit = nil
+		return m, nil
+	case tea.KeyEnter:
+		m.saveWizardCommandEdit()
+		return m, nil
+	}
+	input, cmd := m.wizardCommandEdit.input.Update(msg)
+	m.wizardCommandEdit.input = input
+	return m, cmd
+}
+
+func (m Model) updateWizardCommandEditMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+	if hit, ok := m.buttonHitAt(msg.X, msg.Y); ok {
+		next, cmd, _ := m.handleButtonHit(hit)
+		return next, cmd
+	}
+	return m, nil
+}
+
 func (m *Model) saveOptionModal() {
 	if m.optionModal == nil {
 		return
@@ -1367,6 +1438,14 @@ func (m *Model) saveOptionModal() {
 	}
 	m.wizardOptionOverrides[m.optionModal.option.ID] = value
 	m.optionModal = nil
+}
+
+func (m *Model) saveWizardCommandEdit() {
+	if m.wizardCommandEdit == nil {
+		return
+	}
+	m.applyWizardCommandLine(m.wizardCommandEdit.input.Value())
+	m.wizardCommandEdit = nil
 }
 
 func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -1440,6 +1519,10 @@ func (m Model) fullView() string {
 	if m.optionModal != nil {
 		builder.WriteString("\n")
 		builder.WriteString(renderPanelSpec(m.optionModalSpec(), m.width))
+	}
+	if m.wizardCommandEdit != nil {
+		builder.WriteString("\n")
+		builder.WriteString(renderPanelSpec(m.wizardCommandEditSpec(), m.width))
 	}
 	builder.WriteString("\n\n")
 	builder.WriteString(m.footerView())
@@ -2008,7 +2091,7 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 	case "dashboard":
 		items = append(items, bottomActionSegment{id: "hint", label: "Dashboard: click model roles"})
 	case "wizard":
-		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | k Cache K | Enter Start"})
+		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | k Cache K | c Command | Enter Start"})
 	case "setup":
 		items = append(items, bottomActionSegment{id: "hint", label: "Setup: Up/Down select | Enter toggle"})
 	default:
@@ -2071,7 +2154,7 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 	case "wizard":
 		lines = append(
 			lines,
-			"Launch Wizard: t Runtime | b Variant | m/e/r Role | n/p Model | Enter create",
+			"Launch Wizard: t Runtime | b Variant | m/e/r Role | n/p Model | c Command | Enter create",
 			"API: RunnerController.CreateRunner + POST /g0litellama/v1/runners",
 			"API: WebSocket api.request POST /g0litellama/v1/runners",
 		)
@@ -3032,21 +3115,36 @@ func (m Model) wizardLocalModelLines() []string {
 }
 
 func (m Model) wizardCLIOptionLines() []string {
-	options := applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole)
+	options := m.visibleWizardCLIOptions()
 	if len(options) == 0 {
 		return []string{"no options for selected runtime/backend/role"}
 	}
-	lines := make([]string, 0, len(options))
+	lines := make([]string, 0, len(options)+1)
 	for _, option := range options {
-		label := optionLabel(option)
+		label := wizardOptionDisplayName(option)
+		valueText := ""
 		if value, ok := m.wizardOptionOverrides[option.ID]; ok {
 			if value == "" {
-				label += "=on"
+				valueText = "on"
 			} else {
-				label += "=" + value
+				valueText = value
 			}
 		}
-		lines = append(lines, label+"  "+option.Description)
+		line := fmt.Sprintf("%-10s %-12s %s", wizardOptionButtonTextFromLabel(label), valueText, option.Description)
+		lines = append(lines, m.fullWidthWizardLine(
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Background(lipgloss.Color("236")),
+			line,
+		))
+	}
+	if totalPages := m.wizardCLIOptionPageCount(); totalPages > 1 {
+		lines = append(lines, m.fullWidthWizardLine(
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Background(lipgloss.Color("238")),
+			fmt.Sprintf("Page %d/%d  [ Prev ]  [ Next ]", m.currentWizardOptionPage()+1, totalPages),
+		))
 	}
 	return lines
 }
@@ -3059,16 +3157,34 @@ func (m Model) wizardCommandPreviewLines() []string {
 	return []string{wizardCommandPreview(spec)}
 }
 
+func (m Model) wizardCommandEditSpec() panelSpec {
+	if m.wizardCommandEdit == nil {
+		return panelSpec{}
+	}
+	return panelSpec{
+		title: "Edit Command Preview",
+		lines: []string{
+			"Input",
+			m.wizardCommandEdit.input.View(),
+			"",
+			"[ Save ]  [ X ]",
+		},
+		color: "205",
+	}
+}
+
 func (m Model) optionModalSpec() panelSpec {
 	if m.optionModal == nil {
 		return panelSpec{}
 	}
 	option := m.optionModal.option
 	lines := []string{
-		formatKV("Short", fallback(option.Short, "none")),
-		formatKV("Full", option.Long),
+		option.Long,
 		option.Description,
 		formatKV("Default", fallback(option.DefaultText, "none")),
+	}
+	if option.Short != "" {
+		lines = append([]string{formatKV("Shortcut", option.Short)}, lines...)
 	}
 	if len(option.Enums) > 0 {
 		lines = append(lines, formatKV("Enum", strings.Join(option.Enums, ", ")))
@@ -3078,10 +3194,10 @@ func (m Model) optionModalSpec() panelSpec {
 		"Input",
 		m.optionModal.input.View(),
 		"",
-		"[ Save ]  [ Clear ]  [ X ]",
+		"[ Save ]  [ Reset ]  [ X ]",
 	)
 	return panelSpec{
-		title: "CLI Option " + optionLabel(option),
+		title: "CLI Option " + wizardOptionDisplayName(option),
 		lines: lines,
 		color: "205",
 	}
@@ -3107,8 +3223,18 @@ func (m *Model) openOptionModal(option wizardCLIOption) {
 	}
 }
 
+func (m *Model) openWizardCommandEdit() {
+	input := textinput.New()
+	input.SetValue(strings.Join(m.currentWizardCommandArgs(), " "))
+	input.Focus()
+	m.wizardCommandEdit = &wizardCommandEdit{input: input}
+	if m.managedScreen {
+		m.scrollOffset = m.maxScrollOffset()
+	}
+}
+
 func (m *Model) openApplicableWizardOption(id string) bool {
-	for _, option := range applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole) {
+	for _, option := range m.allWizardCLIOptions() {
 		if option.ID == id {
 			m.openOptionModal(option)
 			return true
@@ -3122,6 +3248,196 @@ func optionLabel(option wizardCLIOption) string {
 		return option.Short
 	}
 	return option.Long
+}
+
+func wizardOptionDisplayName(option wizardCLIOption) string {
+	return strings.TrimLeft(optionLabel(option), "-")
+}
+
+func wizardOptionButtonText(option wizardCLIOption) string {
+	return wizardOptionButtonTextFromLabel(wizardOptionDisplayName(option))
+}
+
+func wizardOptionButtonTextFromLabel(label string) string {
+	return "[" + strings.TrimLeft(label, "-") + "]"
+}
+
+func (m Model) currentWizardOptionPage() int {
+	return clampInt(m.wizardOptionPage, 0, maxInt(0, m.wizardCLIOptionPageCount()-1))
+}
+
+func (m Model) wizardCLIOptionPageCount() int {
+	total := len(m.allWizardCLIOptions())
+	if total == 0 {
+		return 1
+	}
+	return (total + wizardCLIOptionPageSize - 1) / wizardCLIOptionPageSize
+}
+
+func (m Model) visibleWizardCLIOptions() []wizardCLIOption {
+	options := m.allWizardCLIOptions()
+	if len(options) <= wizardCLIOptionPageSize {
+		return options
+	}
+	start := m.currentWizardOptionPage() * wizardCLIOptionPageSize
+	end := minInt(start+wizardCLIOptionPageSize, len(options))
+	return options[start:end]
+}
+
+func (m *Model) pageWizardOptions(delta int) {
+	pageCount := m.wizardCLIOptionPageCount()
+	if pageCount <= 1 {
+		m.wizardOptionPage = 0
+		return
+	}
+	m.wizardOptionPage = (m.currentWizardOptionPage() + delta + pageCount) % pageCount
+}
+
+func (m Model) allWizardCLIOptions() []wizardCLIOption {
+	extras := make([]wizardCLIOption, 0, len(m.wizardCommandExtras))
+	for _, extra := range m.wizardCommandExtras {
+		extras = append(extras, extra.Option)
+	}
+	return append(extras, applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole)...)
+}
+
+func (m Model) wizardOptionByID(id string) (wizardCLIOption, bool) {
+	for _, option := range m.allWizardCLIOptions() {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return wizardCLIOption{}, false
+}
+
+func (m Model) currentWizardCommandArgs() []string {
+	spec, _, err := m.wizardRunnerSpec()
+	if err != nil {
+		return nil
+	}
+	return spec.Command
+}
+
+func (m *Model) applyWizardCommandLine(line string) {
+	args := strings.Fields(line)
+	overrides := map[string]string{}
+	extras := []wizardCommandExtra{}
+	extraSeen := map[string]bool{}
+	options := applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole)
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if arg == "--n-gpu-layers" {
+			if index+1 < len(args) {
+				if args[index+1] != "999" {
+					overrides["gpu-layers"] = args[index+1]
+				}
+				index++
+			}
+			continue
+		}
+		if option, ok := wizardOptionForFlag(options, arg); ok {
+			if option.Kind == "bool" {
+				overrides[option.ID] = ""
+				continue
+			}
+			if index+1 < len(args) {
+				overrides[option.ID] = args[index+1]
+				index++
+			}
+			continue
+		}
+		if wizardFixedCommandFlagHasValue(arg) {
+			index++
+			continue
+		}
+		if wizardFixedCommandFlag(arg) {
+			continue
+		}
+		option := wizardCustomOption(arg)
+		if option.ID == "" || extraSeen[option.ID] {
+			continue
+		}
+		extraSeen[option.ID] = true
+		if index+1 < len(args) && !strings.HasPrefix(args[index+1], "-") {
+			overrides[option.ID] = args[index+1]
+			index++
+		} else {
+			overrides[option.ID] = ""
+		}
+		extras = append(extras, wizardCommandExtra{Option: option})
+	}
+
+	m.wizardOptionOverrides = overrides
+	m.wizardCommandExtras = extras
+	m.wizardRemovedDefaults = m.removedWizardDefaults(args)
+	m.wizardOptionPage = 0
+}
+
+func wizardOptionForFlag(options []wizardCLIOption, flag string) (wizardCLIOption, bool) {
+	for _, option := range options {
+		if flag == option.Short || flag == option.Long {
+			return option, true
+		}
+	}
+	return wizardCLIOption{}, false
+}
+
+func wizardFixedCommandFlagHasValue(flag string) bool {
+	switch flag {
+	case "-m", "--model", "--alias", "--host", "--port":
+		return true
+	default:
+		return false
+	}
+}
+
+func wizardFixedCommandFlag(flag string) bool {
+	return flag == "serve"
+}
+
+func wizardCustomOption(flag string) wizardCLIOption {
+	id := strings.TrimLeft(flag, "-")
+	if id == "" {
+		return wizardCLIOption{}
+	}
+	option := wizardCLIOption{
+		ID:          id,
+		Kind:        "string",
+		DefaultText: "from command preview",
+		Description: "Added from command preview.",
+	}
+	if strings.HasPrefix(flag, "--") {
+		option.Long = flag
+	} else {
+		option.Short = flag
+	}
+	return option
+}
+
+func (m Model) removedWizardDefaults(args []string) map[string]bool {
+	removed := map[string]bool{}
+	if usesWizardGPUBackend(m.wizardBackend) && !containsString(args, "--n-gpu-layers") {
+		removed["gpu-layers"] = true
+	}
+	if m.wizardRole == "embedding" && !containsString(args, "--embedding") {
+		removed["embedding"] = true
+	}
+	if m.wizardRole == "reranking" {
+		if !containsString(args, "--embedding") {
+			removed["embedding"] = true
+		}
+		if !containsString(args, "--pooling") {
+			removed["pooling"] = true
+		}
+		if !containsString(args, "--reranking") {
+			removed["reranking"] = true
+		}
+	}
+	return removed
 }
 
 func appendWizardOptionOverrides(
@@ -3197,6 +3513,10 @@ type wizardCLIOption struct {
 	DefaultText string
 	Enums       []string
 	Description string
+}
+
+type wizardCommandExtra struct {
+	Option wizardCLIOption
 }
 
 func wizardOptionCatalog() []wizardCLIOption {
@@ -4470,6 +4790,7 @@ func (m *Model) toggleWizardRuntime() {
 	}
 	m.wizardVariantSelection = 0
 	m.wizardModelSelection = 0
+	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
 }
 
@@ -4487,6 +4808,7 @@ func (m *Model) cycleWizardVariant() {
 			}
 		}
 		m.wizardBackend = options[(current+1)%len(options)]
+		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
 		return
 	}
@@ -4503,12 +4825,14 @@ func (m *Model) cycleWizardVariant() {
 		}
 	}
 	m.wizardBackend = options[(current+1)%len(options)]
+	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
 }
 
 func (m *Model) setWizardRole(role string) {
 	m.wizardRole = role
 	m.wizardModelSelection = 0
+	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
 }
 
@@ -4532,6 +4856,7 @@ func (m *Model) setWizardVariantFromMouse(x int) {
 		}
 		index := clampInt((x-17)/8, 0, len(options)-1)
 		m.wizardBackend = options[index]
+		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
 		return
 	}
@@ -4541,6 +4866,7 @@ func (m *Model) setWizardVariantFromMouse(x int) {
 	}
 	index := clampInt((x-22)/6, 0, len(options)-1)
 	m.wizardBackend = options[index]
+	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
 }
 
@@ -4708,34 +5034,55 @@ func (m Model) wizardCommandArgv(spec server.RunnerSpec) []string {
 			"--port",
 			strconv.Itoa(spec.Port),
 		}
-		if usesWizardGPUBackend(spec.Backend) && !m.hasWizardOverride("gpu-layers") {
+		if usesWizardGPUBackend(spec.Backend) && !m.hasWizardOverride("gpu-layers") && !m.hasWizardRemovedDefault("gpu-layers") {
 			args = append(args, "--n-gpu-layers", "999")
 		}
 		switch spec.Role {
 		case "embedding":
-			if !m.hasWizardOverride("embedding") {
+			if !m.hasWizardOverride("embedding") && !m.hasWizardRemovedDefault("embedding") {
 				args = append(args, "--embedding")
 			}
 		case "reranking":
-			if !m.hasWizardOverride("embedding") {
+			if !m.hasWizardOverride("embedding") && !m.hasWizardRemovedDefault("embedding") {
 				args = append(args, "--embedding")
 			}
-			if !m.hasWizardOverride("pooling") {
+			if !m.hasWizardOverride("pooling") && !m.hasWizardRemovedDefault("pooling") {
 				args = append(args, "--pooling", "rank")
 			}
-			if !m.hasWizardOverride("reranking") {
+			if !m.hasWizardOverride("reranking") && !m.hasWizardRemovedDefault("reranking") {
 				args = append(args, "--reranking")
 			}
 		}
 	default:
 		return nil
 	}
-	return appendWizardOptionOverrides(args, spec.Runtime, spec.Backend, spec.Role, m.wizardOptionOverrides)
+	args = appendWizardOptionOverrides(args, spec.Runtime, spec.Backend, spec.Role, m.wizardOptionOverrides)
+	return m.appendWizardCommandExtras(args)
 }
 
 func (m Model) hasWizardOverride(id string) bool {
 	_, ok := m.wizardOptionOverrides[id]
 	return ok
+}
+
+func (m Model) hasWizardRemovedDefault(id string) bool {
+	return m.wizardRemovedDefaults != nil && m.wizardRemovedDefaults[id]
+}
+
+func (m Model) appendWizardCommandExtras(args []string) []string {
+	for _, extra := range m.wizardCommandExtras {
+		value, ok := m.wizardOptionOverrides[extra.Option.ID]
+		if !ok {
+			continue
+		}
+		flag := optionLabel(extra.Option)
+		if strings.TrimSpace(value) == "" {
+			args = append(args, flag)
+		} else {
+			args = append(args, flag, strings.TrimSpace(value))
+		}
+	}
+	return args
 }
 
 func (m Model) nextRunnerID(runtimeName string, role string) string {
@@ -5120,9 +5467,10 @@ func tick() tea.Cmd {
 }
 
 const (
-	widePanelGridMinWidth  = 150
-	panelGridColumnGap     = 2
-	runnerTerminalLogLimit = 10
+	widePanelGridMinWidth   = 150
+	panelGridColumnGap      = 2
+	runnerTerminalLogLimit  = 10
+	wizardCLIOptionPageSize = 8
 )
 
 type panelSpec struct {
@@ -5282,6 +5630,9 @@ func (m Model) scrollableBodyView() string {
 	body := m.activeContentView()
 	if m.optionModal != nil {
 		body = joinPanels(body, renderPanelSpec(m.optionModalSpec(), m.width))
+	}
+	if m.wizardCommandEdit != nil {
+		body = joinPanels(body, renderPanelSpec(m.wizardCommandEditSpec(), m.width))
 	}
 	return body
 }

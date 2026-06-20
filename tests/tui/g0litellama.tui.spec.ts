@@ -44,18 +44,32 @@ test("launch wizard creates a fake runner", async ({ terminal }) => {
 test("wizard option modal updates command preview", async ({ terminal }) => {
   await openWizardByKeyboard(terminal);
   terminal.write("t");
-  await expect(terminal.getByText("-ctk", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("[ctk]", { strict: false })).toBeVisible();
 
   terminal.write("k");
 
   await expect(terminal.getByText("--cache-type-k", { strict: false })).toBeVisible();
   await expect(terminal.getByText("[ Save ]", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("[ Clear ]", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("[ Reset ]", { strict: false })).toBeVisible();
 
   terminal.write("q4_0");
   terminal.keyPress(Key.Enter);
 
   await expect(terminal.getByText("-ctk q4_0", { strict: false })).toBeVisible();
+});
+
+test("wizard command preview edit adds option rows", async ({ terminal }) => {
+  await openWizardByKeyboard(terminal);
+  terminal.write("t");
+
+  terminal.write("c");
+  await expect(terminal.getByText("Edit Command Preview", { strict: false })).toBeVisible();
+
+  terminal.write(" --threads 8");
+  terminal.keyPress(Key.Enter);
+
+  await expect(terminal.getByText("[threads]", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("--threads 8", { strict: false })).toBeVisible();
 });
 
 test("mouse click can switch tabs or activate a visible control", async ({ terminal }) => {

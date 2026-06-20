@@ -46,6 +46,14 @@ describe("interactive installer scripts", () => {
     }
   });
 
+  it("uses option-safe Bash printf formats for dashed separators", () => {
+    const shell = readRootScript("install.sh");
+
+    expect(shell).not.toMatch(/printf\s+'-/);
+    expect(shell).toContain("printf '%s\\n' '-------------'");
+    expect(shell).toContain("printf '%s\\n' '-------'");
+  });
+
   it("wraps current install actions in a boxed choice prompt", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);

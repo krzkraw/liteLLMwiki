@@ -1001,7 +1001,7 @@ ensure_bun_dependencies() {
 
 print_install_tasks() {
   printf '\nInstall tasks\n'
-  printf '-------------\n'
+  printf '%s\n' '-------------'
   print_task_status "git" "command -v git >/dev/null 2>&1" "available" "needs install"
   print_task_status "bun" "command -v bun >/dev/null 2>&1" "available" "needs install"
   print_task_status "go" "command -v go >/dev/null 2>&1" "available" "needs install"
@@ -1018,7 +1018,7 @@ print_install_tasks() {
 
 print_summary() {
   printf '\nSummary\n'
-  printf '-------\n'
+  printf '%s\n' '-------'
   for item in "${summary[@]}"; do
     printf '%s\n' "$item"
   done

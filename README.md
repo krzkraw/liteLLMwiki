@@ -337,6 +337,21 @@ bun run smoke:executable
 requires `models/litert/browser/gemma-4-E2B-it-web.litertlm` and checks that `/models/*` serves
 the real binary with `application/octet-stream`.
 
+Sidecar TUI and runtime/backend E2E checks run through Go:
+
+```bash
+bun run e2e:sidecar
+```
+
+This starts the Bubble Tea TUI harness, verifies the launch-wizard runner
+creation path, and enumerates `working: true` entries from
+`native/runtime-config/backends.json` or `RUNTIME_BACKEND_CONFIG`. Real model
+responsiveness checks are skipped with per-combo reasons unless the matching
+backend config, runtime executable or installed runtime variant, and local
+catalog model are present. Set `SIDECAR_E2E_REAL=1` to make missing real-runtime
+prerequisites fail instead of skip, and use `SIDECAR_E2E_TIMEOUT_SECONDS` for
+slower machines.
+
 To verify the production preview server catches the same route:
 
 ```bash

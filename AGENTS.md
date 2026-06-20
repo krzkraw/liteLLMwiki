@@ -42,6 +42,7 @@ selected from disk in the UI.
 - `native/sidecar/internal/supervisor/` - multi-runner process supervisor and
   route authority.
 - `native/sidecar/internal/tui/` - Bubble Tea terminal dashboard.
+- `native/sidecar/e2e/` - sidecar TUI and runtime/backend E2E tests.
 - `native/sidecar/scripts/` - release and real-runtime smoke helpers.
 
 ## Verification Commands
@@ -64,6 +65,9 @@ bash -n configure.sh install.sh
 # Go sidecar tests
 cd native/sidecar && go test ./...
 
+# Sidecar TUI/runtime backend E2E; real runtime combos skip unless configured
+bun run e2e:sidecar
+
 # Sidecar release artifacts
 bun run build:sidecar
 
@@ -73,8 +77,12 @@ bun run smoke:model
 bun run smoke:executable
 ```
 
-`bun run smoke:model` requires an external model file under `models/`. Real
-native runtime smoke requires `LITERT_LM_BIN=/path/to/litert-lm`.
+`bun run smoke:model` requires an external model file under `models/`.
+`bun run e2e:sidecar` always runs the TUI harness and backend-config planner;
+real responsiveness checks read `native/runtime-config/backends.json` or
+`RUNTIME_BACKEND_CONFIG` and skip missing models/runtimes with clear reasons
+unless `SIDECAR_E2E_REAL=1` is set. Real native runtime smoke requires
+`LITERT_LM_BIN=/path/to/litert-lm`.
 
 ## Required First Steps
 

@@ -12,6 +12,7 @@
     "smoke:model": "bun scripts/browser-smoke.mjs --require-model",
     "smoke:executable": "bun scripts/executable-smoke.mjs",
     "e2e:generate": "bun scripts/e2e-generate.mjs",
+    "e2e:sidecar": "cd native/sidecar && scripts/runtime-backend-e2e.sh",
     "build:sidecar": "bun scripts/build-native-runner.mjs",
     "prepare:wasm": "bun scripts/sync-wasm.mjs",
     "postinstall": "bun scripts/sync-wasm.mjs",

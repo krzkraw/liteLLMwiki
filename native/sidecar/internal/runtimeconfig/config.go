@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -17,6 +18,12 @@ type BackendResult struct {
 	Model   string `json:"model,omitempty"`
 	Tested  string `json:"testedAt,omitempty"`
 	Output  string `json:"output,omitempty"`
+}
+
+type BackendCombo struct {
+	Runtime string
+	Backend string
+	Result  BackendResult
 }
 
 type fileConfig struct {
@@ -149,6 +156,33 @@ func (s Status) Visible(runtimeName string, backend string) bool {
 		return true
 	}
 	return result.Working
+}
+
+func (s Status) WorkingBackends() []BackendCombo {
+	if !s.configured {
+		return nil
+	}
+
+	var combos []BackendCombo
+	for runtimeName, backendResults := range s.runtimes {
+		for backend, result := range backendResults {
+			if !result.Working {
+				continue
+			}
+			combos = append(combos, BackendCombo{
+				Runtime: runtimeName,
+				Backend: backend,
+				Result:  result,
+			})
+		}
+	}
+	sort.Slice(combos, func(left int, right int) bool {
+		if combos[left].Runtime == combos[right].Runtime {
+			return combos[left].Backend < combos[right].Backend
+		}
+		return combos[left].Runtime < combos[right].Runtime
+	})
+	return combos
 }
 
 func normalize(value string) string {

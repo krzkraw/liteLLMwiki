@@ -68,6 +68,57 @@ func TestLoadRuntimeBackendResults(t *testing.T) {
 	}
 }
 
+func TestWorkingBackendsEnumeratesConfiguredWorkingCombos(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "backends.json")
+	contents := `{
+  "version": 1,
+  "runtimes": {
+    " LiteRT ": {
+      " GPU ": {
+        "working": true,
+        "command": "litert-lm run gemma4-e2b --backend=gpu",
+        "model": "models/litert/main/gemma-4-E2B-it.litertlm",
+        "testedAt": "2026-06-20T10:00:00Z",
+        "output": "ok"
+      },
+      "npu": {"working": false}
+    },
+    "llamacpp": {
+      "cuda13": {"working": false},
+      "cpu": {
+        "working": true,
+        "command": "llama-server -m model.gguf",
+        "model": "models/llamacpp/main/model.gguf"
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	status, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	combos := status.WorkingBackends()
+	if len(combos) != 2 {
+		t.Fatalf("working combos = %#v, want two entries", combos)
+	}
+	if combos[0].Runtime != "litert" || combos[0].Backend != "gpu" {
+		t.Fatalf("first combo = %#v, want normalized litert/gpu", combos[0])
+	}
+	if combos[0].Result.Model != "models/litert/main/gemma-4-E2B-it.litertlm" {
+		t.Fatalf("first combo model = %q, want preserved model", combos[0].Result.Model)
+	}
+	if combos[1].Runtime != "llamacpp" || combos[1].Backend != "cpu" {
+		t.Fatalf("second combo = %#v, want normalized llamacpp/cpu", combos[1])
+	}
+}
+
 func TestDefaultPathUsesRuntimeConfigDirectory(t *testing.T) {
 	t.Parallel()
 

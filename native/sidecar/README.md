@@ -244,3 +244,27 @@ ports, uses an isolated LiteRT-LM `HOME`, asserts `/v1/models` advertises
 attachment through `/sidecar/v1/multimodal`. Set `LITERT_HOME` to reuse an
 isolated imported-model registry across runs, and set
 `MULTIMODAL_TIMEOUT_SECONDS` for slower attachment generation.
+
+## Runtime Backend E2E
+
+Run the sidecar E2E suite from this directory:
+
+```bash
+scripts/runtime-backend-e2e.sh
+```
+
+From the repository root, the same suite is available as:
+
+```bash
+bun run e2e:sidecar
+```
+
+The suite starts a Bubble Tea TUI harness, creates and starts a runner through
+the launch-wizard controller path, parses working runtime/backend entries from
+`native/runtime-config/backends.json` or `RUNTIME_BACKEND_CONFIG`, and attempts
+one non-streaming `/v1/chat/completions` request for runnable main-model
+combos. Real runtime combos are skipped with explicit reasons when the backend
+config, local catalog model, runtime executable, or installed llama.cpp runtime
+variant is missing. Set `SIDECAR_E2E_REAL=1` to make those missing
+prerequisites fail, and set `SIDECAR_E2E_TIMEOUT_SECONDS` to raise the default
+four-minute per-combo timeout.

@@ -47,6 +47,31 @@ describe("interactive installer scripts", () => {
     expect(powershell).toContain("native\\runtime-config\\backends.json");
   });
 
+  it("requires backend probes to generate a model response", () => {
+    const shell = readRootScript("configure.sh");
+    const powershell = readRootScript("configure.ps1");
+
+    expect(shell).toContain("/v1/chat/completions");
+    expect(shell).toContain("validate_llama_response");
+    expect(shell).toContain("detect_litert_error_output");
+    expect(shell).toContain("LITERT_TEST_MAX_NUM_TOKENS:-4096");
+    expect(shell).toContain("LLAMA_TEST_MAX_TOKENS:-128");
+    expect(shell).toContain("--reasoning off");
+    expect(shell).not.toMatch(
+      /curl -fsS "http:\/\/127\.0\.0\.1:\$port\/v1\/models"[\s\S]*return 0/,
+    );
+
+    expect(powershell).toContain("/v1/chat/completions");
+    expect(powershell).toContain("Test-LlamaCompletionResponse");
+    expect(powershell).toContain("Test-LiteRtErrorOutput");
+    expect(powershell).toContain('else { "4096" }');
+    expect(powershell).toContain("else { 128 }");
+    expect(powershell).toContain('"--reasoning", "off"');
+    expect(powershell).not.toMatch(
+      /Invoke-WebRequest[\s\S]*\/v1\/models[\s\S]*return/,
+    );
+  });
+
   it("does not assign PowerShell automatic OS variables", () => {
     const contents = readRootScript("install.ps1");
 

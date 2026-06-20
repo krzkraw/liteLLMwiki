@@ -48,20 +48,20 @@ controller methods as the keyboard shortcuts.
 The Launch Wizard is a compact configuration screen. It lets the user click or
 key-select the runtime (`litert` or `llamacpp`), a runtime variant, model role
 (`main`, `embedding`, or `reranking`), and one locally installed matching model.
-LiteRT variants are `cpu`, `gpu`, and `npu`. llama.cpp variants are shown as
-`cpu`, `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, and `sycl`, and are mapped to
-installed folders under `native/llama-runtimes`. Variants disabled in the Setup
-tab are hidden immediately. Pressing Enter or clicking `START` creates and
-starts a runner. New runner tabs are inserted after the Setup tab and are named
-by runtime and role, such as `LR-M-1`, `LM-E-1`, or `LM-R-1`; numbering is per
-role.
+LiteRT variants are `cpu`, `gpu`, and `npu`. llama.cpp variants are discovered
+from installed folders under `native/llama-runtimes` and grouped as `cpu`,
+`gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, and `sycl` only when matching
+runtime folders are present. Variants disabled in the Setup tab are hidden
+immediately. Pressing Enter or clicking `START` creates and starts a runner.
+New runner tabs are inserted after the Setup tab and are named by runtime and
+role, such as `LR-M-1`, `LM-E-1`, or `LM-R-1`; numbering is per role.
 
-The Setup tab shows LiteRT backends (`cpu`, `gpu`, `npu`) and llama.cpp backend
-types (`cpu`, `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, `sycl`) with their current
-enabled or disabled state from `native/runtime-config/backends.json`.
-Up/Down selects a backend row, and Enter or Space toggles it. Toggling writes
-`working: true` for enabled or `working: false` for disabled, creating the local
-backend config file when it does not exist.
+The Setup tab shows LiteRT backends (`cpu`, `gpu`, `npu`) and discovered
+llama.cpp backend types with their current enabled or disabled state from
+`native/runtime-config/backends.json`. Click, Up/Down plus Enter, or Space
+toggles a backend row. Toggling writes `working: true` for enabled or
+`working: false` for disabled, creating the local backend config file when it
+does not exist.
 
 Runner tabs show basic status and route/control panels with runtime, role,
 backend, model, upstream, PID, the command argv that will be used for the next

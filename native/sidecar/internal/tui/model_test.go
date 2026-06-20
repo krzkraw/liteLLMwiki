@@ -205,10 +205,11 @@ func TestLaunchWizardUsesResponsiveMasonryLayout(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(ModelOptions{
-		RunnerController: newFakeRunnerController(nil),
-		Logs:             server.NewLogBroadcaster(8),
-		Catalog:          testCatalogWithPresentModels(t),
-		LlamaRuntimeRoot: testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
 	})
 	model.setActiveTab("wizard")
 	model.width = 180
@@ -236,10 +237,11 @@ func TestLaunchWizardMouseUsesRenderedRows(t *testing.T) {
 
 	controller := newFakeRunnerController(nil)
 	model := NewModel(ModelOptions{
-		RunnerController: controller,
-		Logs:             server.NewLogBroadcaster(8),
-		Catalog:          testCatalogWithPresentModels(t),
-		LlamaRuntimeRoot: testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		RunnerController:  controller,
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
 	})
 	model.setActiveTab("wizard")
 	model.width = 180
@@ -501,6 +503,7 @@ func TestLaunchWizardClassifiesMacLlamaRuntimeAsMetal(t *testing.T) {
 		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-macos-arm64"),
 		BackendConfigPath: configPath,
 	})
+	model.setActiveTab("wizard")
 	model.toggleWizardRuntime()
 	if got := model.wizardBackend; got != "metal" {
 		t.Fatalf("wizard backend for macOS llama runtime = %q, want metal", got)
@@ -515,9 +518,18 @@ func TestLaunchWizardClassifiesMacLlamaRuntimeAsMetal(t *testing.T) {
 	if strings.Contains(compactSpaces(model.View()), "llama type cpu") {
 		t.Fatalf("disabled cpu backend should not remain visible for macOS llama runtime:\n%s", model.View())
 	}
+	compactView := compactSpaces(model.View())
+	if !strings.Contains(compactView, "llama type [metal]") {
+		t.Fatalf("macOS llama runtime should only expose metal in wizard:\n%s", model.View())
+	}
+	for _, impossible := range []string{"cuda13", "cuda12", "openvino", "sycl"} {
+		if strings.Contains(compactView, impossible) {
+			t.Fatalf("macOS llama runtime should not expose %s in wizard:\n%s", impossible, model.View())
+		}
+	}
 }
 
-func TestSetupTabRendersBackendStatesFromConfig(t *testing.T) {
+func TestSetupTabRendersOnlyInstalledLlamaRuntimeBackends(t *testing.T) {
 	t.Parallel()
 
 	configPath := filepath.Join(t.TempDir(), "backends.json")
@@ -544,6 +556,7 @@ func TestSetupTabRendersBackendStatesFromConfig(t *testing.T) {
 		RunnerController:  newFakeRunnerController(nil),
 		Logs:              server.NewLogBroadcaster(8),
 		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-macos-arm64"),
 		BackendConfigPath: configPath,
 	})
 	model.setActiveTab("setup")
@@ -558,14 +571,65 @@ func TestSetupTabRendersBackendStatesFromConfig(t *testing.T) {
 		"LiteRT cpu enabled",
 		"LiteRT gpu disabled",
 		"LiteRT npu enabled",
-		"llama.cpp cpu disabled",
 		"llama.cpp metal enabled",
-		"llama.cpp openvino enabled",
-		"llama.cpp cuda13 disabled",
-		"llama.cpp sycl enabled",
+		"Click a backend row to toggle it.",
 	} {
 		if !strings.Contains(compactView, expected) {
 			t.Fatalf("setup tab missing %q:\n%s", expected, view)
+		}
+	}
+	for _, impossible := range []string{
+		"llama.cpp cpu",
+		"llama.cpp openvino",
+		"llama.cpp cuda13",
+		"llama.cpp cuda12",
+		"llama.cpp sycl",
+	} {
+		if strings.Contains(compactView, impossible) {
+			t.Fatalf("setup tab should not show unavailable %q:\n%s", impossible, view)
+		}
+	}
+}
+
+func TestSetupAndWizardKeepInstalledCudaLlamaBackends(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot: testLlamaRuntimeRoot(
+			t,
+			"llama-win-cuda-13.3-x64",
+			"llama-linux-cuda-12-x64",
+		),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.setActiveTab("wizard")
+	model.width = 140
+	model.height = 36
+
+	model.toggleWizardRuntime()
+	compactView := compactSpaces(model.View())
+	if !strings.Contains(compactView, "llama type [cuda13] cuda12") {
+		t.Fatalf("wizard should expose installed CUDA llama runtimes:\n%s", model.View())
+	}
+	for _, unavailable := range []string{" metal", " openvino", " sycl"} {
+		if strings.Contains(compactView, unavailable) {
+			t.Fatalf("wizard should not expose unavailable llama backend %q:\n%s", unavailable, model.View())
+		}
+	}
+
+	model.setActiveTab("setup")
+	setupView := compactSpaces(model.View())
+	for _, expected := range []string{"llama.cpp cuda13 enabled", "llama.cpp cuda12 enabled"} {
+		if !strings.Contains(setupView, expected) {
+			t.Fatalf("setup should expose installed CUDA backend %q:\n%s", expected, model.View())
+		}
+	}
+	for _, unavailable := range []string{"llama.cpp metal", "llama.cpp openvino", "llama.cpp sycl"} {
+		if strings.Contains(setupView, unavailable) {
+			t.Fatalf("setup should not expose unavailable llama backend %q:\n%s", unavailable, model.View())
 		}
 	}
 }
@@ -1063,10 +1127,11 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 
 	controller := newFakeRunnerController(nil)
 	model := NewModel(ModelOptions{
-		RunnerController: controller,
-		Logs:             server.NewLogBroadcaster(8),
-		Catalog:          testCatalogWithPresentModels(t),
-		LlamaRuntimeRoot: testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		RunnerController:  controller,
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
 	})
 	model.width = 140
 	model.height = 36
@@ -1085,7 +1150,7 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	view := model.View()
 	compactView := compactSpaces(view)
 	for _, expected := range []string{
-		"llama type cpu gpu metal openvino [cuda13] cuda12 sycl",
+		"llama type [cuda13]",
 		"model role main embedding [reranking]",
 		"Qwen3-Reranker-0.6B-Q4_K_M.gguf",
 		"[ START ]",

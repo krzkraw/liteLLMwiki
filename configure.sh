@@ -9,6 +9,7 @@ litert_lm_bin="${LITERT_LM_BIN:-}"
 llama_server_bin="${LLAMA_SERVER_BIN:-}"
 litert_model_id="${LITERT_TEST_MODEL_ID:-gemma4-e2b}"
 litert_prompt="${LITERT_TEST_PROMPT:-Say ok.}"
+llama_prompt="${LLAMA_TEST_PROMPT:-Say ok.}"
 litert_runtime_root="$repo_root/native/litert-runtimes"
 llama_runtime_root="$repo_root/native/llama-runtimes"
 
@@ -24,6 +25,7 @@ Environment overrides:
   LLAMA_TEST_MODEL        llama.cpp GGUF model used by backend probes.
   LITERT_LM_BIN           litert-lm executable override.
   LLAMA_SERVER_BIN        llama-server executable override.
+  LLAMA_TEST_MAX_TOKENS   Completion token cap for llama.cpp probes. Defaults to 128.
 USAGE
 }
 
@@ -99,6 +101,68 @@ print_shell_command() {
     first=0
   done
   printf '\n'
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+detect_litert_error_output() {
+  local output="$1"
+
+  printf '%s\n' "$output" | grep -Eiq \
+    '(^An error occurred$|Traceback \(most recent call last\):|RuntimeError:|INVALID_ARGUMENT:|INTERNAL:|Failed to invoke|Failed to allocate|Validation error:)'
+}
+
+validate_litert_response() {
+  local output="$1"
+
+  if detect_litert_error_output "$output"; then
+    return 1
+  fi
+  printf '%s\n' "$output" | grep -Eq '[[:alnum:]]'
+}
+
+validate_llama_response() {
+  local response="$1"
+
+  if has_command bun; then
+    RESPONSE_TEXT="$response" bun --eval '
+const text = process.env.RESPONSE_TEXT || "";
+try {
+  const data = JSON.parse(text);
+  const content = data?.choices?.[0]?.message?.content;
+  process.exit(typeof content === "string" && content.trim().length > 0 ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+'
+    return $?
+  fi
+
+  if has_command python3; then
+    RESPONSE_TEXT="$response" python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    data = json.loads(os.environ.get("RESPONSE_TEXT", ""))
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+except Exception:
+    content = ""
+sys.exit(0 if isinstance(content, str) and content.strip() else 1)
+PY
+    return $?
+  fi
+
+  printf '%s\n' "$response" | grep -Eq '"content"[[:space:]]*:[[:space:]]*"[^"]*[[:alnum:]][^"]*"'
 }
 
 find_litert_lm_in_dir() {
@@ -196,28 +260,46 @@ run_litert_probe() {
   local model_id="$3"
   local backend="$4"
   local prompt="${5:-$litert_prompt}"
+  local max_tokens="${LITERT_TEST_MAX_NUM_TOKENS:-4096}"
+  local run_output run_status
 
   printf 'Runtime command: '
-  print_shell_command "$executable" run "$model_id" "--backend=$backend" "--max-num-tokens=1" "--prompt=$prompt"
+  print_shell_command "$executable" run "$model_id" "--backend=$backend" "--max-num-tokens=$max_tokens" "--prompt=$prompt"
 
   if "$executable" list | awk '{print $1}' | grep -qx "$model_id"; then
     :
   else
-    "$executable" import "$model_path" "$model_id"
+    if ! "$executable" import "$model_path" "$model_id"; then
+      return 1
+    fi
   fi
-  "$executable" run "$model_id" "--backend=$backend" "--max-num-tokens=1" "--prompt=$prompt"
+  if run_output="$("$executable" run "$model_id" "--backend=$backend" "--max-num-tokens=$max_tokens" "--prompt=$prompt" 2>&1)"; then
+    run_status=0
+  else
+    run_status=$?
+  fi
+  printf '%s\n' "$run_output"
+  if [[ "$run_status" -ne 0 ]]; then
+    return "$run_status"
+  fi
+  validate_litert_response "$run_output"
 }
 
 run_llama_probe() {
   local executable="$1"
   local model_path="$2"
   local backend="$3"
-  local port log_file pid args=()
-  local attempt
+  local port log_file response_file pid args=()
+  local prompt="${4:-$llama_prompt}"
+  local max_tokens="${LLAMA_TEST_MAX_TOKENS:-128}"
+  local timeout_seconds="${LLAMA_TEST_TIMEOUT_SECONDS:-180}"
+  local request_timeout_seconds="${LLAMA_TEST_REQUEST_TIMEOUT_SECONDS:-120}"
+  local deadline http_code payload response last_response
 
   port="${LLAMA_TEST_PORT:-$((28000 + RANDOM % 10000))}"
   log_file="$(mktemp "${TMPDIR:-/tmp}/llama-backend-${backend}.XXXXXX.log")"
-  args=("$executable" -m "$model_path" --alias configure-test --host 127.0.0.1 --port "$port")
+  response_file="$(mktemp "${TMPDIR:-/tmp}/llama-backend-${backend}.XXXXXX.response.json")"
+  args=("$executable" -m "$model_path" --alias configure-test --host 127.0.0.1 --port "$port" --reasoning off)
   if llama_uses_gpu_backend "$backend"; then
     args+=(--n-gpu-layers 999)
   fi
@@ -227,25 +309,46 @@ run_llama_probe() {
 
   "${args[@]}" >"$log_file" 2>&1 &
   pid=$!
-  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if curl -fsS "http://127.0.0.1:$port/v1/models" >/dev/null 2>&1; then
-      kill "$pid" >/dev/null 2>&1 || true
-      wait "$pid" >/dev/null 2>&1 || true
-      rm -f "$log_file"
-      return 0
-    fi
+  deadline=$(($(date +%s) + timeout_seconds))
+  payload='{"model":"configure-test","messages":[{"role":"user","content":"'"$(json_escape "$prompt")"'"}],"max_tokens":'"$max_tokens"',"temperature":0,"stream":false}'
+  last_response=""
+
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
     if ! kill -0 "$pid" >/dev/null 2>&1; then
       cat "$log_file"
-      rm -f "$log_file"
+      rm -f "$log_file" "$response_file"
       return 1
+    fi
+
+    http_code="$(curl -sS --max-time "$request_timeout_seconds" \
+      -o "$response_file" \
+      -w '%{http_code}' \
+      -H 'Content-Type: application/json' \
+      -d "$payload" \
+      "http://127.0.0.1:$port/v1/chat/completions" 2>>"$log_file" || true)"
+    response="$(cat "$response_file" 2>/dev/null || true)"
+    if [[ "$http_code" == "200" ]] && validate_llama_response "$response"; then
+      printf 'Completion response: %s\n' "$response"
+      kill "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+      rm -f "$log_file" "$response_file"
+      return 0
+    fi
+    if [[ -n "$response" ]]; then
+      last_response="HTTP $http_code: $response"
+    elif [[ -n "$http_code" ]]; then
+      last_response="HTTP $http_code"
     fi
     sleep 1
   done
 
   cat "$log_file"
+  if [[ -n "$last_response" ]]; then
+    printf 'Last completion response: %s\n' "$last_response"
+  fi
   kill "$pid" >/dev/null 2>&1 || true
   wait "$pid" >/dev/null 2>&1 || true
-  rm -f "$log_file"
+  rm -f "$log_file" "$response_file"
   return 1
 }
 

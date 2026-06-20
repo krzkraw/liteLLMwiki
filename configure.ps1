@@ -4,7 +4,8 @@ param(
   [string]$LlamaModel = $env:LLAMA_TEST_MODEL,
   [string]$LitertBin = $env:LITERT_LM_BIN,
   [string]$LlamaBin = $env:LLAMA_SERVER_BIN,
-  [string]$LitertModelId = $(if ($env:LITERT_TEST_MODEL_ID) { $env:LITERT_TEST_MODEL_ID } else { "gemma4-e2b" })
+  [string]$LitertModelId = $(if ($env:LITERT_TEST_MODEL_ID) { $env:LITERT_TEST_MODEL_ID } else { "gemma4-e2b" }),
+  [string]$LlamaPrompt = $(if ($env:LLAMA_TEST_PROMPT) { $env:LLAMA_TEST_PROMPT } else { "Say ok." })
 )
 
 $ErrorActionPreference = "Stop"
@@ -129,6 +130,33 @@ function Test-LlamaUsesGpuBackend {
   param([string]$Backend)
 
   return @("gpu", "cuda", "cuda12", "cuda13", "metal", "vulkan", "openvino", "sycl", "npu") -contains $Backend
+}
+
+function Test-LiteRtErrorOutput {
+  param([string]$OutputText)
+
+  return $OutputText -match "(?m)(^An error occurred$|Traceback \(most recent call last\):|RuntimeError:|INVALID_ARGUMENT:|INTERNAL:|Failed to invoke|Failed to allocate|Validation error:)"
+}
+
+function Test-LiteRtResponse {
+  param([string]$OutputText)
+
+  if (Test-LiteRtErrorOutput -OutputText $OutputText) {
+    return $false
+  }
+  return -not [string]::IsNullOrWhiteSpace($OutputText)
+}
+
+function Test-LlamaCompletionResponse {
+  param([string]$ResponseText)
+
+  try {
+    $Data = $ResponseText | ConvertFrom-Json
+    $Content = $Data.choices[0].message.content
+    return ($Content -is [string]) -and (-not [string]::IsNullOrWhiteSpace($Content))
+  } catch {
+    return $false
+  }
 }
 
 function Get-LlamaSpecs {
@@ -260,7 +288,8 @@ function Invoke-LiteRtBackendProbe {
     [string]$Prompt = $(if ($env:LITERT_TEST_PROMPT) { $env:LITERT_TEST_PROMPT } else { "Say ok." })
   )
 
-  Write-Output ("Runtime command: " + (Format-Command @($Executable, "run", $ModelId, "--backend=$Backend", "--max-num-tokens=1", "--prompt=$Prompt")))
+  $MaxTokens = if ($env:LITERT_TEST_MAX_NUM_TOKENS) { $env:LITERT_TEST_MAX_NUM_TOKENS } else { "4096" }
+  Write-Output ("Runtime command: " + (Format-Command @($Executable, "run", $ModelId, "--backend=$Backend", "--max-num-tokens=$MaxTokens", "--prompt=$Prompt")))
   $ListOutput = & $Executable list 2>$null
   $HasModel = $false
   if ($LASTEXITCODE -eq 0) {
@@ -277,9 +306,16 @@ function Invoke-LiteRtBackendProbe {
       throw "litert-lm import failed with exit code $LASTEXITCODE"
     }
   }
-  & $Executable run $ModelId "--backend=$Backend" "--max-num-tokens=1" "--prompt=$Prompt"
-  if ($LASTEXITCODE -ne 0) {
-    throw "litert-lm run failed with exit code $LASTEXITCODE"
+  $RunOutput = & $Executable run $ModelId "--backend=$Backend" "--max-num-tokens=$MaxTokens" "--prompt=$Prompt" 2>&1 | Out-String
+  $RunExitCode = $LASTEXITCODE
+  if (-not [string]::IsNullOrWhiteSpace($RunOutput)) {
+    Write-Output $RunOutput.TrimEnd()
+  }
+  if ($RunExitCode -ne 0) {
+    throw "litert-lm run failed with exit code $RunExitCode"
+  }
+  if (-not (Test-LiteRtResponse -OutputText $RunOutput)) {
+    throw "litert-lm run did not return a usable model response."
   }
 }
 
@@ -287,13 +323,17 @@ function Invoke-LlamaBackendProbe {
   param(
     [string]$Executable,
     [string]$ModelPath,
-    [string]$Backend
+    [string]$Backend,
+    [string]$Prompt = $LlamaPrompt
   )
 
   $Port = if ($env:LLAMA_TEST_PORT) { [int]$env:LLAMA_TEST_PORT } else { Get-Random -Minimum 28000 -Maximum 38000 }
+  $MaxTokens = if ($env:LLAMA_TEST_MAX_TOKENS) { [int]$env:LLAMA_TEST_MAX_TOKENS } else { 128 }
+  $TimeoutSeconds = if ($env:LLAMA_TEST_TIMEOUT_SECONDS) { [int]$env:LLAMA_TEST_TIMEOUT_SECONDS } else { 180 }
+  $RequestTimeoutSeconds = if ($env:LLAMA_TEST_REQUEST_TIMEOUT_SECONDS) { [int]$env:LLAMA_TEST_REQUEST_TIMEOUT_SECONDS } else { 120 }
   $StdoutLog = Join-Path ([System.IO.Path]::GetTempPath()) "llama-backend-$Backend-$([Guid]::NewGuid().ToString('N')).stdout.log"
   $StderrLog = Join-Path ([System.IO.Path]::GetTempPath()) "llama-backend-$Backend-$([Guid]::NewGuid().ToString('N')).stderr.log"
-  $Arguments = @("-m", $ModelPath, "--alias", "configure-test", "--host", "127.0.0.1", "--port", [string]$Port)
+  $Arguments = @("-m", $ModelPath, "--alias", "configure-test", "--host", "127.0.0.1", "--port", [string]$Port, "--reasoning", "off")
   if (Test-LlamaUsesGpuBackend -Backend $Backend) {
     $Arguments += @("--n-gpu-layers", "999")
   }
@@ -301,23 +341,48 @@ function Invoke-LlamaBackendProbe {
 
   $Process = Start-Process -FilePath $Executable -ArgumentList $Arguments -PassThru -NoNewWindow -RedirectStandardOutput $StdoutLog -RedirectStandardError $StderrLog
   try {
-    for ($Attempt = 0; $Attempt -lt 20; $Attempt += 1) {
-      try {
-        Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$Port/v1/models" | Out-Null
-        return
-      } catch {
-        if ($Process.HasExited) {
-          $Output = ""
-          if (Test-Path $StdoutLog) {
-            $Output += Get-Content $StdoutLog -Raw
-          }
-          if (Test-Path $StderrLog) {
-            $Output += Get-Content $StderrLog -Raw
-          }
-          throw "llama-server exited before readiness. $Output"
+    $Deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    $LastResponse = ""
+    $RequestBody = @{
+      model = "configure-test"
+      messages = @(@{
+        role = "user"
+        content = $Prompt
+      })
+      max_tokens = $MaxTokens
+      temperature = 0
+      stream = $false
+    } | ConvertTo-Json -Depth 8 -Compress
+
+    while ([DateTimeOffset]::UtcNow -lt $Deadline) {
+      if ($Process.HasExited) {
+        $Output = ""
+        if (Test-Path $StdoutLog) {
+          $Output += Get-Content $StdoutLog -Raw
         }
-        Start-Sleep -Seconds 1
+        if (Test-Path $StderrLog) {
+          $Output += Get-Content $StderrLog -Raw
+        }
+        throw "llama-server exited before returning a chat completion. $Output"
       }
+
+      try {
+        $Response = Invoke-WebRequest `
+          -UseBasicParsing `
+          -TimeoutSec $RequestTimeoutSeconds `
+          -Method Post `
+          -ContentType "application/json" `
+          -Body $RequestBody `
+          -Uri "http://127.0.0.1:$Port/v1/chat/completions"
+        $LastResponse = $Response.Content
+        if (Test-LlamaCompletionResponse -ResponseText $LastResponse) {
+          Write-Output "Completion response: $LastResponse"
+          return
+        }
+      } catch {
+        $LastResponse = ($_ | Out-String)
+      }
+      Start-Sleep -Seconds 1
     }
     $TimedOutOutput = ""
     if (Test-Path $StdoutLog) {
@@ -326,7 +391,7 @@ function Invoke-LlamaBackendProbe {
     if (Test-Path $StderrLog) {
       $TimedOutOutput += Get-Content $StderrLog -Raw
     }
-    throw "llama-server did not serve /v1/models before timeout. $TimedOutOutput"
+    throw "llama-server did not return a chat completion before timeout. Last response: $LastResponse $TimedOutOutput"
   } finally {
     if (-not $Process.HasExited) {
       Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue

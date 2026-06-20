@@ -122,13 +122,16 @@ Windows PowerShell:
 The configure scripts test LiteRT `cpu`, `gpu`, and `npu` backends plus
 discovered llama.cpp runtime backend types under `native/llama-runtimes/`.
 Before each test, the script prints the command it plans to use and lets you
-edit it; an empty response runs the default. Results are written to the ignored
+edit it; an empty response runs the default. LiteRT probes require non-error
+`litert-lm run` output, and llama.cpp probes start `llama-server` with reasoning
+off and wait for a non-streaming `/v1/chat/completions` response so server
+readiness alone does not count as a working model backend. The llama.cpp probe
+uses `LLAMA_TEST_MAX_TOKENS=128` by default. Results are written to the ignored
 local file `native/runtime-config/backends.json`. Backends marked not working
 are hidden from the sidecar TUI Launch Wizard. The sidecar TUI Setup tab can
 also enable or disable the same LiteRT and llama.cpp backend entries and writes
-the same local config file. Override test models with
-`LITERT_TEST_MODEL` and `LLAMA_TEST_MODEL`, or pass the matching script
-parameters.
+the same local config file. Override test models with `LITERT_TEST_MODEL` and
+`LLAMA_TEST_MODEL`, or pass the matching script parameters.
 
 To use a Nextcloud public share as the model download source instead of the
 default Hugging Face URLs, pass the share URL at install time. The share should
@@ -268,9 +271,9 @@ starts `litert-lm serve --host 127.0.0.1 --port 9381`.
 The TUI Launch Wizard creates runners from downloaded catalog models. It toggles
 `litert` versus `llamacpp`; `litert` exposes `cpu`, `gpu`, and `npu` variants,
 while `llamacpp` exposes installed `native/llama-runtimes` choices grouped as
-`cpu`, `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, and `sycl`. It then filters model
-choices by role (`main`, `embedding`, or `reranking`) and only shows downloaded
-applicable models.
+`cpu`, `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, and `sycl` when matching
+runtime folders are present. It then filters model choices by role (`main`,
+`embedding`, or `reranking`) and only shows downloaded applicable models.
 
 The sidecar still exposes HTTP endpoints for manual checks and smoke scripts,
 including status:

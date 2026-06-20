@@ -684,7 +684,7 @@ func (m Model) wizardModelIndexFromMouse(x int, y int) (int, bool) {
 }
 
 func (m Model) setupBackendIndexFromMouse(y int) (int, bool) {
-	rows := setupBackendRows()
+	rows := m.setupBackendRows()
 	row := y - panelContentRow(m.contentTopRow(), setupBackendFirstLine)
 	if row < 0 || row >= len(rows) {
 		return 0, false
@@ -1822,10 +1822,11 @@ func (m Model) setupView() string {
 }
 
 func (m Model) setupBackendLines() []string {
-	rows := setupBackendRows()
+	rows := m.setupBackendRows()
 	selected := clampInt(m.setupSelection, 0, len(rows)-1)
 	lines := []string{
 		"Up/Down selects a backend; Enter/Space toggles enabled state.",
+		"Click a backend row to toggle it.",
 		"Disabled backends are hidden from Launch Wizard choices.",
 		"Runtime     Backend   State",
 	}
@@ -1879,7 +1880,7 @@ func (m Model) toggleSelectedSetupBackend() Model {
 }
 
 func (m Model) selectedSetupBackend() (setupBackendRow, bool) {
-	rows := setupBackendRows()
+	rows := m.setupBackendRows()
 	if len(rows) == 0 {
 		return setupBackendRow{}, false
 	}
@@ -1888,7 +1889,7 @@ func (m Model) selectedSetupBackend() (setupBackendRow, bool) {
 }
 
 func (m *Model) clampSetupSelection() {
-	rows := setupBackendRows()
+	rows := m.setupBackendRows()
 	if len(rows) == 0 {
 		m.setupSelection = 0
 		return
@@ -1896,8 +1897,9 @@ func (m *Model) clampSetupSelection() {
 	m.setupSelection = clampInt(m.setupSelection, 0, len(rows)-1)
 }
 
-func setupBackendRows() []setupBackendRow {
-	rows := make([]setupBackendRow, 0, len(litertBackendOptions())+len(llamaTypeOptions()))
+func (m Model) setupBackendRows() []setupBackendRow {
+	llamaOptions := m.availableLlamaTypeOptions()
+	rows := make([]setupBackendRow, 0, len(litertBackendOptions())+len(llamaOptions))
 	for _, backend := range litertBackendOptions() {
 		rows = append(rows, setupBackendRow{
 			Runtime:      "litert",
@@ -1905,7 +1907,7 @@ func setupBackendRows() []setupBackendRow {
 			Backend:      backend,
 		})
 	}
-	for _, backend := range llamaTypeOptions() {
+	for _, backend := range llamaOptions {
 		rows = append(rows, setupBackendRow{
 			Runtime:      "llamacpp",
 			RuntimeLabel: "llama.cpp",
@@ -3993,7 +3995,11 @@ func (m Model) selectedLlamaRuntimeVariant() (llamaRuntimeVariant, bool) {
 		return llamaRuntimeVariant{}, false
 	}
 	for _, variant := range m.llamaRuntimeVariants {
-		if llamaRuntimeType(variant.Name) == m.wizardBackend {
+		backend := variant.Backend
+		if backend == "" {
+			backend = llamaRuntimeType(variant.Name)
+		}
+		if backend == m.wizardBackend {
 			return variant, true
 		}
 	}
@@ -4127,7 +4133,26 @@ func llamaTypeOptions() []string {
 }
 
 func (m Model) llamaTypeOptions() []string {
-	return m.visibleBackendOptions("llamacpp", llamaTypeOptions())
+	return m.visibleBackendOptions("llamacpp", m.availableLlamaTypeOptions())
+}
+
+func (m Model) availableLlamaTypeOptions() []string {
+	available := map[string]bool{}
+	for _, variant := range m.llamaRuntimeVariants {
+		backend := variant.Backend
+		if backend == "" {
+			backend = llamaRuntimeType(variant.Name)
+		}
+		available[backend] = true
+	}
+
+	options := []string{}
+	for _, option := range llamaTypeOptions() {
+		if available[option] {
+			options = append(options, option)
+		}
+	}
+	return options
 }
 
 func (m Model) visibleBackendOptions(runtimeName string, options []string) []string {
@@ -4143,7 +4168,11 @@ func (m Model) visibleBackendOptions(runtimeName string, options []string) []str
 func (m Model) filterLlamaRuntimeVariants(variants []llamaRuntimeVariant) []llamaRuntimeVariant {
 	filtered := make([]llamaRuntimeVariant, 0, len(variants))
 	for _, variant := range variants {
-		if m.backendStatus.Visible("llamacpp", llamaRuntimeType(variant.Name)) {
+		backend := variant.Backend
+		if backend == "" {
+			backend = llamaRuntimeType(variant.Name)
+		}
+		if m.backendStatus.Visible("llamacpp", backend) {
 			filtered = append(filtered, variant)
 		}
 	}
@@ -4151,8 +4180,7 @@ func (m Model) filterLlamaRuntimeVariants(variants []llamaRuntimeVariant) []llam
 }
 
 func (m Model) firstAvailableLlamaType() string {
-	for _, variant := range m.llamaRuntimeVariants {
-		backend := llamaRuntimeType(variant.Name)
+	for _, backend := range m.availableLlamaTypeOptions() {
 		if m.backendStatus.Visible("llamacpp", backend) {
 			return backend
 		}
@@ -4236,7 +4264,7 @@ func discoverLlamaRuntimeVariants(root string) []llamaRuntimeVariant {
 		}
 		variants = append(variants, llamaRuntimeVariant{
 			Name:       entry.Name(),
-			Backend:    backendForLlamaRuntime(entry.Name()),
+			Backend:    llamaRuntimeType(entry.Name()),
 			Executable: executable,
 		})
 	}

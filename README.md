@@ -78,6 +78,22 @@ when available and fall back to starting a new PowerShell console.
 For explicit non-interactive sidecar launches, pass `--headless` to
 `launch-sidecar.sh` or `-Headless` to `launch-sidecar.ps1`.
 
+To remove generated, ignored, and untracked files from the checkout while
+preserving local model binaries under `models/`, run:
+
+```bash
+./clean.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\clean.ps1
+```
+
+The clean scripts run `git clean -xdf -e models/`. They do not revert tracked
+file edits.
+
 For a guided first-time setup, run the interactive installer:
 
 ```bash

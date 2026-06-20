@@ -10,6 +10,27 @@ function readRootScript(name: string): string {
 }
 
 describe("root launcher scripts", () => {
+  it("provides clean scripts that remove generated files while preserving models", () => {
+    const shellScriptPath = join(repoRoot, "clean.sh");
+    const shell = readRootScript("clean.sh");
+    const powershell = readRootScript("clean.ps1");
+
+    accessSync(shellScriptPath, constants.X_OK);
+    expect(shell).toContain("#!/usr/bin/env bash");
+    expect(shell).toContain("set -euo pipefail");
+    expect(shell).toContain('dirname "${BASH_SOURCE[0]}"');
+    expect(shell).toContain('git -C "$repo_root" clean -xdf -e models/');
+    expect(shell).toContain("-e models/");
+    expect(shell).not.toContain("reset --hard");
+
+    expect(powershell).toContain("Set-StrictMode");
+    expect(powershell).toContain("$PSScriptRoot");
+    expect(powershell).toContain('git -C $RepoRoot clean -xdf -e "models/"');
+    expect(powershell).toContain("-e");
+    expect(powershell).toContain("models/");
+    expect(powershell).not.toContain("reset --hard");
+  });
+
   it("provides Unix and PowerShell entry points for web UI, sidecar, and both", () => {
     const scriptNames = [
       "launch-webui.sh",

@@ -497,7 +497,7 @@ func (m Model) handleBottomBarAction(x int, y int) (Model, tea.Cmd, bool) {
 		}
 	case "runner-edit-command":
 		if runner, ok := m.activeRunner(); ok {
-			m.edit = newRunnerEdit(runner, "commandLine", "Command", runnerCommandLine(runner.Command), false)
+			m.edit = newCommandLineRunnerEdit(runner)
 			return m, nil, true
 		}
 	case "runner-close":
@@ -848,7 +848,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if runner, ok := m.activeRunner(); ok {
 			if value == "C" {
-				m.edit = newRunnerEdit(runner, "commandLine", "Command", runnerCommandLine(runner.Command), false)
+				m.edit = newCommandLineRunnerEdit(runner)
 				return m, nil
 			}
 			switch strings.ToLower(value) {
@@ -1185,6 +1185,13 @@ func newRunnerEdit(
 		value:   "",
 		numeric: numeric,
 	}
+}
+
+func newCommandLineRunnerEdit(runner server.RunnerSnapshot) *runnerEdit {
+	current := runnerCommandLine(runner.Command)
+	edit := newRunnerEdit(runner, "commandLine", "Command", current, false)
+	edit.value = current
+	return edit
 }
 
 func newSecretRunnerEdit(
@@ -4116,7 +4123,7 @@ func (m Model) litertBackendOptions() []string {
 }
 
 func llamaTypeOptions() []string {
-	return []string{"cpu", "gpu", "openvino", "cuda13", "cuda12", "sycl"}
+	return []string{"cpu", "gpu", "metal", "openvino", "cuda13", "cuda12", "sycl"}
 }
 
 func (m Model) llamaTypeOptions() []string {
@@ -4160,6 +4167,8 @@ func llamaRuntimeType(name string) string {
 		return "cuda13"
 	case strings.Contains(lower, "cuda-12") || strings.Contains(lower, "cuda12") || strings.Contains(lower, "cuda-12."):
 		return "cuda12"
+	case strings.Contains(lower, "macos"):
+		return "metal"
 	case strings.Contains(lower, "openvino"):
 		return "openvino"
 	case strings.Contains(lower, "sycl"):

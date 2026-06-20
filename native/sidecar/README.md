@@ -49,7 +49,7 @@ The Launch Wizard is a compact configuration screen. It lets the user click or
 key-select the runtime (`litert` or `llamacpp`), a runtime variant, model role
 (`main`, `embedding`, or `reranking`), and one locally installed matching model.
 LiteRT variants are `cpu`, `gpu`, and `npu`. llama.cpp variants are shown as
-`cpu`, `gpu`, `openvino`, `cuda13`, `cuda12`, and `sycl`, and are mapped to
+`cpu`, `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, and `sycl`, and are mapped to
 installed folders under `native/llama-runtimes`. Variants disabled in the Setup
 tab are hidden immediately. Pressing Enter or clicking `START` creates and
 starts a runner. New runner tabs are inserted after the Setup tab and are named
@@ -57,7 +57,7 @@ by runtime and role, such as `LR-M-1`, `LM-E-1`, or `LM-R-1`; numbering is per
 role.
 
 The Setup tab shows LiteRT backends (`cpu`, `gpu`, `npu`) and llama.cpp backend
-types (`cpu`, `gpu`, `openvino`, `cuda13`, `cuda12`, `sycl`) with their current
+types (`cpu`, `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, `sycl`) with their current
 enabled or disabled state from `native/runtime-config/backends.json`.
 Up/Down selects a backend row, and Enter or Space toggles it. Toggling writes
 `working: true` for enabled or `working: false` for disabled, creating the local

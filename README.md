@@ -252,7 +252,7 @@ starts `litert-lm serve --host 127.0.0.1 --port 9381`.
 The TUI Launch Wizard creates runners from downloaded catalog models. It toggles
 `litert` versus `llamacpp`; `litert` exposes `cpu`, `gpu`, and `npu` variants,
 while `llamacpp` exposes installed `native/llama-runtimes` choices grouped as
-`cpu`, `gpu`, `openvino`, `cuda13`, `cuda12`, and `sycl`. It then filters model
+`cpu`, `gpu`, `metal`, `openvino`, `cuda13`, `cuda12`, and `sycl`. It then filters model
 choices by role (`main`, `embedding`, or `reranking`) and only shows downloaded
 applicable models.
 

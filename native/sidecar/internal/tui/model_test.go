@@ -477,6 +477,46 @@ func TestLaunchWizardHidesConfiguredNotWorkingBackends(t *testing.T) {
 	}
 }
 
+func TestLaunchWizardClassifiesMacLlamaRuntimeAsMetal(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "backends.json")
+	config := `{
+  "version": 1,
+  "runtimes": {
+    "llamacpp": {
+      "cpu": {"working": false},
+      "metal": {"working": true}
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write backend config: %v", err)
+	}
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-macos-arm64"),
+		BackendConfigPath: configPath,
+	})
+	model.toggleWizardRuntime()
+	if got := model.wizardBackend; got != "metal" {
+		t.Fatalf("wizard backend for macOS llama runtime = %q, want metal", got)
+	}
+	variant, ok := model.selectedLlamaRuntimeVariant()
+	if !ok {
+		t.Fatal("expected selected macOS llama runtime variant")
+	}
+	if variant.Backend != "metal" {
+		t.Fatalf("macOS llama variant backend = %q, want metal", variant.Backend)
+	}
+	if strings.Contains(compactSpaces(model.View()), "llama type cpu") {
+		t.Fatalf("disabled cpu backend should not remain visible for macOS llama runtime:\n%s", model.View())
+	}
+}
+
 func TestSetupTabRendersBackendStatesFromConfig(t *testing.T) {
 	t.Parallel()
 
@@ -490,6 +530,7 @@ func TestSetupTabRendersBackendStatesFromConfig(t *testing.T) {
     },
     "llamacpp": {
       "cpu": {"working": false},
+      "metal": {"working": true},
       "openvino": {"working": true},
       "cuda13": {"working": false}
     }
@@ -518,6 +559,7 @@ func TestSetupTabRendersBackendStatesFromConfig(t *testing.T) {
 		"LiteRT gpu disabled",
 		"LiteRT npu enabled",
 		"llama.cpp cpu disabled",
+		"llama.cpp metal enabled",
 		"llama.cpp openvino enabled",
 		"llama.cpp cuda13 disabled",
 		"llama.cpp sycl enabled",
@@ -822,11 +864,22 @@ func TestRunnerTabRendersAndEditsCommandPreview(t *testing.T) {
 	if editing.edit == nil || editing.edit.field != "commandLine" {
 		t.Fatalf("edit state = %#v, want commandLine editor", editing.edit)
 	}
+	currentLine := runnerCommandLine(runner.Command)
+	if editing.edit.value != currentLine {
+		t.Fatalf("command editor value = %q, want current command %q", editing.edit.value, currentLine)
+	}
 	if !strings.Contains(editing.View(), "Editing Command") {
 		t.Fatalf("runner command editor is not visible:\n%s", editing.View())
 	}
 
 	editedLine := "litert-lm serve --host 127.0.0.1 --port 9488 --verbose"
+	for range currentLine {
+		next, cmd = editing.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		if cmd != nil {
+			t.Fatalf("clearing command returned unexpected command")
+		}
+		editing = next.(Model)
+	}
 	next, cmd = editing.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(editedLine)})
 	if cmd != nil {
 		t.Fatalf("typing command returned unexpected command")
@@ -1032,7 +1085,7 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	view := model.View()
 	compactView := compactSpaces(view)
 	for _, expected := range []string{
-		"llama type cpu gpu openvino [cuda13] cuda12 sycl",
+		"llama type cpu gpu metal openvino [cuda13] cuda12 sycl",
 		"model role main embedding [reranking]",
 		"Qwen3-Reranker-0.6B-Q4_K_M.gguf",
 		"[ START ]",

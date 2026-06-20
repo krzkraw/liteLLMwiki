@@ -110,6 +110,9 @@ function Get-LlamaRuntimeType {
   if (($Lower -like "*cuda-12*") -or ($Lower -like "*cuda12*")) {
     return "cuda12"
   }
+  if ($Lower -like "*macos*") {
+    return "metal"
+  }
   if ($Lower -like "*openvino*") {
     return "openvino"
   }
@@ -165,7 +168,7 @@ function Get-LlamaSpecs {
       $ExecutableFallback = "llama-server"
     }
   }
-  foreach ($Backend in @("cpu", "gpu", "openvino", "cuda13", "cuda12", "sycl")) {
+  foreach ($Backend in @("cpu", "gpu", "metal", "openvino", "cuda13", "cuda12", "sycl")) {
     $Specs.Add([pscustomobject]@{
       Backend = $Backend
       Executable = $ExecutableFallback

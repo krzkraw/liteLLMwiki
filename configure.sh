@@ -152,6 +152,7 @@ llama_runtime_type() {
   case "$lower" in
     *cuda-13*|*cuda13*) printf 'cuda13\n' ;;
     *cuda-12*|*cuda12*) printf 'cuda12\n' ;;
+    *macos*) printf 'metal\n' ;;
     *openvino*) printf 'openvino\n' ;;
     *sycl*) printf 'sycl\n' ;;
     *vulkan*|*hip*|*radeon*|*opencl*) printf 'gpu\n' ;;
@@ -462,7 +463,7 @@ main() {
   done < <(discover_llama_specs)
 
   if [[ "${#llama_specs[@]}" -eq 0 ]]; then
-    for known_backend in cpu gpu openvino cuda13 cuda12 sycl; do
+    for known_backend in cpu gpu metal openvino cuda13 cuda12 sycl; do
       llama_specs+=("$known_backend|$llama_bin|candidate")
     done
   fi

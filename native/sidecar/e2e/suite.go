@@ -147,6 +147,7 @@ func PlanRuntimeBackendCombos(options SuiteOptions) (RuntimeBackendPlan, error) 
 		case "litert":
 			combo.Executable = litertExecutable
 			combo = attachCatalogModel(combo, modelCatalog)
+			combo = preferConfiguredModel(combo, modelCatalog, repoRoot)
 			combo.SkipReason = litertSkipReason(combo)
 		case "llamacpp":
 			combo.Executable = llamaExecutable
@@ -158,6 +159,7 @@ func PlanRuntimeBackendCombos(options SuiteOptions) (RuntimeBackendPlan, error) 
 				}
 			}
 			combo = attachCatalogModel(combo, modelCatalog)
+			combo = preferConfiguredModel(combo, modelCatalog, repoRoot)
 			combo.SkipReason = llamaSkipReason(combo)
 		default:
 			combo.SkipReason = "unsupported runtime " + item.Runtime
@@ -189,6 +191,29 @@ func attachCatalogModel(combo RuntimeBackendCombo, modelCatalog *catalog.Catalog
 		combo.ModelPath = entry.TargetPath
 		return combo
 	}
+	return combo
+}
+
+func preferConfiguredModel(combo RuntimeBackendCombo, modelCatalog *catalog.Catalog, repoRoot string) RuntimeBackendCombo {
+	configuredModel := strings.TrimSpace(combo.ConfigResult.Model)
+	if configuredModel == "" {
+		return combo
+	}
+	if !filepath.IsAbs(configuredModel) {
+		configuredModel = filepath.Join(repoRoot, configuredModel)
+	}
+	stat, err := os.Stat(configuredModel)
+	if err != nil || stat.IsDir() {
+		return combo
+	}
+	combo.ModelPath = configuredModel
+	for _, entry := range modelCatalog.Entries() {
+		if entry.Runtime == combo.Runtime && entry.Role == combo.Role && entry.TargetPath == configuredModel {
+			combo.ModelID = entry.ID
+			return combo
+		}
+	}
+	combo.ModelID = comboRunnerID(combo)
 	return combo
 }
 
@@ -392,6 +417,8 @@ func llamaRuntimeType(name string) string {
 		return "cuda13"
 	case strings.Contains(lower, "cuda-12") || strings.Contains(lower, "cuda12") || strings.Contains(lower, "cuda-12."):
 		return "cuda12"
+	case strings.Contains(lower, "macos"):
+		return "metal"
 	case strings.Contains(lower, "openvino"):
 		return "openvino"
 	case strings.Contains(lower, "sycl"):

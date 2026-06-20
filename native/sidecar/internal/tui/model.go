@@ -2226,7 +2226,10 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 	if editor := m.runnerEditorSpec(runner); editor.title != "" {
 		panels = append(panels, editor)
 	}
-	return m.panelGrid(panels...)
+	return joinPanels(
+		m.panelGrid(panels...),
+		renderPanelSpec(m.runnerTerminalSpec(runner), m.width),
+	)
 }
 
 func (m Model) runnerSummaryLines(runner server.RunnerSnapshot) []string {
@@ -2551,6 +2554,23 @@ func (m Model) runnerLogLines(runnerID string, limit int) []string {
 	for _, entry := range filtered[start:] {
 		lines = append(lines, formatLogEntry(entry))
 	}
+	return lines
+}
+
+func (m Model) runnerTerminalSpec(runner server.RunnerSnapshot) panelSpec {
+	return panelSpec{
+		title: "Terminal / Logs",
+		lines: m.runnerTerminalLines(runner),
+		color: "244",
+	}
+}
+
+func (m Model) runnerTerminalLines(runner server.RunnerSnapshot) []string {
+	lines := []string{
+		formatKV("Command", fallback(runnerCommandLine(runner.Command), "not configured")),
+		"",
+	}
+	lines = append(lines, m.runnerLogLines(runner.ID, runnerTerminalLogLimit)...)
 	return lines
 }
 
@@ -4389,8 +4409,9 @@ func tick() tea.Cmd {
 }
 
 const (
-	widePanelGridMinWidth = 150
-	panelGridColumnGap    = 2
+	widePanelGridMinWidth  = 150
+	panelGridColumnGap     = 2
+	runnerTerminalLogLimit = 10
 )
 
 type panelSpec struct {

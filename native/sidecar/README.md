@@ -67,10 +67,12 @@ Runner tabs show basic status and route/control panels with runtime, role,
 backend, model, upstream, PID, the command argv that will be used for the next
 managed start, `s`/`x`/`r` start/stop/restart actions, `C`/`Edit Cmd` command
 editing, and an `X Close` bottom action that stops a running runner and removes
-its tab. Launch Wizard and runner tabs use the same responsive body layout: small
-terminals render full-width stacked panels, and wide terminals render two
-masonry-balanced columns so the right side of the terminal is used without
-bringing back the old cluster of diagnostic boxes.
+its tab. Each runner tab also has a bottom terminal/log panel with the command
+line and recent stdout/stderr entries for that runner. Launch Wizard and runner
+tabs use the same responsive body layout: small terminals render full-width
+stacked panels, and wide terminals render two masonry-balanced columns so the
+right side of the terminal is used without bringing back the old cluster of
+diagnostic boxes.
 
 In headless mode, the sidecar still:
 

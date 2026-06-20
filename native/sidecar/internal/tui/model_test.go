@@ -852,6 +852,110 @@ func TestRunnerTabRendersAndEditsCommandPreview(t *testing.T) {
 	}
 }
 
+func TestRunnerTabRendersBottomTerminalWithRunnerLogs(t *testing.T) {
+	t.Parallel()
+
+	runner := testRunner("LR-M-1", "litert", "main", "running")
+	runner.Command = []string{
+		"litert-lm",
+		"serve",
+		"--host",
+		"127.0.0.1",
+		"--port",
+		"9381",
+	}
+	logs := server.NewLogBroadcaster(16)
+	logs.Publish("runner:LR-M-1", "stdout", "model loaded")
+	logs.Publish("runner:LR-M-1", "stderr", "retrying bind")
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{runner}),
+		Logs:             logs,
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 180
+	model.height = 40
+	model.setActiveTab("runner:LR-M-1")
+
+	view := model.View()
+	terminal := runnerTerminalSection(t, view)
+	for _, expected := range []string{
+		"Command",
+		"litert-lm serve --host 127.0.0.1 --port 9381",
+		"stdout model loaded",
+		"stderr retrying bind",
+	} {
+		if !strings.Contains(terminal, expected) {
+			t.Fatalf("runner terminal missing %q:\n%s", expected, view)
+		}
+	}
+	commandIndex := strings.Index(terminal, "Command")
+	logIndex := strings.Index(terminal, "stdout model loaded")
+	if commandIndex < 0 || logIndex < commandIndex {
+		t.Fatalf("runner terminal should render command before logs:\n%s", terminal)
+	}
+	terminalIndex := strings.LastIndex(view, "Terminal")
+	controlsIndex := strings.LastIndex(view, "Routes / Controls")
+	if terminalIndex < controlsIndex {
+		t.Fatalf("runner terminal should render below route/control panels:\n%s", view)
+	}
+}
+
+func TestRunnerTabFiltersTerminalLogsToActiveRunner(t *testing.T) {
+	t.Parallel()
+
+	runner := testRunner("LR-M-1", "litert", "main", "running")
+	runner.Command = []string{"litert-lm", "serve"}
+	logs := server.NewLogBroadcaster(16)
+	logs.Publish("runner:LR-M-2", "stdout", "other runner output")
+	logs.Publish("runtime", "stderr", "runtime output")
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{runner}),
+		Logs:             logs,
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 160
+	model.height = 36
+	model.setActiveTab("runner:LR-M-1")
+
+	terminal := runnerTerminalSection(t, model.View())
+	for _, unexpected := range []string{
+		"other runner output",
+		"runtime output",
+	} {
+		if strings.Contains(terminal, unexpected) {
+			t.Fatalf("runner terminal should filter %q:\n%s", unexpected, terminal)
+		}
+	}
+}
+
+func TestRunnerTabTerminalEmptyStateIncludesCommand(t *testing.T) {
+	t.Parallel()
+
+	runner := testRunner("LR-M-1", "litert", "main", "created")
+	runner.Command = []string{"litert-lm", "serve", "--port", "9381"}
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{runner}),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 34
+	model.setActiveTab("runner:LR-M-1")
+
+	terminal := runnerTerminalSection(t, model.View())
+	for _, expected := range []string{
+		"Command",
+		"litert-lm serve --port 9381",
+		"No runner logs yet.",
+	} {
+		if !strings.Contains(terminal, expected) {
+			t.Fatalf("empty runner terminal missing %q:\n%s", expected, terminal)
+		}
+	}
+}
+
 func TestRunnerCloseBottomActionCallsControllerAndRemovesTab(t *testing.T) {
 	t.Parallel()
 
@@ -1035,6 +1139,16 @@ func lineContainsAll(view string, parts ...string) bool {
 		}
 	}
 	return false
+}
+
+func runnerTerminalSection(t *testing.T, view string) string {
+	t.Helper()
+
+	index := strings.LastIndex(view, "Terminal")
+	if index < 0 {
+		t.Fatalf("runner terminal panel missing:\n%s", view)
+	}
+	return view[index:]
 }
 
 func compactSpaces(value string) string {

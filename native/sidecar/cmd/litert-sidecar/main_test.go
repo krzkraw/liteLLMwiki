@@ -181,6 +181,23 @@ func TestSupervisorRunnerControllerCreatesAndControlsRunner(t *testing.T) {
 	if snapshot.Routes["embedding"] != runner.ID {
 		t.Fatalf("embedding route = %q", snapshot.Routes["embedding"])
 	}
+
+	closed, err := controller.CloseRunner(context.Background(), runner.ID)
+	if err != nil {
+		t.Fatalf("close runner: %v", err)
+	}
+	if closed.ID != runner.ID {
+		t.Fatalf("closed runner id = %q, want %q", closed.ID, runner.ID)
+	}
+	snapshot = controller.Snapshot()
+	if got, ok := snapshot.Routes["embedding"]; ok {
+		t.Fatalf("embedding route = %q/%v, want removed after close", got, ok)
+	}
+	for _, snapshotRunner := range snapshot.Runners {
+		if snapshotRunner.ID == runner.ID {
+			t.Fatalf("runner %q should be removed after close", runner.ID)
+		}
+	}
 }
 
 func TestSupervisorRunnerControllerStartOutlivesRequestContext(t *testing.T) {

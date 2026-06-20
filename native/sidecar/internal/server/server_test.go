@@ -467,6 +467,94 @@ func TestRunnerEndpointsCreateListAndControlRunner(t *testing.T) {
 	}
 }
 
+func TestRunnerCloseEndpointRemovesRunnerAndRoute(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{
+		DisableDefaultLiteRT: true,
+	})
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+
+	runnerID, err := runtimeSupervisor.CreateRunner(supervisor.RunnerSpec{
+		ID:       "embedding-llamacpp",
+		Runtime:  supervisor.RuntimeLlamaCPP,
+		Role:     supervisor.RoleEmbedding,
+		Backend:  supervisor.BackendCPU,
+		ModelID:  "qwen3-embedding",
+		Host:     "127.0.0.1",
+		Port:     9492,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9492",
+	})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	if runnerID != "embedding-llamacpp" {
+		t.Fatalf("runner id = %q", runnerID)
+	}
+
+	closeReq := httptest.NewRequest(
+		http.MethodPost,
+		"/sidecar/v1/runners/embedding-llamacpp/close",
+		nil,
+	)
+	closeRec := httptest.NewRecorder()
+	handler.ServeHTTP(closeRec, closeReq)
+
+	if closeRec.Code != http.StatusOK {
+		t.Fatalf(
+			"close status = %d, want %d: %s",
+			closeRec.Code,
+			http.StatusOK,
+			closeRec.Body.String(),
+		)
+	}
+	var closeBody struct {
+		Runner RunnerSnapshot `json:"runner"`
+	}
+	if err := json.NewDecoder(closeRec.Body).Decode(&closeBody); err != nil {
+		t.Fatalf("decode close response: %v", err)
+	}
+	if closeBody.Runner.ID != "embedding-llamacpp" {
+		t.Fatalf("closed runner id = %q", closeBody.Runner.ID)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/sidecar/v1/runners", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+	var listBody RunnerSnapshotResponse
+	if err := json.NewDecoder(listRec.Body).Decode(&listBody); err != nil {
+		t.Fatalf("decode runner list: %v", err)
+	}
+	if len(listBody.Runners) != 0 {
+		t.Fatalf("runners = %#v, want none after close", listBody.Runners)
+	}
+	if got, ok := listBody.Routes["embedding"]; ok {
+		t.Fatalf("embedding route = %q/%v, want removed after close", got, ok)
+	}
+
+	missingReq := httptest.NewRequest(
+		http.MethodPost,
+		"/sidecar/v1/runners/missing-runner/close",
+		nil,
+	)
+	missingRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf(
+			"missing close status = %d, want %d: %s",
+			missingRec.Code,
+			http.StatusNotFound,
+			missingRec.Body.String(),
+		)
+	}
+}
+
 func TestWebSocketAPIRequestControlsRunner(t *testing.T) {
 	t.Parallel()
 
@@ -1471,6 +1559,20 @@ func (c testRunnerController) RestartRunner(
 		return RunnerSnapshot{}, err
 	}
 	return c.runner(id)
+}
+
+func (c testRunnerController) CloseRunner(
+	ctx context.Context,
+	id string,
+) (RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	runner, err := c.supervisor.CloseRunner(ctx, id)
+	if err != nil {
+		return RunnerSnapshot{}, err
+	}
+	return testRunnerSnapshot(runner), nil
 }
 
 func (c testRunnerController) runner(id string) (RunnerSnapshot, error) {

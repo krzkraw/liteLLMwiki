@@ -42,7 +42,7 @@ The bottom line is the action surface, htop-style. It always shows global
 actions and the current tab's actions. Clicking `Menu` opens a bottom-left
 global menu with navigation, palette, and quit actions; `F1` remains a keyboard
 shortcut for terminals that expose function keys. Runner tab action labels in
-the bottom bar are clickable and call the same start, stop, and restart
+the bottom bar are clickable and call the same start, stop, restart, and close
 controller methods as the keyboard shortcuts.
 
 The Launch Wizard is a compact configuration screen. It lets the user click or
@@ -64,8 +64,9 @@ Up/Down selects a backend row, and Enter or Space toggles it. Toggling writes
 backend config file when it does not exist.
 
 Runner tabs show basic status and route/control panels with runtime, role,
-backend, model, upstream, PID, and `s`/`x`/`r` start/stop/restart actions.
-Launch Wizard and runner tabs use the same responsive body layout: small
+backend, model, upstream, PID, `s`/`x`/`r` start/stop/restart actions, and an
+`X Close` bottom action that stops a running runner and removes its tab. Launch
+Wizard and runner tabs use the same responsive body layout: small
 terminals render full-width stacked panels, and wide terminals render two
 masonry-balanced columns so the right side of the terminal is used without
 bringing back the old cluster of diagnostic boxes.
@@ -138,6 +139,7 @@ PATCH /sidecar/v1/runners/{id}
 POST /sidecar/v1/runners/{id}/start
 POST /sidecar/v1/runners/{id}/restart
 POST /sidecar/v1/runners/{id}/stop
+POST /sidecar/v1/runners/{id}/close
 ```
 
 `POST /sidecar/v1/runners` accepts runner fields such as `id`, `runtime`,
@@ -146,7 +148,9 @@ POST /sidecar/v1/runners/{id}/stop
 fields as a partial update for a runner that is not currently starting or
 running. The same routes are available through WebSocket `api.request` frames.
 Long-lived start and restart operations are detached from the request context,
-while stop operations still honor the caller timeout.
+while stop and close operations still honor the caller timeout. Closing a
+runner stops a managed running process when needed, removes owned route state,
+and removes the runner from subsequent runner snapshots.
 
 `/sidecar/v1/status` probes the upstream `/v1/models` endpoint when the runtime
 is available. The base `gemma4-e2b` model means the default CPU/base path is

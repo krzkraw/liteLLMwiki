@@ -302,6 +302,20 @@ func (c supervisorRunnerController) RestartRunner(
 	return c.runner(id)
 }
 
+func (c supervisorRunnerController) CloseRunner(
+	ctx context.Context,
+	id string,
+) (server.RunnerSnapshot, error) {
+	if _, err := c.runner(id); err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	runner, err := c.supervisor.CloseRunner(ctx, id)
+	if err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	return toServerRunnerSnapshot(runner), nil
+}
+
 func (c supervisorRunnerController) runner(id string) (server.RunnerSnapshot, error) {
 	runner, ok := c.supervisor.Runner(id)
 	if !ok {

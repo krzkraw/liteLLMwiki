@@ -496,6 +496,39 @@ func (s *Supervisor) StopRunner(ctx context.Context, id string) error {
 	return s.stopRecord(ctx, record)
 }
 
+func (s *Supervisor) CloseRunner(ctx context.Context, id string) (RunnerSnapshot, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	record, err := s.recordForUpdate(id)
+	if err != nil {
+		return RunnerSnapshot{}, err
+	}
+	closed := s.runnerSnapshot(record)
+	if err := s.stopRecord(ctx, record); err != nil {
+		return RunnerSnapshot{}, err
+	}
+	if closed.State == StateRunning || closed.State == StateStarting {
+		closed.State = StateStopped
+		closed.Detail = "Runner process was stopped and closed."
+		closed.LastError = ""
+	}
+
+	s.mu.Lock()
+	current := s.runners[id]
+	if current == nil {
+		s.mu.Unlock()
+		return RunnerSnapshot{}, fmt.Errorf("runner %q not found", id)
+	}
+	if routedID := s.routes[current.snapshot.Role]; routedID == id {
+		delete(s.routes, current.snapshot.Role)
+	}
+	delete(s.runners, id)
+	s.mu.Unlock()
+	s.publishStatusChange()
+	return closed, nil
+}
+
 func (s *Supervisor) RestartRunner(ctx context.Context, id string) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()

@@ -41,6 +41,7 @@ const (
 	runnerBottomStartX   = 63
 	runnerBottomStopX    = 73
 	runnerBottomRestartX = 82
+	runnerBottomCloseX   = 90
 )
 
 type tab struct {
@@ -494,6 +495,10 @@ func (m Model) handleBottomBarAction(x int, y int) (Model, tea.Cmd, bool) {
 		if runner, ok := m.activeRunner(); ok {
 			return m, m.runnerActionCmd("restart", runner.ID), true
 		}
+	case "runner-close":
+		if runner, ok := m.activeRunner(); ok {
+			return m, m.runnerActionCmd("close", runner.ID), true
+		}
 	}
 	return m, nil, false
 }
@@ -909,6 +914,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.runnerActionCmd("stop", runner.ID)
 			case "r":
 				return m, m.runnerActionCmd("restart", runner.ID)
+			case "c":
+				return m, m.runnerActionCmd("close", runner.ID)
 			}
 		}
 	}
@@ -1598,7 +1605,7 @@ func (m Model) bottomActionBarView() string {
 			style = style.Bold(true).
 				Foreground(lipgloss.Color(palette.actionFG)).
 				Background(lipgloss.Color(palette.actionBG))
-		case "runner-stop", "runner-restart":
+		case "runner-stop", "runner-restart", "runner-close":
 			style = style.Bold(true).Foreground(lipgloss.Color(palette.variantHeader))
 		case "hint":
 			style = style.Faint(true)
@@ -1648,6 +1655,7 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 				bottomActionSegment{id: "runner-start", label: "Start"},
 				bottomActionSegment{id: "runner-stop", label: "Stop"},
 				bottomActionSegment{id: "runner-restart", label: "Restart"},
+				bottomActionSegment{id: "runner-close", label: "X Close"},
 			)
 		}
 	}
@@ -1744,7 +1752,7 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 		basePath := "/sidecar/v1/runners/" + runner.ID
 		lines = append(
 			lines,
-			fmt.Sprintf("Runner %s: s Start | x Stop | r Restart", runner.ID),
+			fmt.Sprintf("Runner %s: s Start | x Stop | r Restart | c Close", runner.ID),
 			"Edit: b/p/h/i/m/e/u/f/l/v/t/o",
 			"API: RunnerController + "+basePath,
 			"Route: "+runnerRoleRoute(runner.Role)+" -> "+fallback(runner.Upstream, "unavailable"),
@@ -2231,10 +2239,11 @@ func (m Model) runnerRouteControlLines(runner server.RunnerSnapshot) []string {
 		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
 		formatKV("Models", endpointPath(runner.Upstream, "/v1/models")),
 		"",
-		"Actions ---- s Start -- x Stop -- r Restart",
+		"Actions ---- s Start -- x Stop -- r Restart -- c Close",
 		"POST " + basePath + "/start",
 		"POST " + basePath + "/stop",
 		"POST " + basePath + "/restart",
+		"POST " + basePath + "/close",
 	}
 	switch runner.Role {
 	case "main":
@@ -2358,11 +2367,12 @@ func runnerOperationLines(runner server.RunnerSnapshot) []string {
 		formatKV("API route", runnerRoleRoute(runner.Role)),
 		"",
 		"Controller parity:",
-		"RunnerController.StartRunner / StopRunner / RestartRunner / UpdateRunner",
+		"RunnerController.StartRunner / StopRunner / RestartRunner / CloseRunner / UpdateRunner",
 		"WebSocket api.request parity:",
 		"POST " + basePath + "/start",
 		"POST " + basePath + "/stop",
 		"POST " + basePath + "/restart",
+		"POST " + basePath + "/close",
 		"PATCH " + basePath,
 	}
 }
@@ -2466,10 +2476,11 @@ func (m Model) runnerControlLines(runner server.RunnerSnapshot) []string {
 	return []string{
 		"Controls",
 		"Actions",
-		"s Start   x Stop   r Restart",
+		"s Start   x Stop   r Restart   c Close",
 		"POST " + basePath + "/start",
 		"POST " + basePath + "/stop",
 		"POST " + basePath + "/restart",
+		"POST " + basePath + "/close",
 		"",
 		"Edit settings",
 		"Settings editor",
@@ -3173,10 +3184,10 @@ func (m Model) settingsRunnerParityLines() []string {
 				fallback(runner.State, "unknown"),
 				runnerRoleRoute(runner.Role),
 			),
-			"TUI: s/x/r + b/p/h/i/m/e/u/f/l/v/t/o",
-			"Controller: RunnerController.StartRunner/StopRunner/RestartRunner/UpdateRunner",
+			"TUI: s/x/r/c + b/p/h/i/m/e/u/f/l/v/t/o",
+			"Controller: RunnerController.StartRunner/StopRunner/RestartRunner/CloseRunner/UpdateRunner",
 			"WS: api.request PATCH "+basePath,
-			"WS: api.request POST "+basePath+"/start|stop|restart",
+			"WS: api.request POST "+basePath+"/start|stop|restart|close",
 		)
 	}
 	return lines
@@ -3239,6 +3250,7 @@ func settingsAPIParityGroups() []settingsAPIParityGroup {
 					surface: "api.request POST /sidecar/v1/runners/{id}/restart",
 					backing: "RunnerController.RestartRunner",
 				},
+				{surface: "api.request POST /sidecar/v1/runners/{id}/close", backing: "RunnerController.CloseRunner"},
 				{surface: "api.request POST /sidecar/v1/multimodal", backing: "RuntimeController.Multimodal"},
 			},
 		},
@@ -3275,8 +3287,8 @@ func settingsActionMapLines() []string {
 		"x Stop runtime -> RuntimeController.Stop() -> runtime.stop",
 		"r Restart release -> RuntimeController.Restart(release) -> runtime.restart",
 		"g Restart debug -> RuntimeController.Restart(debug) -> runtime.restart",
-		"Runner s/x/r -> RunnerController.StartRunner/StopRunner/RestartRunner",
-		"POST /sidecar/v1/runners/{id}/start|stop|restart",
+		"Runner s/x/r/c -> RunnerController.StartRunner/StopRunner/RestartRunner/CloseRunner",
+		"POST /sidecar/v1/runners/{id}/start|stop|restart|close",
 		"Runner edits -> RunnerController.UpdateRunner -> PATCH /sidecar/v1/runners/{id}",
 		"Models d -> Catalog.Download -> POST /sidecar/v1/models/download",
 		"Wizard Enter -> RunnerController.CreateRunner -> POST /sidecar/v1/runners",
@@ -3350,6 +3362,8 @@ func (m Model) runnerActionCmd(action string, id string) tea.Cmd {
 			_, err = m.runnerController.StopRunner(ctx, id)
 		case "restart":
 			_, err = m.runnerController.RestartRunner(ctx, id)
+		case "close":
+			_, err = m.runnerController.CloseRunner(ctx, id)
 		default:
 			err = fmt.Errorf("unknown runner action %q", action)
 		}
@@ -3510,6 +3524,8 @@ func (m Model) actionNotice(message runnerActionMsg) string {
 		return "stopped " + message.id
 	case "restart":
 		return "restarted " + message.id
+	case "close":
+		return "closed " + message.id
 	default:
 		return message.action + " " + message.id
 	}

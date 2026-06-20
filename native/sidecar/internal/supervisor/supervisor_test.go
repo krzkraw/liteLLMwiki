@@ -117,6 +117,116 @@ func TestSupervisorRoutesByRunnerRole(t *testing.T) {
 	}
 }
 
+func TestSupervisorCloseRunnerRemovesOnlyOwnedRoute(t *testing.T) {
+	t.Parallel()
+
+	supervisor := New(Config{
+		DisableDefaultLiteRT: true,
+	})
+	firstID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:       "embedding-one",
+		Runtime:  RuntimeLlamaCPP,
+		Role:     RoleEmbedding,
+		Backend:  BackendCPU,
+		ModelID:  "qwen3-embedding-one",
+		Host:     "127.0.0.1",
+		Port:     9496,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9496",
+	})
+	if err != nil {
+		t.Fatalf("create first embedding runner: %v", err)
+	}
+	secondID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:       "embedding-two",
+		Runtime:  RuntimeLlamaCPP,
+		Role:     RoleEmbedding,
+		Backend:  BackendCPU,
+		ModelID:  "qwen3-embedding-two",
+		Host:     "127.0.0.1",
+		Port:     9497,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9497",
+	})
+	if err != nil {
+		t.Fatalf("create second embedding runner: %v", err)
+	}
+
+	closed, err := supervisor.CloseRunner(context.Background(), firstID)
+	if err != nil {
+		t.Fatalf("close first runner: %v", err)
+	}
+	if closed.ID != firstID {
+		t.Fatalf("closed runner id = %q, want %q", closed.ID, firstID)
+	}
+	if _, ok := supervisor.Runner(firstID); ok {
+		t.Fatalf("runner %q should be removed after close", firstID)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/embeddings"); !ok || got != "http://127.0.0.1:9497" {
+		t.Fatalf("embedding route = %q/%v, want second runner route", got, ok)
+	}
+
+	if _, err := supervisor.CloseRunner(context.Background(), secondID); err != nil {
+		t.Fatalf("close second runner: %v", err)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/embeddings"); ok {
+		t.Fatalf("embedding route = %q/%v, want no route after routed runner closes", got, ok)
+	}
+	if _, err := supervisor.CloseRunner(context.Background(), "missing-runner"); err == nil {
+		t.Fatalf("close missing runner error = nil, want not found")
+	}
+}
+
+func TestSupervisorCloseRunnerStopsManagedProcessAndRemovesRunner(t *testing.T) {
+	t.Parallel()
+
+	exe, _ := writeLlamaHelper(t)
+	modelPath := filepath.Join(t.TempDir(), "gemma.gguf")
+	if err := os.WriteFile(modelPath, []byte("model"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	supervisor := New(Config{
+		DisableDefaultLiteRT: true,
+	})
+	runnerID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:         "main-llamacpp-close",
+		Runtime:    RuntimeLlamaCPP,
+		Role:       RoleMain,
+		Backend:    BackendCPU,
+		Executable: exe,
+		ModelPath:  modelPath,
+		ModelID:    "gemma4-close",
+		Host:       "127.0.0.1",
+		Port:       9498,
+		Launch:     true,
+	})
+	if err != nil {
+		t.Fatalf("create managed runner: %v", err)
+	}
+	if err := supervisor.StartRunner(context.Background(), runnerID); err != nil {
+		t.Fatalf("start managed runner: %v", err)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/chat/completions"); !ok || got != "http://127.0.0.1:9498" {
+		t.Fatalf("chat route = %q/%v, want managed runner", got, ok)
+	}
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	closed, err := supervisor.CloseRunner(closeCtx, runnerID)
+	if err != nil {
+		t.Fatalf("close managed runner: %v", err)
+	}
+	if closed.ID != runnerID || closed.PID == 0 {
+		t.Fatalf("closed runner = %#v, want snapshot with managed process pid", closed)
+	}
+	if _, ok := supervisor.Runner(runnerID); ok {
+		t.Fatalf("runner %q should be removed after close", runnerID)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/chat/completions"); ok {
+		t.Fatalf("chat route = %q/%v, want no route after close", got, ok)
+	}
+}
+
 func TestSupervisorUpdatesStoppedRunnerSettings(t *testing.T) {
 	t.Parallel()
 

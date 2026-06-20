@@ -770,6 +770,55 @@ func TestRunnerBottomBarMouseActionsUseSharedController(t *testing.T) {
 	}
 }
 
+func TestRunnerCloseBottomActionCallsControllerAndRemovesTab(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController([]server.RunnerSnapshot{
+		testRunner("LR-M-1", "litert", "main", "running"),
+	})
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 30
+	model.setActiveTab("runner:LR-M-1")
+
+	bottom := lastNonEmptyLine(model.View())
+	if !strings.Contains(bottom, "X Close") {
+		t.Fatalf("runner bottom action bar missing X close action in %q:\n%s", bottom, model.View())
+	}
+	var closeSegment bottomActionSegment
+	for _, segment := range model.bottomActionSegments() {
+		if segment.label == "X Close" {
+			closeSegment = segment
+			break
+		}
+	}
+	if closeSegment.label == "" {
+		t.Fatalf("runner bottom action segments missing X Close: %#v", model.bottomActionSegments())
+	}
+
+	next, cmd := model.Update(leftClick(closeSegment.start, model.height-1))
+	if cmd == nil {
+		t.Fatalf("close click returned no command")
+	}
+	message := cmd()
+	afterAction, _ := next.(Model).Update(message)
+	updated := afterAction.(Model)
+
+	if got := controller.calls[len(controller.calls)-1]; got != "close:LR-M-1" {
+		t.Fatalf("close call = %q, want close:LR-M-1", got)
+	}
+	if _, ok := updated.runnerByID("LR-M-1"); ok {
+		t.Fatalf("runner LR-M-1 should be removed after close")
+	}
+	if got := updated.activeTabID(); got != "dashboard" {
+		t.Fatalf("active tab = %q, want dashboard after closing last runner", got)
+	}
+}
+
 func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	t.Parallel()
 
@@ -1111,6 +1160,20 @@ func (c *fakeRunnerController) RestartRunner(
 		if c.runners[index].ID == id {
 			c.runners[index].State = "running"
 			return c.runners[index], nil
+		}
+	}
+	return server.RunnerSnapshot{}, nil
+}
+
+func (c *fakeRunnerController) CloseRunner(
+	_ context.Context,
+	id string,
+) (server.RunnerSnapshot, error) {
+	c.calls = append(c.calls, "close:"+id)
+	for index, runner := range c.runners {
+		if runner.ID == id {
+			c.runners = append(c.runners[:index], c.runners[index+1:]...)
+			return runner, nil
 		}
 	}
 	return server.RunnerSnapshot{}, nil

@@ -131,6 +131,7 @@ type RunnerController interface {
 	StartRunner(context.Context, string) (RunnerSnapshot, error)
 	StopRunner(context.Context, string) (RunnerSnapshot, error)
 	RestartRunner(context.Context, string) (RunnerSnapshot, error)
+	CloseRunner(context.Context, string) (RunnerSnapshot, error)
 }
 
 type RuntimeControlConfig struct {
@@ -464,6 +465,8 @@ func (s *Server) runnerResourceAPIResponse(
 		runner, err = s.runnerController.StopRunner(ctx, id)
 	case "restart":
 		runner, err = s.runnerController.RestartRunner(ctx, id)
+	case "close":
+		runner, err = s.runnerController.CloseRunner(ctx, id)
 	default:
 		return textAPIResponse(http.StatusNotFound, "not found\n")
 	}

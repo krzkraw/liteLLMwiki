@@ -1,0 +1,15 @@
+{
+  "name": "g0litellama-tui-e2e",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "test:tui": "cd tests/tui && bunx @microsoft/tui-test",
+    "e2e:tui": "bun run test:tui",
+    "test:go": "cd G0LiteLLaMa && go test ./...",
+    "e2e:go": "cd G0LiteLLaMa && scripts/runtime-backend-e2e.sh"
+  },
+  "devDependencies": {
+    "@microsoft/tui-test": "0.0.4"
+  }
+}

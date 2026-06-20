@@ -505,7 +505,7 @@ func TestBottomBarListsGlobalMenuAndCurrentTabActions(t *testing.T) {
 	next, _ := model.Update(textKey("2"))
 	updated := next.(Model)
 	wizardBottom := lastNonEmptyLine(updated.View().Content)
-	if !strings.Contains(wizardBottom, "Wizard: click toggles | Enter Start") {
+	if !strings.Contains(wizardBottom, "Wizard: click toggles | k Cache K | Enter Start") {
 		t.Fatalf("wizard bottom action bar = %q:\n%s", wizardBottom, updated.View().Content)
 	}
 }

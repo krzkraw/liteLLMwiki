@@ -87,6 +87,21 @@ From the repo root, script syntax checks:
 bash -n configure.sh install.sh launch-g0litellama.sh clean.sh
 ```
 
+## Rendered TUI E2E
+
+The repository is Go-first, but rendered terminal E2E tests use Bun and
+`@microsoft/tui-test` on macOS/Linux development machines.
+
+```bash
+bun install
+bun run e2e:tui
+```
+
+These tests run a deterministic TUI fixture, not the real runtime supervisor,
+and assert against the rendered terminal screen. Windows remains supported for
+end-user usage and release builds, but Windows development of the Bun-based TUI
+E2E harness is not required.
+
 ## Models
 
 Model binaries are external artifacts. Put them under `models/`, for example:

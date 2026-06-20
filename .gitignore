@@ -4,6 +4,8 @@
 node_modules/
 dist/
 coverage/
+.tui-test/
+tui-traces/
 .vite/
 public/vendor/
 package-lock.json

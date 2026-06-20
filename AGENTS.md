@@ -45,6 +45,9 @@ cd G0LiteLLaMa && go test ./...
 # E2E planner/TUI checks; real runtime combos skip unless configured
 cd G0LiteLLaMa && scripts/runtime-backend-e2e.sh
 
+# Rendered TUI E2E
+bun run e2e:tui
+
 # Release artifacts
 cd G0LiteLLaMa && scripts/build-release.sh dist
 ```
@@ -53,6 +56,45 @@ Real backend checks read `G0LiteLLaMa/runtime-config/backends.json` or
 `RUNTIME_BACKEND_CONFIG` and skip missing models/runtimes with clear reasons
 unless `G0LITELLAMA_E2E_REAL=1` is set. Real LiteRT smoke requires
 `LITERT_LM_BIN=/path/to/litert-lm`.
+
+## Rendered TUI E2E
+
+The project is Go-first, but rendered terminal E2E uses Bun plus
+`@microsoft/tui-test` on macOS/Linux development machines.
+
+For any change affecting:
+- Bubble Tea `Update` or `View`;
+- TUI layout;
+- tab navigation;
+- Launch Wizard behavior;
+- option modals;
+- keyboard handling;
+- mouse handling;
+- bottom action bar;
+- runner tab rendering;
+
+run:
+
+```bash
+cd G0LiteLLaMa && go test ./...
+bun run e2e:tui
+```
+
+Direct `Model.Update` tests are necessary but not sufficient for TUI behavior.
+Rendered terminal behavior must be verified through `@microsoft/tui-test`
+unless the change is provably unrelated to visible or interactive TUI behavior.
+
+Do not claim TUI behavior is verified from:
+
+- raw process exit code alone;
+- terminal scrollback;
+- `tmux`;
+- Ghostty screenshots alone;
+- direct `Model.Update` tests alone;
+- manual inspection alone.
+
+Windows usage/builds remain supported, but Windows development of Bun-based TUI
+E2E is not required.
 
 ## Required First Steps
 

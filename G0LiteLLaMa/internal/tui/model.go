@@ -1014,6 +1014,9 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	value := key.Text
+	if value == "" && len([]rune(msg.String())) == 1 {
+		value = msg.String()
+	}
 	if value == "" {
 		return m, nil
 	}
@@ -1040,6 +1043,10 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "r":
 			m.setWizardRole("reranking")
 			return m, nil
+		case "k":
+			if m.openApplicableWizardOption("cache-type-k") {
+				return m, nil
+			}
 		case "n":
 			m.cycleWizardModel(1)
 			return m, nil
@@ -1452,10 +1459,7 @@ func (m Model) managedScreenView() string {
 		return fitLinesToHeight(joinPanels(sliceRenderedLines(top, 0, topHeight), footer), m.height)
 	}
 
-	body := m.activeContentView()
-	if m.optionModal != nil {
-		body = joinPanels(body, renderPanelSpec(m.optionModalSpec(), m.width))
-	}
+	body := m.scrollableBodyView()
 	visibleBody := sliceRenderedLines(body, m.scrollOffset, bodyHeight)
 	if strings.TrimSpace(visibleBody) == "" {
 		visibleBody = mutedStyle.Render("No content in this pane.")
@@ -2004,7 +2008,7 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 	case "dashboard":
 		items = append(items, bottomActionSegment{id: "hint", label: "Dashboard: click model roles"})
 	case "wizard":
-		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | Enter Start"})
+		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | k Cache K | Enter Start"})
 	case "setup":
 		items = append(items, bottomActionSegment{id: "hint", label: "Setup: Up/Down select | Enter toggle"})
 	default:
@@ -3098,6 +3102,19 @@ func (m *Model) openOptionModal(option wizardCLIOption) {
 	input.SetValue(m.wizardOptionOverrides[option.ID])
 	input.Focus()
 	m.optionModal = &optionModal{option: option, input: input}
+	if m.managedScreen {
+		m.scrollOffset = m.maxScrollOffset()
+	}
+}
+
+func (m *Model) openApplicableWizardOption(id string) bool {
+	for _, option := range applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole) {
+		if option.ID == id {
+			m.openOptionModal(option)
+			return true
+		}
+	}
+	return false
 }
 
 func optionLabel(option wizardCLIOption) string {
@@ -5234,7 +5251,7 @@ func (m Model) maxScrollOffset() int {
 	if bodyHeight <= 0 {
 		return 0
 	}
-	lineCount := viewLineCount(m.activeContentView())
+	lineCount := viewLineCount(m.scrollableBodyView())
 	if lineCount <= bodyHeight {
 		return 0
 	}
@@ -5243,7 +5260,7 @@ func (m Model) maxScrollOffset() int {
 
 func (m Model) scrollStatusLine() string {
 	bodyHeight := managedBodyHeight(m.height, m.managedTopView(), m.commandRailSizingView())
-	totalLines := viewLineCount(m.activeContentView())
+	totalLines := viewLineCount(m.scrollableBodyView())
 	if bodyHeight <= 0 || totalLines <= bodyHeight {
 		return "Scroll: content fits | Up/Down PgUp/PgDn Home/End"
 	}
@@ -5259,6 +5276,14 @@ func (m Model) scrollStatusLine() string {
 
 func (m Model) commandRailSizingView() string {
 	return m.footerView()
+}
+
+func (m Model) scrollableBodyView() string {
+	body := m.activeContentView()
+	if m.optionModal != nil {
+		body = joinPanels(body, renderPanelSpec(m.optionModalSpec(), m.width))
+	}
+	return body
 }
 
 func (m *Model) resetScroll() {

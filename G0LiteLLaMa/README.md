@@ -82,3 +82,21 @@ scripts/runtime-backend-e2e.sh
 Real backend checks read `G0LiteLLaMa/runtime-config/backends.json` or
 `RUNTIME_BACKEND_CONFIG` and skip missing models/runtimes unless
 `G0LITELLAMA_E2E_REAL=1` is set.
+
+## TUI Testing
+
+Go tests cover model logic and fake controller behavior:
+
+```bash
+go test ./...
+```
+
+Rendered terminal E2E is driven from the repository root with Bun:
+
+```bash
+bun run e2e:tui
+```
+
+The rendered tests use a fixture binary under
+`cmd/g0litellama-tui-fixture` so they do not start real runtimes or bind the
+API server port.

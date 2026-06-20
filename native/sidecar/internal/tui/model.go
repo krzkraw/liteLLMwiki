@@ -169,6 +169,7 @@ type Model struct {
 	llamaRuntimeVariants   []llamaRuntimeVariant
 	dashboardModelDropdown string
 	globalMenuOpen         bool
+	globalPaletteMenuOpen  bool
 	paletteID              string
 }
 
@@ -454,6 +455,7 @@ func (m Model) handleBottomBarAction(x int, y int) (Model, tea.Cmd, bool) {
 	switch segment.id {
 	case "menu":
 		m.globalMenuOpen = !m.globalMenuOpen
+		m.globalPaletteMenuOpen = false
 		return m, nil, true
 	case "next":
 		m.active = (m.active + 1) % len(m.tabs())
@@ -500,12 +502,13 @@ func (m Model) handleGlobalMenuClick(x int, y int) (Model, tea.Cmd, bool) {
 	}
 	menuWidth := lipgloss.Width(firstRenderedLine(m.globalMenuMainView()))
 	paletteX := menuWidth + panelGridColumnGap
-	if x >= paletteX {
+	if m.globalPaletteMenuOpen && x >= paletteX {
 		index := y - menuTop - 2
 		palettes := tuiPalettes()
 		if index >= 0 && index < len(palettes) {
 			m.paletteID = palettes[index].id
 			m.globalMenuOpen = false
+			m.globalPaletteMenuOpen = false
 			return m, nil, true
 		}
 		return m, nil, false
@@ -516,15 +519,19 @@ func (m Model) handleGlobalMenuClick(x int, y int) (Model, tea.Cmd, bool) {
 		m.active = (m.active + 1) % len(m.tabs())
 		m.resetScroll()
 		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
 		return m, nil, true
 	case 3:
 		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
 		m.resetScroll()
 		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
 		return m, nil, true
 	case 4:
+		m.globalPaletteMenuOpen = true
 		return m, nil, true
 	case 5:
+		m.globalPaletteMenuOpen = false
 		return m, tea.Quit, true
 	default:
 		return m, nil, false
@@ -678,6 +685,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case tea.KeyF1:
 		m.globalMenuOpen = !m.globalMenuOpen
+		m.globalPaletteMenuOpen = false
 		return m, nil
 	case tea.KeyRight, tea.KeyTab:
 		m.active = (m.active + 1) % len(m.tabs())
@@ -1467,6 +1475,9 @@ func (m Model) footerView() string {
 
 func (m Model) globalMenuView() string {
 	menu := m.globalMenuMainView()
+	if !m.globalPaletteMenuOpen {
+		return menu
+	}
 	paletteMenu := m.paletteMenuView()
 	return lipgloss.JoinHorizontal(lipgloss.Top, menu, strings.Repeat(" ", panelGridColumnGap), paletteMenu)
 }
@@ -1477,7 +1488,7 @@ func (m Model) globalMenuMainView() string {
 		[]string{
 			"Next tab        change view",
 			"Previous tab    change view",
-			"Palettes >      choose theme",
+			"Palette themes > choose colors",
 			"Esc Quit",
 		},
 		m.palette().menu,
@@ -1501,7 +1512,7 @@ func (m Model) paletteMenuView() string {
 		}
 		lines = append(lines, label)
 	}
-	return renderPanel("Palettes", lines, m.palette().menu)
+	return renderPanel("Palette choices", lines, m.palette().menu)
 }
 
 func (m Model) bottomActionBarView() string {

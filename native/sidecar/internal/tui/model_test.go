@@ -475,7 +475,7 @@ func TestGlobalActionsOpenAsBottomLeftMenu(t *testing.T) {
 	updated := next.(Model)
 	for _, expected := range []string{
 		"Global menu",
-		"Palettes",
+		"Palette themes >",
 		"Esc Quit",
 	} {
 		if !strings.Contains(updated.View(), expected) {
@@ -492,7 +492,7 @@ func TestGlobalActionsOpenAsBottomLeftMenu(t *testing.T) {
 	}
 }
 
-func TestGlobalMenuShowsPaletteChoices(t *testing.T) {
+func TestGlobalMenuPaletteActionOpensPaletteChoices(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(ModelOptions{
@@ -504,10 +504,27 @@ func TestGlobalMenuShowsPaletteChoices(t *testing.T) {
 	model.height = 30
 
 	next, _ := model.Update(leftClick(2, model.height-1))
-	view := next.(Model).View()
+	opened := next.(Model)
+	view := opened.View()
 	for _, expected := range []string{
 		"Global menu",
-		"Palettes",
+		"Palette themes >",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("global menu missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "Amber") {
+		t.Fatalf("palette choices should stay hidden until palette action is selected:\n%s", view)
+	}
+
+	next, cmd := opened.Update(leftClick(4, opened.globalMenuTopRow()+4))
+	if cmd != nil {
+		t.Fatalf("palette action click returned unexpected command")
+	}
+	view = next.(Model).View()
+	for _, expected := range []string{
+		"Palette choices",
 		"Neon",
 		"Amber",
 		"Ocean",
@@ -532,9 +549,14 @@ func TestGlobalMenuPaletteChoiceCanBeClicked(t *testing.T) {
 
 	next, _ := model.Update(leftClick(2, model.height-1))
 	opened := next.(Model)
+	next, cmd := opened.Update(leftClick(4, opened.globalMenuTopRow()+4))
+	if cmd != nil {
+		t.Fatalf("palette action click returned unexpected command")
+	}
+	opened = next.(Model)
 	paletteX := lipgloss.Width(firstRenderedLine(opened.globalMenuMainView())) + panelGridColumnGap + 3
 	amberRow := opened.globalMenuTopRow() + 3
-	next, cmd := opened.Update(leftClick(paletteX, amberRow))
+	next, cmd = opened.Update(leftClick(paletteX, amberRow))
 	if cmd != nil {
 		t.Fatalf("palette click returned unexpected command")
 	}

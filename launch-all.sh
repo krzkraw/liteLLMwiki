@@ -61,8 +61,7 @@ launch_terminal() {
     osascript <<OSA
 tell application "Terminal"
   activate
-  set terminalWindow to (make new window)
-  do script "$(escape_applescript "$command")" in selected tab of terminalWindow
+  do script "$(escape_applescript "$command")"
 end tell
 OSA
     return 0

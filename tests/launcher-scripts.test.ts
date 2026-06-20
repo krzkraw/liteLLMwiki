@@ -172,8 +172,10 @@ describe("root launcher scripts", () => {
     ]) {
       const contents = readRootScript(scriptName);
 
-      expect(contents).toContain("make new window");
-      expect(contents).toContain("selected tab of terminalWindow");
+      expect(contents).toContain('do script "$(escape_applescript "$command")"');
+      expect(contents).not.toContain("make new window");
+      expect(contents).not.toContain("selected tab");
+      expect(contents).not.toContain("terminalWindow");
       expect(contents).not.toContain("--new-tab");
     }
 
@@ -184,8 +186,10 @@ describe("root launcher scripts", () => {
     ]) {
       const contents = readRootScript(scriptName);
 
-      expect(contents).toContain("make new window");
-      expect(contents).toContain("selected tab of terminalWindow");
+      expect(contents).toContain('do script `"$EscapedCommand`"');
+      expect(contents).not.toContain("make new window");
+      expect(contents).not.toContain("selected tab");
+      expect(contents).not.toContain("terminalWindow");
       expect(contents).toContain("wt.exe");
       expect(contents).toContain('"--window"');
       expect(contents).toContain('"new"');

@@ -455,9 +455,6 @@ llama_runtime_spec() {
     macos-arm64)
       printf 'llama-macos-arm64|macOS Apple Silicon|%s/llama-b9736-bin-macos-arm64.tar.gz|sha256:caa5092f2f0442cf6f62e8e3308fdd58e603ca435cb801020adfc1830f79b328||\n' "$llama_release_base"
       ;;
-    macos-x64)
-      printf 'llama-macos-x64|macOS Intel|%s/llama-b9736-bin-macos-x64.tar.gz|sha256:eef042e42534c567a80a8c032d358f6c7e0df410f2ae797e811e040bf688cc60||\n' "$llama_release_base"
-      ;;
     win-cpu-x64)
       printf 'llama-win-cpu-x64|Windows x64 CPU|%s/llama-b9736-bin-win-cpu-x64.zip|sha256:fdd2971197e234a76fcbe5bae2763fcd70ed20123714beffe90473cc29843f58||\n' "$llama_release_base"
       ;;
@@ -499,8 +496,7 @@ llama_available_options() {
   arch_name="$(uname -m)"
 
   case "$os_name:$arch_name" in
-    Darwin:arm64|Darwin:aarch64) printf 'macos-arm64\n' ;;
-    Darwin:x86_64|Darwin:amd64) printf 'macos-x64\n' ;;
+    Darwin:*) printf 'macos-arm64\n' ;;
     MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
       printf 'win-cpu-x64\nwin-cuda13-x64\nwin-cuda12-x64\nwin-vulkan-x64\nwin-openvino-x64\nwin-sycl-x64\nwin-hip-x64\n'
       ;;

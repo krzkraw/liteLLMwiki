@@ -120,10 +120,10 @@ or download fails, it prints the command or URL again and waits for you to
 complete it. Hugging Face tokens are prompted only for downloads that may need
 one and are kept in the current process environment.
 The installer also offers selectable local runtime installs for the current
-platform. On macOS, the matching LiteRT-LM and llama.cpp runtime choices are
-preselected by default, so pressing Enter installs the local runtime folders
-even if Homebrew or a global uv tool already provides `litert-lm` or
-`llama-server` on `PATH`.
+platform. On macOS, the matching LiteRT-LM runtime and Apple Silicon llama.cpp
+runtime choice are preselected by default, so pressing Enter installs the local
+runtime folders even if Homebrew or a global uv tool already provides
+`litert-lm` or `llama-server` on `PATH`.
 
 LiteRT-LM runtimes are installed through uv under `native/litert-runtimes/` into
 folders such as `litert-macos-arm64`. llama.cpp runtime archives are verified

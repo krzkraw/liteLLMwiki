@@ -453,11 +453,8 @@ function Get-LlamaRuntimeDefinitions {
 
   $Definitions = @()
 
-  if ($RunningOnMacOs -and ($Architecture.ToString() -eq "Arm64")) {
+  if ($RunningOnMacOs) {
     $Definitions += New-LlamaRuntimeDefinition "macos-arm64" "llama-macos-arm64" "macOS Apple Silicon" "$LlamaReleaseBase/llama-b9736-bin-macos-arm64.tar.gz" "sha256:caa5092f2f0442cf6f62e8e3308fdd58e603ca435cb801020adfc1830f79b328"
-  }
-  if ($RunningOnMacOs -and ($Architecture.ToString() -eq "X64")) {
-    $Definitions += New-LlamaRuntimeDefinition "macos-x64" "llama-macos-x64" "macOS Intel" "$LlamaReleaseBase/llama-b9736-bin-macos-x64.tar.gz" "sha256:eef042e42534c567a80a8c032d358f6c7e0df410f2ae797e811e040bf688cc60"
   }
   if ($RunningOnWindows -and ($Architecture.ToString() -eq "X64")) {
     $Definitions += New-LlamaRuntimeDefinition "win-cpu-x64" "llama-win-cpu-x64" "Windows x64 CPU" "$LlamaReleaseBase/llama-b9736-bin-win-cpu-x64.zip" "sha256:fdd2971197e234a76fcbe5bae2763fcd70ed20123714beffe90473cc29843f58"

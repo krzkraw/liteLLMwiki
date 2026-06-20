@@ -9,6 +9,21 @@ function readRootScript(name: string): string {
   return readFileSync(join(repoRoot, name), "utf8");
 }
 
+function readScriptSection(
+  scriptName: string,
+  startMarker: string,
+  endMarker: string,
+): string {
+  const contents = readRootScript(scriptName);
+  const start = contents.indexOf(startMarker);
+  const end = contents.indexOf(endMarker, start);
+
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+
+  return contents.slice(start, end);
+}
+
 describe("interactive installer scripts", () => {
   it("provides Unix and PowerShell installer entry points", () => {
     expect(readRootScript("install.sh")).toContain("#!/usr/bin/env bash");
@@ -107,6 +122,36 @@ describe("interactive installer scripts", () => {
       expect(contents).toContain("sha256:caa5092f2f0442cf6f62e8e3308fdd58e603ca435cb801020adfc1830f79b328");
       expect(contents).toContain("sha256:");
     }
+  });
+
+  it("offers only the Apple Silicon llama.cpp runtime on macOS", () => {
+    const shellLlamaRuntimeSection = readScriptSection(
+      "install.sh",
+      "llama_runtime_spec()",
+      "verify_sha256()",
+    );
+
+    expect(shellLlamaRuntimeSection).toContain("macos-arm64");
+    expect(shellLlamaRuntimeSection).toContain(
+      "Darwin:*) printf 'macos-arm64\\n' ;;",
+    );
+    expect(shellLlamaRuntimeSection).not.toContain("macos-x64");
+    expect(shellLlamaRuntimeSection).not.toContain(
+      "llama-b9736-bin-macos-x64.tar.gz",
+    );
+
+    const powershellLlamaRuntimeSection = readScriptSection(
+      "install.ps1",
+      "function Get-LlamaRuntimeDefinitions",
+      "function Get-LlamaExecutableNames",
+    );
+
+    expect(powershellLlamaRuntimeSection).toContain("macos-arm64");
+    expect(powershellLlamaRuntimeSection).toContain("if ($RunningOnMacOs) {");
+    expect(powershellLlamaRuntimeSection).not.toContain("macos-x64");
+    expect(powershellLlamaRuntimeSection).not.toContain(
+      "llama-b9736-bin-macos-x64.tar.gz",
+    );
   });
 
   it("offers selectable LiteRT runtime installs with local macOS runtime folders", () => {

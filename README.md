@@ -90,6 +90,28 @@ Windows PowerShell:
 .\install.ps1
 ```
 
+The installer offers to run backend configuration tests near the end. You can
+also run them directly:
+
+```bash
+./configure.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\configure.ps1
+```
+
+The configure scripts test LiteRT `cpu`, `gpu`, and `npu` backends plus
+discovered llama.cpp runtime backend types under `native/llama-runtimes/`.
+Before each test, the script prints the command it plans to use and lets you
+edit it; an empty response runs the default. Results are written to the ignored
+local file `native/runtime-config/backends.json`. Backends marked not working
+are hidden from the sidecar TUI Launch Wizard. Override test models with
+`LITERT_TEST_MODEL` and `LLAMA_TEST_MODEL`, or pass the matching script
+parameters.
+
 To use a Nextcloud public share as the model download source instead of the
 default Hugging Face URLs, pass the share URL at install time. The share should
 point at the Models folder itself, with `litert/` and `llamacpp/` visible at the

@@ -424,6 +424,56 @@ func TestLaunchWizardRendersThemedOptionBarsAndModelHighlight(t *testing.T) {
 	}
 }
 
+func TestLaunchWizardHidesConfiguredNotWorkingBackends(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "backends.json")
+	config := `{
+  "version": 1,
+  "runtimes": {
+    "litert": {
+      "gpu": {"working": true},
+      "npu": {"working": false}
+    },
+    "llamacpp": {
+      "cpu": {"working": true},
+      "cuda13": {"working": false}
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write backend config: %v", err)
+	}
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cpu-x64", "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: configPath,
+	})
+	model.setActiveTab("wizard")
+	model.width = 140
+	model.height = 36
+
+	compactView := compactSpaces(model.View())
+	if !strings.Contains(compactView, "LiteRT backend [cpu] gpu") {
+		t.Fatalf("wizard should keep working/default LiteRT backends:\n%s", model.View())
+	}
+	if strings.Contains(compactView, "npu") {
+		t.Fatalf("wizard should hide configured not-working LiteRT npu backend:\n%s", model.View())
+	}
+
+	model.toggleWizardRuntime()
+	compactView = compactSpaces(model.View())
+	if !strings.Contains(compactView, "llama type [cpu]") {
+		t.Fatalf("wizard should keep working llama cpu backend:\n%s", model.View())
+	}
+	if strings.Contains(compactView, "cuda13") {
+		t.Fatalf("wizard should hide configured not-working llama cuda13 backend:\n%s", model.View())
+	}
+}
+
 func TestLaunchWizardOptionBarsDoNotUseDecorativeDashesOrTextFainting(t *testing.T) {
 	t.Parallel()
 

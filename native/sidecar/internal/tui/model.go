@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"litert-sidecar/internal/catalog"
+	"litert-sidecar/internal/runtimeconfig"
 	"litert-sidecar/internal/server"
 )
 
@@ -55,6 +56,7 @@ type ModelOptions struct {
 	ChatEndpoint      string
 	ManagedScreen     bool
 	LlamaRuntimeRoot  string
+	BackendConfigPath string
 }
 
 type tickMsg time.Time
@@ -167,6 +169,8 @@ type Model struct {
 	wizardModelSelection   int
 	llamaRuntimeRoot       string
 	llamaRuntimeVariants   []llamaRuntimeVariant
+	backendConfigPath      string
+	backendStatus          runtimeconfig.Status
 	dashboardModelDropdown string
 	globalMenuOpen         bool
 	globalPaletteMenuOpen  bool
@@ -328,6 +332,7 @@ func NewModel(options ModelOptions) Model {
 		wizardBackend:     "cpu",
 		wizardRole:        "main",
 		llamaRuntimeRoot:  options.LlamaRuntimeRoot,
+		backendConfigPath: resolveBackendConfigPath(options.BackendConfigPath),
 		paletteID:         "neon",
 	}
 	model.refresh()
@@ -1230,7 +1235,10 @@ func (m *Model) refresh() {
 	if m.catalog != nil {
 		m.models = m.catalog.Entries()
 	}
-	m.llamaRuntimeVariants = discoverLlamaRuntimeVariants(m.llamaRuntimeRoot)
+	m.backendStatus = loadBackendStatus(m.backendConfigPath)
+	m.llamaRuntimeVariants = m.filterLlamaRuntimeVariants(
+		discoverLlamaRuntimeVariants(m.llamaRuntimeRoot),
+	)
 	m.normalizeWizardSelection()
 	if m.active >= len(m.tabs()) {
 		m.active = 0
@@ -2529,8 +2537,9 @@ func (m Model) wizardContentWidth() int {
 
 func (m Model) wizardVariantToggleLine() string {
 	if m.wizardRuntime == "llamacpp" {
-		options := make([]wizardOption, 0, len(llamaTypeOptions()))
-		for _, option := range llamaTypeOptions() {
+		backendOptions := m.llamaTypeOptions()
+		options := make([]wizardOption, 0, len(backendOptions))
+		for _, option := range backendOptions {
 			options = append(options, wizardOption{
 				label:    option,
 				selected: m.wizardBackend == option,
@@ -2545,8 +2554,9 @@ func (m Model) wizardVariantToggleLine() string {
 			m.palette().variantSelected,
 		)
 	}
-	options := make([]wizardOption, 0, len(litertBackendOptions()))
-	for _, option := range litertBackendOptions() {
+	backendOptions := m.litertBackendOptions()
+	options := make([]wizardOption, 0, len(backendOptions))
+	for _, option := range backendOptions {
 		options = append(options, wizardOption{
 			label:    option,
 			selected: m.wizardBackend == option,
@@ -2596,7 +2606,7 @@ func (m Model) wizardVariantNames() []string {
 		}
 		return names
 	}
-	return litertBackendOptions()
+	return m.litertBackendOptions()
 }
 
 func (m Model) wizardModelLines() []string {
@@ -3625,7 +3635,10 @@ func (m *Model) toggleWizardRuntime() {
 
 func (m *Model) cycleWizardVariant() {
 	if m.wizardRuntime == "llamacpp" {
-		options := llamaTypeOptions()
+		options := m.llamaTypeOptions()
+		if len(options) == 0 {
+			return
+		}
 		current := 0
 		for index, option := range options {
 			if option == m.wizardBackend {
@@ -3638,7 +3651,10 @@ func (m *Model) cycleWizardVariant() {
 		return
 	}
 
-	options := litertBackendOptions()
+	options := m.litertBackendOptions()
+	if len(options) == 0 {
+		return
+	}
 	current := 0
 	for index, option := range options {
 		if option == m.wizardBackend {
@@ -3670,13 +3686,19 @@ func (m *Model) cycleWizardModel(delta int) {
 
 func (m *Model) setWizardVariantFromMouse(x int) {
 	if m.wizardRuntime == "llamacpp" {
-		options := llamaTypeOptions()
+		options := m.llamaTypeOptions()
+		if len(options) == 0 {
+			return
+		}
 		index := clampInt((x-17)/8, 0, len(options)-1)
 		m.wizardBackend = options[index]
 		m.normalizeWizardSelection()
 		return
 	}
-	options := litertBackendOptions()
+	options := m.litertBackendOptions()
+	if len(options) == 0 {
+		return
+	}
 	index := clampInt((x-22)/6, 0, len(options)-1)
 	m.wizardBackend = options[index]
 	m.normalizeWizardSelection()
@@ -3698,10 +3720,10 @@ func (m *Model) normalizeWizardSelection() {
 	if !isWizardRole(m.wizardRole) {
 		m.wizardRole = "main"
 	}
-	if m.wizardRuntime == "litert" && !containsString(litertBackendOptions(), m.wizardBackend) {
-		m.wizardBackend = "cpu"
+	if m.wizardRuntime == "litert" && !containsString(m.litertBackendOptions(), m.wizardBackend) {
+		m.wizardBackend = firstString(m.litertBackendOptions(), "cpu")
 	}
-	if m.wizardRuntime == "llamacpp" && !containsString(llamaTypeOptions(), m.wizardBackend) {
+	if m.wizardRuntime == "llamacpp" && !containsString(m.llamaTypeOptions(), m.wizardBackend) {
 		m.wizardBackend = m.firstAvailableLlamaType()
 	}
 	if len(m.llamaRuntimeVariants) == 0 {
@@ -3861,15 +3883,46 @@ func litertBackendOptions() []string {
 	return []string{"cpu", "gpu", "npu"}
 }
 
+func (m Model) litertBackendOptions() []string {
+	return m.visibleBackendOptions("litert", litertBackendOptions())
+}
+
 func llamaTypeOptions() []string {
 	return []string{"cpu", "gpu", "openvino", "cuda13", "cuda12", "sycl"}
 }
 
+func (m Model) llamaTypeOptions() []string {
+	return m.visibleBackendOptions("llamacpp", llamaTypeOptions())
+}
+
+func (m Model) visibleBackendOptions(runtimeName string, options []string) []string {
+	visible := make([]string, 0, len(options))
+	for _, option := range options {
+		if m.backendStatus.Visible(runtimeName, option) {
+			visible = append(visible, option)
+		}
+	}
+	return visible
+}
+
+func (m Model) filterLlamaRuntimeVariants(variants []llamaRuntimeVariant) []llamaRuntimeVariant {
+	filtered := make([]llamaRuntimeVariant, 0, len(variants))
+	for _, variant := range variants {
+		if m.backendStatus.Visible("llamacpp", llamaRuntimeType(variant.Name)) {
+			filtered = append(filtered, variant)
+		}
+	}
+	return filtered
+}
+
 func (m Model) firstAvailableLlamaType() string {
 	for _, variant := range m.llamaRuntimeVariants {
-		return llamaRuntimeType(variant.Name)
+		backend := llamaRuntimeType(variant.Name)
+		if m.backendStatus.Visible("llamacpp", backend) {
+			return backend
+		}
 	}
-	return "cpu"
+	return firstString(m.llamaTypeOptions(), "cpu")
 }
 
 func llamaRuntimeType(name string) string {
@@ -3897,6 +3950,34 @@ func containsString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func firstString(values []string, fallbackValue string) string {
+	if len(values) == 0 {
+		return fallbackValue
+	}
+	return values[0]
+}
+
+func loadBackendStatus(path string) runtimeconfig.Status {
+	status, err := runtimeconfig.Load(path)
+	if err != nil {
+		return runtimeconfig.Status{}
+	}
+	return status
+}
+
+func resolveBackendConfigPath(path string) string {
+	if strings.TrimSpace(path) != "" {
+		return path
+	}
+	if envPath := os.Getenv("RUNTIME_BACKEND_CONFIG"); strings.TrimSpace(envPath) != "" {
+		return envPath
+	}
+	if repoRoot := findRepoRoot(); repoRoot != "" {
+		return runtimeconfig.DefaultPath(repoRoot)
+	}
+	return filepath.FromSlash("native/runtime-config/backends.json")
 }
 
 func discoverLlamaRuntimeVariants(root string) []llamaRuntimeVariant {

@@ -105,6 +105,49 @@ prompt_task_choice() {
   done
 }
 
+print_optional_task_box() {
+  local label="$1"
+  local description="$2"
+  local command_text="$3"
+  local expected_result="$4"
+  local line
+
+  printf '\n+------------------------------------------------------------+\n'
+  printf '| Task: %s\n' "$label"
+  printf '| Description: %s\n' "$description"
+  printf '| Command or URL I would use:\n'
+  while IFS= read -r line; do
+    print_box_line "  $line"
+  done <<< "$command_text"
+  printf '| Expected result: %s\n' "$expected_result"
+  print_box_line "Do you want me to do it?"
+  printf '| Choices:\n'
+  print_box_line "  [Y] Yes - run it now"
+  print_box_line "  [N] No - skip this optional step"
+  print_box_line "  [M] Manual & wait - I will do it and press Enter"
+  printf '+------------------------------------------------------------+\n'
+}
+
+prompt_optional_task_choice() {
+  local label="$1"
+  local description="$2"
+  local command_text="$3"
+  local expected_result="$4"
+  local answer
+
+  print_optional_task_box "$label" "$description" "$command_text" "$expected_result"
+  while true; do
+    printf 'Choice [Y/N/M]: '
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) return 0 ;;
+      n|N|no|NO) return 1 ;;
+      m|M|manual|MANUAL) return 2 ;;
+      *) printf 'Choose Y, N, or M.\n' ;;
+    esac
+  done
+}
+
 run_logged() {
   local label="$1"
   shift
@@ -1272,6 +1315,41 @@ ensure_bun_dependencies() {
     "Install Bun packages and regenerate the LiteRT-LM WASM vendor files."
 }
 
+offer_backend_configuration() {
+  local command_text="./configure.sh"
+  local expected_result="native/runtime-config/backends.json contains runtime backend test results"
+  local choice
+
+  if prompt_optional_task_choice "Run backend configuration tests" \
+    "Optionally test LiteRT and llama.cpp backends now. Results hide not-working combinations in the sidecar TUI." \
+    "$command_text" \
+    "$expected_result"; then
+    choice=0
+  else
+    choice=$?
+  fi
+
+  case "$choice" in
+    0)
+      if ./configure.sh; then
+        add_summary "OK: backend configuration tests"
+      else
+        printf 'Backend configuration tests failed. You can run ./configure.sh later.\n'
+        add_summary "FAIL: backend configuration tests"
+      fi
+      ;;
+    1)
+      add_summary "SKIP: backend configuration tests"
+      ;;
+    2)
+      wait_for_user_action "backend configuration tests" \
+        "test -s '$repo_root/native/runtime-config/backends.json'" \
+        "$expected_result"
+      add_summary "OK: backend configuration tests"
+      ;;
+  esac
+}
+
 print_install_tasks() {
   printf '\nInstall tasks\n'
   printf '%s\n' '-------------'
@@ -1287,6 +1365,7 @@ print_install_tasks() {
   print_task_pending "bun test - will run"
   print_task_pending "web production build - will run"
   print_task_pending "sidecar artifacts build - will run"
+  print_task_pending "backend configuration tests - optional"
 }
 
 print_summary() {
@@ -1327,6 +1406,7 @@ main() {
   run_logged "bun test" bun run test
   run_logged "web production build" bun run build
   run_logged "sidecar artifacts build" bun run build:sidecar
+  offer_backend_configuration
 
   print_summary
 }

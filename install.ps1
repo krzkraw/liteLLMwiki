@@ -111,6 +111,55 @@ function Read-TaskChoice {
   }
 }
 
+function Write-OptionalTaskBox {
+  param(
+    [string]$Label,
+    [string]$Description,
+    [string]$CommandText,
+    [string]$ExpectedResult
+  )
+
+  Write-Host ""
+  Write-Host "+------------------------------------------------------------+"
+  Write-Host "| Task: $Label"
+  Write-Host "| Description: $Description"
+  Write-Host "| Command or URL I would use:"
+  foreach ($Line in ($CommandText -split "`r?`n")) {
+    Write-BoxLine "  $Line"
+  }
+  Write-Host "| Expected result: $ExpectedResult"
+  Write-BoxLine "Do you want me to do it?"
+  Write-Host "| Choices:"
+  Write-BoxLine "  [Y] Yes - run it now"
+  Write-BoxLine "  [N] No - skip this optional step"
+  Write-BoxLine "  [M] Manual & wait - I will do it and press Enter"
+  Write-Host "+------------------------------------------------------------+"
+}
+
+function Read-OptionalTaskChoice {
+  param(
+    [string]$Label,
+    [string]$Description,
+    [string]$CommandText,
+    [string]$ExpectedResult
+  )
+
+  Write-OptionalTaskBox -Label $Label -Description $Description -CommandText $CommandText -ExpectedResult $ExpectedResult
+  while ($true) {
+    $Answer = Read-Host "Choice [Y/N/M]"
+    if ($Answer -match "^(y|yes)$") {
+      return "yes"
+    }
+    if ($Answer -match "^(n|no)$") {
+      return "no"
+    }
+    if ($Answer -match "^(m|manual)$") {
+      return "manual"
+    }
+    Write-Host "Choose Y, N, or M."
+  }
+}
+
 function Invoke-RunLogged {
   param(
     [string]$Label,
@@ -1094,6 +1143,42 @@ function Ensure-BunDependencies {
     -Description "Install Bun packages and regenerate the LiteRT-LM WASM vendor files."
 }
 
+function Offer-BackendConfiguration {
+  $CommandText = ".\configure.ps1"
+  $ExpectedResult = "native\runtime-config\backends.json contains runtime backend test results"
+
+  $Choice = Read-OptionalTaskChoice `
+    -Label "Run backend configuration tests" `
+    -Description "Optionally test LiteRT and llama.cpp backends now. Results hide not-working combinations in the sidecar TUI." `
+    -CommandText $CommandText `
+    -ExpectedResult $ExpectedResult
+
+  if ($Choice -eq "yes") {
+    try {
+      & "$RepoRoot\configure.ps1"
+      if ($LASTEXITCODE -ne 0) {
+        throw "configure.ps1 failed with exit code $LASTEXITCODE"
+      }
+      Add-Summary "OK: backend configuration tests"
+    } catch {
+      Write-Host "Backend configuration tests failed. You can run .\configure.ps1 later."
+      Add-Summary "FAIL: backend configuration tests"
+    }
+    return
+  }
+
+  if ($Choice -eq "manual") {
+    Invoke-WaitForUserAction -Label "backend configuration tests" -Check {
+      $Path = Join-Path $RepoRoot "native\runtime-config\backends.json"
+      (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
+    } -ExpectedResult $ExpectedResult
+    Add-Summary "OK: backend configuration tests"
+    return
+  }
+
+  Add-Summary "SKIP: backend configuration tests"
+}
+
 function Print-InstallTasks {
   Write-Host ""
   Write-Host "Install tasks"
@@ -1114,6 +1199,7 @@ function Print-InstallTasks {
   Write-TaskPending "bun test - will run"
   Write-TaskPending "web production build - will run"
   Write-TaskPending "sidecar artifacts build - will run"
+  Write-TaskPending "backend configuration tests - optional"
 }
 
 function Print-Summary {
@@ -1152,5 +1238,6 @@ Ensure-SelectedModels
 Invoke-RunLogged "bun test" { & bun run test }
 Invoke-RunLogged "web production build" { & bun run build }
 Invoke-RunLogged "sidecar artifacts build" { & bun run build:sidecar }
+Offer-BackendConfiguration
 
 Print-Summary

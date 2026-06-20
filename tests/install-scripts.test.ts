@@ -31,6 +31,22 @@ describe("interactive installer scripts", () => {
     accessSync(join(repoRoot, "install.sh"), constants.X_OK);
   });
 
+  it("provides configure scripts and installers offer backend testing", () => {
+    expect(readRootScript("configure.sh")).toContain("#!/usr/bin/env bash");
+    expect(readRootScript("configure.ps1")).toContain("Set-StrictMode");
+    accessSync(join(repoRoot, "configure.sh"), constants.X_OK);
+
+    const shell = readRootScript("install.sh");
+    const powershell = readRootScript("install.ps1");
+
+    expect(shell).toContain("./configure.sh");
+    expect(shell).toContain("Run backend configuration tests");
+    expect(shell).toContain("native/runtime-config/backends.json");
+    expect(powershell).toContain(".\\configure.ps1");
+    expect(powershell).toContain("Run backend configuration tests");
+    expect(powershell).toContain("native\\runtime-config\\backends.json");
+  });
+
   it("does not assign PowerShell automatic OS variables", () => {
     const contents = readRootScript("install.ps1");
 

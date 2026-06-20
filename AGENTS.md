@@ -29,6 +29,8 @@ selected from disk in the UI.
 - `models/` - ignored local model directory; keep only `README.md` tracked.
 - `native/sidecar-artifacts/` - ignored sidecar release artifact output; keep
   only `README.md` tracked.
+- `native/runtime-config/` - ignored local runtime/backend test results; keep
+  only docs and ignore rules tracked.
 - `native/litert-runtimes/` - ignored repo-local uv tool installs for
   `litert-lm`; keep only `README.md` tracked.
 - `native/llama-runtimes/` - ignored downloaded llama.cpp runtime archives
@@ -55,6 +57,9 @@ bun test
 
 # Web production build
 bun run build
+
+# Script syntax checks
+bash -n configure.sh install.sh
 
 # Go sidecar tests
 cd native/sidecar && go test ./...
@@ -96,6 +101,8 @@ native runtime smoke requires `LITERT_LM_BIN=/path/to/litert-lm`.
   `native/litert-runtimes/`; install them locally when needed.
 - Never commit downloaded llama.cpp runtime folders or CUDA DLLs under
   `native/llama-runtimes/`; install them locally when needed.
+- Never commit generated `native/runtime-config/backends.json`; it records
+  machine-specific backend test results.
 
 ## Workflow Rules
 

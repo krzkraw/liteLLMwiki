@@ -36,6 +36,56 @@ function ConvertTo-AppleScriptString {
   return $Value.Replace('\', '\\').Replace('"', '\"')
 }
 
+function Get-LiteRTMacTerminalApp {
+  $Candidate = if ($env:LITERT_TERMINAL_APP) {
+    $env:LITERT_TERMINAL_APP
+  } elseif ($env:TERM_PROGRAM) {
+    $env:TERM_PROGRAM
+  } else {
+    ""
+  }
+
+  switch ($Candidate) {
+    "Ghostty" { return "Ghostty" }
+    "ghostty" { return "Ghostty" }
+    "Ghostty.app" { return "Ghostty" }
+    "Apple_Terminal" { return "Terminal" }
+    "Terminal" { return "Terminal" }
+    "Terminal.app" { return "Terminal" }
+    "" { return "Terminal" }
+    default { return $Candidate }
+  }
+}
+
+function Start-LiteRTGhostty {
+  param(
+    [string]$Command,
+    [string]$WorkingDirectory
+  )
+
+  $EscapedCommand = ConvertTo-AppleScriptString $Command
+  $EscapedWorkingDirectory = ConvertTo-AppleScriptString $WorkingDirectory
+  & osascript `
+    -e 'tell application "Ghostty"' `
+    -e 'activate' `
+    -e 'set cfg to new surface configuration' `
+    -e "set initial working directory of cfg to `"$EscapedWorkingDirectory`"" `
+    -e "set initial input of cfg to `"$EscapedCommand`" & linefeed" `
+    -e 'set win to new window with configuration cfg' `
+    -e 'end tell' | Out-Null
+}
+
+function Start-LiteRTAppleTerminal {
+  param([string]$Command)
+
+  $EscapedCommand = ConvertTo-AppleScriptString $Command
+  & osascript `
+    -e 'tell application "Terminal"' `
+    -e 'activate' `
+    -e "do script `"$EscapedCommand`"" `
+    -e 'end tell' | Out-Null
+}
+
 function ConvertTo-WindowsCommandArgument {
   param([AllowNull()][string]$Value)
 
@@ -116,12 +166,12 @@ function Start-LiteRTTerminal {
       -ProcessArgs $ProcessArgs `
       -WorkingDirectory $WorkingDirectory `
       -EnvironmentNames $EnvironmentNames
-    $EscapedCommand = ConvertTo-AppleScriptString $Command
-    & osascript `
-      -e 'tell application "Terminal"' `
-      -e 'activate' `
-      -e "do script `"$EscapedCommand`"" `
-      -e 'end tell' | Out-Null
+
+    if ((Get-LiteRTMacTerminalApp) -eq "Ghostty") {
+      Start-LiteRTGhostty -Command $Command -WorkingDirectory $WorkingDirectory
+    } else {
+      Start-LiteRTAppleTerminal -Command $Command
+    }
     return
   }
 

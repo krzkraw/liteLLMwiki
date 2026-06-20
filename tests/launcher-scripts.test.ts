@@ -91,6 +91,8 @@ describe("root launcher scripts", () => {
       expect(contents).toContain("launch_terminal");
       expect(contents).toContain("--litert-launch-inline");
       expect(contents).toContain("osascript");
+      expect(contents).toContain("TERM_PROGRAM");
+      expect(contents).toContain("Ghostty");
       expect(contents).toContain("gnome-terminal");
       expect(contents).toContain("xterm");
     }
@@ -100,6 +102,8 @@ describe("root launcher scripts", () => {
 
       expect(contents).toContain("Start-LiteRTTerminal");
       expect(contents).toContain("osascript");
+      expect(contents).toContain("TERM_PROGRAM");
+      expect(contents).toContain("Ghostty");
       expect(contents).toContain("gnome-terminal");
       expect(contents).toContain("xterm");
       expect(contents).toContain("[switch]$Inline");
@@ -162,6 +166,42 @@ describe("root launcher scripts", () => {
     expect(powershellLauncher.indexOf("launch-webui.ps1")).toBeLessThan(
       powershellLauncher.indexOf("launch-sidecar.ps1"),
     );
+  });
+
+  it("prefers the invoking macOS terminal before Terminal.app fallback", () => {
+    for (const scriptName of [
+      "launch-webui.sh",
+      "launch-sidecar.sh",
+      "launch-all.sh",
+    ]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("macos_terminal_app");
+      expect(contents).toContain("LITERT_TERMINAL_APP");
+      expect(contents).toContain("TERM_PROGRAM");
+      expect(contents).toContain("Ghostty");
+      expect(contents).toContain("new surface configuration");
+      expect(contents.indexOf("launch_macos_ghostty")).toBeLessThan(
+        contents.indexOf("launch_macos_terminal_app"),
+      );
+    }
+
+    for (const scriptName of [
+      "launch-webui.ps1",
+      "launch-sidecar.ps1",
+      "launch-all.ps1",
+    ]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("Get-LiteRTMacTerminalApp");
+      expect(contents).toContain("LITERT_TERMINAL_APP");
+      expect(contents).toContain("TERM_PROGRAM");
+      expect(contents).toContain("Ghostty");
+      expect(contents).toContain("new surface configuration");
+      expect(contents.indexOf("Start-LiteRTGhostty")).toBeLessThan(
+        contents.indexOf("Start-LiteRTAppleTerminal"),
+      );
+    }
   });
 
   it("prefers separate terminal windows over tab handoff", () => {

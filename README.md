@@ -70,9 +70,11 @@ after the script name and reads common overrides such as `SIDECAR_BIN`,
 for the sidecar TUI. It starts the web UI first, then opens the sidecar TUI so
 the dashboard is the foreground terminal. It forces the sidecar launcher onto
 the TUI path even if a headless environment variable was left behind by smoke
-testing. On Windows the PowerShell scripts prefer Windows Terminal
-`--window new new-tab` when available and fall back to starting a new
-PowerShell console.
+testing. On macOS the launchers prefer the invoking terminal from
+`TERM_PROGRAM`, including Ghostty, and support an explicit
+`LITERT_TERMINAL_APP=Ghostty` override before falling back to Terminal.app. On
+Windows the PowerShell scripts prefer Windows Terminal `--window new new-tab`
+when available and fall back to starting a new PowerShell console.
 For explicit non-interactive sidecar launches, pass `--headless` to
 `launch-sidecar.sh` or `-Headless` to `launch-sidecar.ps1`.
 

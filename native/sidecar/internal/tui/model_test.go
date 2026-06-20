@@ -242,17 +242,23 @@ func TestLaunchWizardMouseUsesRenderedRows(t *testing.T) {
 	model.width = 180
 	model.height = 36
 
-	runtimeRow := lineNumberContaining(model.View(), "runtime ----")
+	runtimeRow := lineNumberContaining(model.View(), "runtime")
 	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
 	model = next.(Model)
-	if !strings.Contains(compactSpaces(model.View()), "runtime ---- litert [llama.cpp]") {
+	if strings.Contains(model.View(), "runtime ----") {
+		t.Fatalf("wizard runtime row should not render decorative dashes:\n%s", model.View())
+	}
+	if !strings.Contains(compactSpaces(model.View()), "runtime litert [llama.cpp]") {
 		t.Fatalf("wizard did not select llama.cpp from rendered runtime row:\n%s", model.View())
 	}
 
-	roleRow := lineNumberContaining(model.View(), "model role ----")
+	roleRow := lineNumberContaining(model.View(), "model role")
 	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
 	model = next.(Model)
-	if !strings.Contains(compactSpaces(model.View()), "model role ---- main embedding [reranking]") {
+	if strings.Contains(model.View(), "model role ----") {
+		t.Fatalf("wizard model role row should not render decorative dashes:\n%s", model.View())
+	}
+	if !strings.Contains(compactSpaces(model.View()), "model role main embedding [reranking]") {
 		t.Fatalf("wizard did not select reranking from rendered role row:\n%s", model.View())
 	}
 
@@ -418,6 +424,28 @@ func TestLaunchWizardRendersThemedOptionBarsAndModelHighlight(t *testing.T) {
 	}
 }
 
+func TestLaunchWizardOptionBarsDoNotUseDecorativeDashesOrTextFainting(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("model.go")
+	if err != nil {
+		t.Fatalf("read model.go: %v", err)
+	}
+	value := string(source)
+	start := strings.Index(value, "func (m Model) wizardOptionBar(")
+	end := strings.Index(value, "func (m Model) wizardStartLine()")
+	if start < 0 || end < 0 || end <= start {
+		t.Fatalf("could not locate wizard option renderer in model.go")
+	}
+	renderer := value[start:end]
+	if strings.Contains(renderer, `Render(label + " ----")`) {
+		t.Fatalf("wizard option renderer still emits decorative dashes")
+	}
+	if strings.Contains(renderer, "Faint(true)") {
+		t.Fatalf("wizard option renderer should dim colors, not text")
+	}
+}
+
 func TestRuntimeStatusBadgesUseGreenForActiveAndRedForIdle(t *testing.T) {
 	t.Parallel()
 
@@ -570,21 +598,21 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	model.height = 36
 	model.setActiveTab("wizard")
 
-	runtimeRow := lineNumberContaining(model.View(), "runtime ----")
+	runtimeRow := lineNumberContaining(model.View(), "runtime")
 	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
 	model = next.(Model)
-	if !strings.Contains(compactSpaces(model.View()), "runtime ---- litert [llama.cpp]") {
+	if !strings.Contains(compactSpaces(model.View()), "runtime litert [llama.cpp]") {
 		t.Fatalf("wizard did not select llama.cpp by mouse:\n%s", model.View())
 	}
 
-	roleRow := lineNumberContaining(model.View(), "model role ----")
+	roleRow := lineNumberContaining(model.View(), "model role")
 	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
 	model = next.(Model)
 	view := model.View()
 	compactView := compactSpaces(view)
 	for _, expected := range []string{
-		"llama type ---- cpu gpu openvino [cuda13] cuda12 sycl",
-		"model role ---- main embedding [reranking]",
+		"llama type cpu gpu openvino [cuda13] cuda12 sycl",
+		"model role main embedding [reranking]",
 		"Qwen3-Reranker-0.6B-Q4_K_M.gguf",
 		"[ START ]",
 	} {

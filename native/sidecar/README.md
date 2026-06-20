@@ -39,10 +39,11 @@ When that model list is open, narrow terminals stack the status and model list
 full-width, while wide terminals place them in two masonry-balanced columns.
 
 The bottom line is the action surface, htop-style. It always shows global
-actions and the current tab's actions. `F1` or clicking the F1 area opens a
-bottom-left global menu with navigation and quit actions. Runner tab action
-labels in the bottom bar are clickable and call the same start, stop, and
-restart controller methods as the keyboard shortcuts.
+actions and the current tab's actions. Clicking `Menu` opens a bottom-left
+global menu with navigation, palette, and quit actions; `F1` remains a keyboard
+shortcut for terminals that expose function keys. Runner tab action labels in
+the bottom bar are clickable and call the same start, stop, and restart
+controller methods as the keyboard shortcuts.
 
 The Launch Wizard is a compact configuration screen. It lets the user click or
 key-select the runtime (`litert` or `llamacpp`), a runtime variant, model role

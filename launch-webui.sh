@@ -31,6 +31,40 @@ escape_applescript() {
   printf '%s' "$value"
 }
 
+macos_terminal_app() {
+  local candidate="${LITERT_TERMINAL_APP:-${TERM_PROGRAM:-}}"
+  case "$candidate" in
+    Ghostty|ghostty|Ghostty.app) printf 'Ghostty' ;;
+    Apple_Terminal|Terminal|Terminal.app|"") printf 'Terminal' ;;
+    *) printf '%s' "$candidate" ;;
+  esac
+}
+
+launch_macos_ghostty() {
+  local command="$1"
+
+  osascript <<OSA
+tell application "Ghostty"
+  activate
+  set cfg to new surface configuration
+  set initial working directory of cfg to "$(escape_applescript "$repo_root")"
+  set initial input of cfg to "$(escape_applescript "$command")" & linefeed
+  set win to new window with configuration cfg
+end tell
+OSA
+}
+
+launch_macos_terminal_app() {
+  local command="$1"
+
+  osascript <<OSA
+tell application "Terminal"
+  activate
+  do script "$(escape_applescript "$command")"
+end tell
+OSA
+}
+
 launch_terminal() {
   local title="$1"
   shift
@@ -39,12 +73,10 @@ launch_terminal() {
   command="cd $(shell_join "$repo_root") && WEBUI_HOST=$(shell_join "$host") WEBUI_PORT=$(shell_join "$port") $(shell_join "$@")"
 
   if [[ "$(uname -s)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
-    osascript <<OSA
-tell application "Terminal"
-  activate
-  do script "$(escape_applescript "$command")"
-end tell
-OSA
+    case "$(macos_terminal_app)" in
+      Ghostty) launch_macos_ghostty "$command" ;;
+      *) launch_macos_terminal_app "$command" ;;
+    esac
     return 0
   fi
 

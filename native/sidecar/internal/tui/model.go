@@ -2424,7 +2424,6 @@ func (m Model) wizardLocalModelLines() []string {
 		}
 		lines = append(lines, m.fullWidthWizardLine(
 			lipgloss.NewStyle().
-				Faint(true).
 				Foreground(lipgloss.Color("252")).
 				Background(lipgloss.Color(m.palette().modelBG)),
 			line,
@@ -2457,19 +2456,18 @@ func (m Model) wizardOptionBar(
 		Bold(true).
 		Foreground(lipgloss.Color(header)).
 		Background(lipgloss.Color(background)).
-		Render(label + " ----")
+		Padding(0, 1).
+		Render(label)
 
 	parts := []string{headerText}
 	for _, option := range options {
 		text := selectedToken(option.label, option.selected)
 		style := lipgloss.NewStyle().
-			Faint(true).
 			Foreground(lipgloss.Color(button)).
 			Background(lipgloss.Color(background)).
 			Padding(0, 1)
 		if option.selected {
 			style = style.
-				Faint(false).
 				Bold(true).
 				Foreground(lipgloss.Color("16")).
 				Background(lipgloss.Color(selected))
@@ -2479,7 +2477,6 @@ func (m Model) wizardOptionBar(
 
 	return m.fullWidthWizardLine(
 		lipgloss.NewStyle().
-			Faint(true).
 			Foreground(lipgloss.Color(button)).
 			Background(lipgloss.Color(background)),
 		strings.Join(parts, " "),

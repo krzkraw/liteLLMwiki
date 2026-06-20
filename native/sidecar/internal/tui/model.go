@@ -26,21 +26,19 @@ const refreshInterval = time.Second
 const defaultChatEndpoint = "http://127.0.0.1:9379/v1/chat/completions"
 
 const (
-	dashboardModelRowY    = 8
 	dashboardModelMainX   = 23
 	dashboardModelEmbedX  = 33
 	dashboardModelRerankX = 49
 
-	wizardRuntimeRowY     = 6
-	wizardRuntimeLlamaX   = 24
-	wizardVariantRowY     = 8
-	wizardRoleRowY        = 10
-	wizardRoleMainX       = 18
-	wizardRoleEmbeddingX  = 25
-	wizardRoleRerankingX  = 37
-	wizardModelListStartY = 13
-	wizardStartRowY       = 18
-	wizardStartX          = 6
+	wizardRuntimeLlamaX  = 24
+	wizardRoleMainX      = 18
+	wizardRoleEmbeddingX = 25
+	wizardRoleRerankingX = 37
+	wizardStartX         = 6
+
+	runnerBottomStartX   = 63
+	runnerBottomStopX    = 73
+	runnerBottomRestartX = 82
 )
 
 type tab struct {
@@ -320,6 +318,9 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.handleTabClick(msg.X, msg.Y) {
 		return m, nil
 	}
+	if next, cmd, ok := m.bottomBarRunnerAction(msg.X, msg.Y); ok {
+		return next, cmd
+	}
 	if m.handleBottomBarClick(msg.X, msg.Y) {
 		return m, nil
 	}
@@ -335,15 +336,38 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleBottomBarClick(x int, y int) bool {
-	if m.height <= 0 || y < m.height-1 || x > 8 {
+	if m.height <= 0 || y < m.height-1 {
 		return false
 	}
-	m.globalMenuOpen = !m.globalMenuOpen
-	return true
+	if x <= 8 {
+		m.globalMenuOpen = !m.globalMenuOpen
+		return true
+	}
+	return false
+}
+
+func (m Model) bottomBarRunnerAction(x int, y int) (tea.Model, tea.Cmd, bool) {
+	if m.height <= 0 || y < m.height-1 {
+		return m, nil, false
+	}
+	runner, ok := m.activeRunner()
+	if !ok {
+		return m, nil, false
+	}
+	switch {
+	case x >= runnerBottomRestartX:
+		return m, m.runnerActionCmd("restart", runner.ID), true
+	case x >= runnerBottomStopX:
+		return m, m.runnerActionCmd("stop", runner.ID), true
+	case x >= runnerBottomStartX:
+		return m, m.runnerActionCmd("start", runner.ID), true
+	default:
+		return m, nil, false
+	}
 }
 
 func (m *Model) handleTabClick(x int, y int) bool {
-	if y != 2 {
+	if y != m.tabBarRow() {
 		return false
 	}
 	position := 0
@@ -361,7 +385,7 @@ func (m *Model) handleTabClick(x int, y int) bool {
 }
 
 func (m Model) updateDashboardMouse(x int, y int) Model {
-	if y != dashboardModelRowY {
+	if y != m.dashboardModelRow() {
 		return m
 	}
 	switch {
@@ -378,8 +402,13 @@ func (m Model) updateDashboardMouse(x int, y int) Model {
 }
 
 func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
+	if index, ok := m.wizardModelIndexFromMouse(x, y); ok {
+		m.setWizardModelSelection(index)
+		return m, nil
+	}
+
 	switch y {
-	case wizardRuntimeRowY:
+	case m.wizardChoiceRow(0):
 		if x >= wizardRuntimeLlamaX {
 			m.wizardRuntime = "llamacpp"
 			m.wizardBackend = m.firstAvailableLlamaType()
@@ -389,9 +418,9 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 		}
 		m.wizardModelSelection = 0
 		m.normalizeWizardSelection()
-	case wizardVariantRowY:
+	case m.wizardChoiceRow(2):
 		m.setWizardVariantFromMouse(x)
-	case wizardRoleRowY:
+	case m.wizardChoiceRow(4):
 		switch {
 		case x >= wizardRoleRerankingX:
 			m.setWizardRole("reranking")
@@ -400,16 +429,72 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 		case x >= wizardRoleMainX:
 			m.setWizardRole("main")
 		}
-	case wizardStartRowY:
+	case m.wizardChoiceRow(6):
 		if x >= wizardStartX && x < wizardStartX+12 {
 			return m, m.wizardCreateCmd()
 		}
-	default:
-		if y >= wizardModelListStartY {
-			m.setWizardModelFromMouse(y)
-		}
 	}
 	return m, nil
+}
+
+func (m Model) tabBarRow() int {
+	return viewLineCount(m.headerView())
+}
+
+func (m Model) contentTopRow() int {
+	return viewLineCount(m.managedTopView()) + 1
+}
+
+func (m Model) dashboardModelRow() int {
+	return panelContentRow(m.contentTopRow(), 9)
+}
+
+func (m Model) wizardChoiceRow(line int) int {
+	return panelContentRow(m.contentTopRow(), line)
+}
+
+func (m Model) wizardModelIndexFromMouse(x int, y int) (int, bool) {
+	startX := 0
+	startY := m.wizardLocalModelStartRow()
+	if m.usesWidePanelGrid() {
+		startX = m.panelGridColumnWidth() + panelGridColumnGap
+	}
+	if x < startX || y < startY {
+		return 0, false
+	}
+	candidates := m.wizardCandidateModels()
+	if len(candidates) == 0 {
+		return 0, false
+	}
+	index := y - startY
+	if index < 0 || index >= len(candidates) {
+		return 0, false
+	}
+	return index, true
+}
+
+func (m Model) wizardLocalModelStartRow() int {
+	if m.usesWidePanelGrid() {
+		return panelContentRow(m.contentTopRow(), 0)
+	}
+	choicePanel := renderPanelSpec(
+		panelSpec{"Launch Wizard", m.wizardChoiceLines(), "214"},
+		m.width,
+	)
+	localPanelTop := m.contentTopRow() + viewLineCount(choicePanel) + 1
+	return panelContentRow(localPanelTop, 0)
+}
+
+func (m Model) usesWidePanelGrid() bool {
+	return m.width >= widePanelGridMinWidth
+}
+
+func (m Model) panelGridColumnWidth() int {
+	return (m.width - panelGridColumnGap) / 2
+}
+
+func panelContentRow(panelTop int, line int) int {
+	return panelTop + 2 + line
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1038,9 +1123,16 @@ func (m Model) runtimeAliveCount(runtimeName string) int {
 
 func runtimeUseBadge(alive int) string {
 	if alive > 0 {
-		return statusBadge("active")
+		return coloredStatus("active", runtimeUseBadgeColor(alive))
 	}
-	return statusBadge("idle")
+	return coloredStatus("idle", runtimeUseBadgeColor(alive))
+}
+
+func runtimeUseBadgeColor(alive int) string {
+	if alive > 0 {
+		return "82"
+	}
+	return "196"
 }
 
 func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
@@ -1303,7 +1395,22 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 }
 
 func (m Model) dashboardView() string {
-	lines := []string{
+	status := panelSpec{"Status", m.dashboardStatusLines(), "45"}
+	if m.dashboardModelDropdown == "" {
+		return renderPanelSpec(status, m.width)
+	}
+	return m.panelGrid(
+		status,
+		panelSpec{
+			roleDisplayName(m.dashboardModelDropdown) + " models",
+			m.modelDropdownItemLines(m.dashboardModelDropdown),
+			"205",
+		},
+	)
+}
+
+func (m Model) dashboardStatusLines() []string {
+	return []string{
 		"Runners by runtime",
 		fmt.Sprintf("LiteRT      %d alive", m.runtimeAliveCount("litert")),
 		fmt.Sprintf("llama.cpp   %d alive", m.runtimeAliveCount("llamacpp")),
@@ -1320,11 +1427,6 @@ func (m Model) dashboardView() string {
 			m.presentModelCount("reranking"),
 		),
 	}
-	if m.dashboardModelDropdown != "" {
-		lines = append(lines, "")
-		lines = append(lines, m.modelDropdownLines(m.dashboardModelDropdown)...)
-	}
-	return renderPanelWidth("Status", lines, "45", m.width)
 }
 
 func (m Model) roleAliveCount(role string) int {
@@ -1354,7 +1456,11 @@ func (m Model) presentModelCount(role string) int {
 
 func (m Model) modelDropdownLines(role string) []string {
 	title := roleDisplayName(role) + " models"
-	lines := []string{title}
+	return append([]string{title}, m.modelDropdownItemLines(role)...)
+}
+
+func (m Model) modelDropdownItemLines(role string) []string {
+	lines := []string{}
 	found := false
 	for _, entry := range m.models {
 		if entry.Role != role || entry.State != catalog.StatePresent {
@@ -1634,6 +1740,13 @@ func (m Model) recentActivityLines(limit int) []string {
 }
 
 func (m Model) runnerView(runner server.RunnerSnapshot) string {
+	return m.panelGrid(
+		panelSpec{"Runner " + runner.ID, m.runnerSummaryLines(runner), "82"},
+		panelSpec{"Routes / Controls", m.runnerRouteControlLines(runner), "45"},
+	)
+}
+
+func (m Model) runnerSummaryLines(runner server.RunnerSnapshot) []string {
 	lines := []string{
 		formatKV("State", fallback(runner.State, "unknown")),
 		formatKV("Runtime", fallback(runner.Runtime, "unknown")),
@@ -1643,13 +1756,34 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		formatKV("Model ID", fallback(runner.ModelID, "not configured")),
 		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
 		formatKV("PID", fallbackInt(runner.PID, "not running")),
-		"",
-		"Actions ---- s Start -- x Stop -- r Restart",
 	}
 	if runner.Detail != "" {
 		lines = append(lines, formatKV("Detail", runner.Detail))
 	}
-	return renderPanelWidth("Runner "+runner.ID, lines, "82", m.width)
+	return lines
+}
+
+func (m Model) runnerRouteControlLines(runner server.RunnerSnapshot) []string {
+	basePath := "/sidecar/v1/runners/" + runner.ID
+	lines := []string{
+		formatKV("Route", runnerRoleRoute(runner.Role)),
+		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
+		formatKV("Models", endpointPath(runner.Upstream, "/v1/models")),
+		"",
+		"Actions ---- s Start -- x Stop -- r Restart",
+		"POST " + basePath + "/start",
+		"POST " + basePath + "/stop",
+		"POST " + basePath + "/restart",
+	}
+	switch runner.Role {
+	case "main":
+		lines = append(lines, "OpenAI ---- "+runnerRoleRoute(runner.Role))
+	case "embedding":
+		lines = append(lines, "OpenAI ---- "+runnerRoleRoute(runner.Role))
+	case "reranking":
+		lines = append(lines, "OpenAI ---- "+runnerRoleRoute(runner.Role))
+	}
+	return lines
 }
 
 func (m Model) runnerSignalLines(runner server.RunnerSnapshot) []string {
@@ -1953,7 +2087,14 @@ func (m Model) runnerEditorSpec(runner server.RunnerSnapshot) panelSpec {
 }
 
 func (m Model) wizardView() string {
-	lines := []string{
+	return m.panelGrid(
+		panelSpec{"Launch Wizard", m.wizardChoiceLines(), "214"},
+		panelSpec{"Local Models", m.wizardLocalModelLines(), "45"},
+	)
+}
+
+func (m Model) wizardChoiceLines() []string {
+	return []string{
 		"runtime ---- " + selectedToken("litert", m.wizardRuntime == "litert") + " " +
 			selectedToken("llama.cpp", m.wizardRuntime == "llamacpp"),
 		"",
@@ -1964,23 +2105,25 @@ func (m Model) wizardView() string {
 			selectedToken("embedding", m.wizardRole == "embedding") + " " +
 			selectedToken("reranking", m.wizardRole == "reranking"),
 		"",
-		"local models",
+		"[ START ]",
 	}
+}
+
+func (m Model) wizardLocalModelLines() []string {
+	lines := []string{}
 	candidates := m.wizardCandidateModels()
 	if len(candidates) == 0 {
-		lines = append(lines, "  no local models match this runtime, variant, and role")
-	} else {
-		selected := clampInt(m.wizardModelSelection, 0, len(candidates)-1)
-		for index, entry := range candidates {
-			prefix := "  "
-			if index == selected {
-				prefix = "> "
-			}
-			lines = append(lines, prefix+entry.Filename)
-		}
+		return []string{"no local models match this runtime, variant, and role"}
 	}
-	lines = append(lines, "", "[ START ]")
-	return renderPanelWidth("Launch Wizard", lines, "214", m.width)
+	selected := clampInt(m.wizardModelSelection, 0, len(candidates)-1)
+	for index, entry := range candidates {
+		prefix := "  "
+		if index == selected {
+			prefix = "> "
+		}
+		lines = append(lines, prefix+entry.Filename)
+	}
+	return lines
 }
 
 func selectedToken(label string, selected bool) string {
@@ -3125,14 +3268,13 @@ func (m *Model) setWizardVariantFromMouse(x int) {
 	m.normalizeWizardSelection()
 }
 
-func (m *Model) setWizardModelFromMouse(y int) {
+func (m *Model) setWizardModelSelection(index int) {
 	candidates := m.wizardCandidateModels()
 	if len(candidates) == 0 {
 		m.wizardModelSelection = 0
 		return
 	}
-	index := clampInt(y-wizardModelListStartY, 0, len(candidates)-1)
-	m.wizardModelSelection = index
+	m.wizardModelSelection = clampInt(index, 0, len(candidates)-1)
 }
 
 func (m *Model) normalizeWizardSelection() {
@@ -3556,7 +3698,7 @@ type panelSpec struct {
 
 func (m Model) panelGrid(panels ...panelSpec) string {
 	width := m.width
-	if width < widePanelGridMinWidth {
+	if !m.usesWidePanelGrid() {
 		rendered := make([]string, 0, len(panels))
 		for _, panel := range panels {
 			rendered = append(rendered, renderPanelSpec(panel, width))
@@ -3564,7 +3706,7 @@ func (m Model) panelGrid(panels ...panelSpec) string {
 		return joinPanels(rendered...)
 	}
 
-	columnWidth := (width - panelGridColumnGap) / 2
+	columnWidth := m.panelGridColumnWidth()
 	columns := [2][]string{}
 	columnHeights := [2]int{}
 	for _, panel := range panels {
@@ -3786,6 +3928,10 @@ func statusBadge(state string) string {
 	case "unavailable", "error", "missing":
 		color = "196"
 	}
+	return coloredStatus(state, color)
+}
+
+func coloredStatus(state string, color string) string {
 	return lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(color)).

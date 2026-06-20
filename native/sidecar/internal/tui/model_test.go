@@ -126,7 +126,8 @@ func TestDashboardMouseClickOpensModelRoleDropdown(t *testing.T) {
 	model.width = 140
 	model.height = 32
 
-	next, cmd := model.Update(leftClick(dashboardModelMainX, dashboardModelRowY))
+	modelRow := lineNumberContaining(model.View(), "Models ----")
+	next, cmd := model.Update(leftClick(dashboardModelMainX, modelRow))
 	if cmd != nil {
 		t.Fatalf("dashboard model click returned unexpected command")
 	}
@@ -140,6 +141,159 @@ func TestDashboardMouseClickOpensModelRoleDropdown(t *testing.T) {
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("dashboard dropdown missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestDashboardModelDropdownUsesResponsiveLayout(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 180
+	model.height = 36
+
+	modelRow := lineNumberContaining(model.View(), "Models ----")
+	next, _ := model.Update(leftClick(dashboardModelMainX, modelRow))
+	wide := next.(Model)
+	wideView := wide.View()
+	if !lineContainsAll(wideView, "Status", "Main models") {
+		t.Fatalf("wide dashboard dropdown should share a masonry row with status:\n%s", wideView)
+	}
+
+	wide.width = 120
+	narrowView := wide.View()
+	if lineContainsAll(narrowView, "Status", "Main models") {
+		t.Fatalf("narrow dashboard dropdown should stack full-width under status:\n%s", narrowView)
+	}
+	for _, expected := range []string{"Status", "Main models"} {
+		if !strings.Contains(narrowView, expected) {
+			t.Fatalf("narrow dashboard dropdown missing %q:\n%s", expected, narrowView)
+		}
+	}
+}
+
+func TestMouseCanSwitchTabsFromRenderedTabRow(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 24
+
+	tabRow := lineNumberContaining(model.View(), "Launch Wizard")
+	next, cmd := model.Update(leftClick(18, tabRow))
+	if cmd != nil {
+		t.Fatalf("tab mouse click returned unexpected command")
+	}
+	if got := next.(Model).activeTabID(); got != "wizard" {
+		t.Fatalf("active tab = %q, want wizard", got)
+	}
+}
+
+func TestLaunchWizardUsesResponsiveMasonryLayout(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot: testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+	})
+	model.setActiveTab("wizard")
+	model.width = 180
+	model.height = 36
+
+	wideView := model.View()
+	if !lineContainsAll(wideView, "Launch Wizard", "Local Models") {
+		t.Fatalf("wide wizard should render choices and local models in masonry columns:\n%s", wideView)
+	}
+
+	model.width = 120
+	narrowView := model.View()
+	if lineContainsAll(narrowView, "Launch Wizard", "Local Models") {
+		t.Fatalf("narrow wizard should stack choices and local models full-width:\n%s", narrowView)
+	}
+	for _, expected := range []string{"Launch Wizard", "Local Models"} {
+		if !strings.Contains(narrowView, expected) {
+			t.Fatalf("narrow wizard missing %q:\n%s", expected, narrowView)
+		}
+	}
+}
+
+func TestLaunchWizardMouseUsesRenderedRows(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController(nil)
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot: testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+	})
+	model.setActiveTab("wizard")
+	model.width = 180
+	model.height = 36
+
+	runtimeRow := lineNumberContaining(model.View(), "runtime ----")
+	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
+	model = next.(Model)
+	if !strings.Contains(model.View(), "runtime ---- litert [llama.cpp]") {
+		t.Fatalf("wizard did not select llama.cpp from rendered runtime row:\n%s", model.View())
+	}
+
+	roleRow := lineNumberContaining(model.View(), "model role ----")
+	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
+	model = next.(Model)
+	if !strings.Contains(model.View(), "model role ---- main embedding [reranking]") {
+		t.Fatalf("wizard did not select reranking from rendered role row:\n%s", model.View())
+	}
+
+	startRow := lineNumberContaining(model.View(), "[ START ]")
+	nextModel, cmd := model.Update(leftClick(wizardStartX, startRow))
+	if cmd == nil {
+		t.Fatalf("wizard start click from rendered row returned no command")
+	}
+	message := cmd()
+	afterAction, _ := nextModel.(Model).Update(message)
+	if got := afterAction.(Model).activeTabID(); got != "runner:LM-R-1" {
+		t.Fatalf("active tab = %q, want new runner tab", got)
+	}
+}
+
+func TestRunnerTabUsesResponsiveMasonryLayout(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{
+			testRunner("LR-M-1", "litert", "main", "running"),
+		}),
+		Logs:    server.NewLogBroadcaster(8),
+		Catalog: testCatalogWithPresentModels(t),
+	})
+	model.setActiveTab("runner:LR-M-1")
+	model.width = 180
+	model.height = 36
+
+	wideView := model.View()
+	if !lineContainsAll(wideView, "Runner LR-M-1", "Routes / Controls") {
+		t.Fatalf("wide runner view should render details and controls in masonry columns:\n%s", wideView)
+	}
+
+	model.width = 120
+	narrowView := model.View()
+	if lineContainsAll(narrowView, "Runner LR-M-1", "Routes / Controls") {
+		t.Fatalf("narrow runner view should stack details and controls full-width:\n%s", narrowView)
+	}
+	for _, expected := range []string{"Runner LR-M-1", "Routes / Controls"} {
+		if !strings.Contains(narrowView, expected) {
+			t.Fatalf("narrow runner view missing %q:\n%s", expected, narrowView)
 		}
 	}
 }
@@ -172,6 +326,17 @@ func TestBottomBarListsGlobalMenuAndCurrentTabActions(t *testing.T) {
 	wizardBottom := lastNonEmptyLine(updated.View())
 	if !strings.Contains(wizardBottom, "Wizard: click toggles | Enter Start") {
 		t.Fatalf("wizard bottom action bar = %q:\n%s", wizardBottom, updated.View())
+	}
+}
+
+func TestRuntimeStatusBadgesUseGreenForActiveAndRedForIdle(t *testing.T) {
+	t.Parallel()
+
+	if got := runtimeUseBadgeColor(1); got != "82" {
+		t.Fatalf("active runtime color = %q, want green", got)
+	}
+	if got := runtimeUseBadgeColor(0); got != "196" {
+		t.Fatalf("idle runtime color = %q, want red", got)
 	}
 }
 
@@ -210,6 +375,43 @@ func TestGlobalActionsOpenAsBottomLeftMenu(t *testing.T) {
 	}
 }
 
+func TestRunnerBottomBarMouseActionsUseSharedController(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController([]server.RunnerSnapshot{
+		testRunner("LR-M-1", "litert", "main", "created"),
+	})
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 30
+	model.setActiveTab("runner:LR-M-1")
+
+	for _, tc := range []struct {
+		name string
+		x    int
+		want string
+	}{
+		{name: "start", x: runnerBottomStartX, want: "start:LR-M-1"},
+		{name: "stop", x: runnerBottomStopX, want: "stop:LR-M-1"},
+		{name: "restart", x: runnerBottomRestartX, want: "restart:LR-M-1"},
+	} {
+		next, cmd := model.Update(leftClick(tc.x, model.height-1))
+		if cmd == nil {
+			t.Fatalf("%s click returned no command", tc.name)
+		}
+		message := cmd()
+		afterAction, _ := next.(Model).Update(message)
+		model = afterAction.(Model)
+		if got := controller.calls[len(controller.calls)-1]; got != tc.want {
+			t.Fatalf("%s call = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	t.Parallel()
 
@@ -224,13 +426,15 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	model.height = 36
 	model.setActiveTab("wizard")
 
-	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, wizardRuntimeRowY))
+	runtimeRow := lineNumberContaining(model.View(), "runtime ----")
+	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
 	model = next.(Model)
 	if !strings.Contains(model.View(), "runtime ---- litert [llama.cpp]") {
 		t.Fatalf("wizard did not select llama.cpp by mouse:\n%s", model.View())
 	}
 
-	next, _ = model.Update(leftClick(wizardRoleRerankingX, wizardRoleRowY))
+	roleRow := lineNumberContaining(model.View(), "model role ----")
+	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
 	model = next.(Model)
 	view := model.View()
 	for _, expected := range []string{
@@ -244,7 +448,8 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 		}
 	}
 
-	nextModel, cmd := model.Update(leftClick(wizardStartX, wizardStartRowY))
+	startRow := lineNumberContaining(model.View(), "[ START ]")
+	nextModel, cmd := model.Update(leftClick(wizardStartX, startRow))
 	if cmd == nil {
 		t.Fatalf("wizard start click returned no command")
 	}
@@ -304,6 +509,31 @@ func lastNonEmptyLine(view string) string {
 		}
 	}
 	return ""
+}
+
+func lineNumberContaining(view string, text string) int {
+	for index, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, text) {
+			return index
+		}
+	}
+	return -1
+}
+
+func lineContainsAll(view string, parts ...string) bool {
+	for _, line := range strings.Split(view, "\n") {
+		matches := true
+		for _, part := range parts {
+			if !strings.Contains(line, part) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 func leftClick(x int, y int) tea.MouseMsg {
@@ -454,16 +684,30 @@ func (c *fakeRunnerController) StartRunner(
 }
 
 func (c *fakeRunnerController) StopRunner(
-	context.Context,
-	string,
+	_ context.Context,
+	id string,
 ) (server.RunnerSnapshot, error) {
+	c.calls = append(c.calls, "stop:"+id)
+	for index := range c.runners {
+		if c.runners[index].ID == id {
+			c.runners[index].State = "stopped"
+			return c.runners[index], nil
+		}
+	}
 	return server.RunnerSnapshot{}, nil
 }
 
 func (c *fakeRunnerController) RestartRunner(
-	context.Context,
-	string,
+	_ context.Context,
+	id string,
 ) (server.RunnerSnapshot, error) {
+	c.calls = append(c.calls, "restart:"+id)
+	for index := range c.runners {
+		if c.runners[index].ID == id {
+			c.runners[index].State = "running"
+			return c.runners[index], nil
+		}
+	}
 	return server.RunnerSnapshot{}, nil
 }
 

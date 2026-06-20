@@ -27,18 +27,22 @@ The TUI is currently focused on the native runner basics. It shows only a
 Dashboard tab, a Launch Wizard tab, and runner tabs created from the wizard.
 Chat, Models, Logs, and Settings tabs are intentionally hidden while the native
 runner workflow is being stabilized. The status header reports LiteRT and
-llama.cpp independently as `active` or `idle` based on whether each runtime has
-any running runner.
+llama.cpp independently as green `active` or red `idle` based on whether each
+runtime has any running runner.
 
 The Dashboard contains a single status widget: live runner counts by runtime,
 live runner counts by role, and model-file counts by role. Clicking the Main,
 Embedding, or Reranking model count opens a small local-model list for that
 role. The old system-health, topology, signal-board, route-map, backend-card,
 recent-activity, and command-rail panels are no longer part of the dashboard.
+When that model list is open, narrow terminals stack the status and model list
+full-width, while wide terminals place them in two masonry-balanced columns.
 
 The bottom line is the action surface, htop-style. It always shows global
 actions and the current tab's actions. `F1` or clicking the F1 area opens a
-bottom-left global menu with navigation and quit actions.
+bottom-left global menu with navigation and quit actions. Runner tab action
+labels in the bottom bar are clickable and call the same start, stop, and
+restart controller methods as the keyboard shortcuts.
 
 The Launch Wizard is a compact configuration screen. It lets the user click or
 key-select the runtime (`litert` or `llamacpp`), a runtime variant, model role
@@ -50,8 +54,12 @@ installed folders under `native/llama-runtimes`. Pressing Enter or clicking
 Launch Wizard and are named by runtime and role, such as `LR-M-1`, `LM-E-1`,
 or `LM-R-1`; numbering is per role.
 
-Runner tabs show a single basic status/control panel with runtime, role,
+Runner tabs show basic status and route/control panels with runtime, role,
 backend, model, upstream, PID, and `s`/`x`/`r` start/stop/restart actions.
+Launch Wizard and runner tabs use the same responsive body layout: small
+terminals render full-width stacked panels, and wide terminals render two
+masonry-balanced columns so the right side of the terminal is used without
+bringing back the old cluster of diagnostic boxes.
 
 In headless mode, the sidecar still:
 

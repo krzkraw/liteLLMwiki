@@ -57,6 +57,8 @@
    THE SYSTEM SHALL render global actions and current-tab actions in a bottom action bar.
 2. WHEN F1 is pressed or clicked
    THE SYSTEM SHALL toggle a bottom-left global actions menu.
+3. WHEN a runner tab is visible
+   THE SYSTEM SHALL let the user click the bottom-bar runner actions to start, stop, and restart that runner.
 
 ## US-5: Clickable Launch Wizard
 
@@ -76,3 +78,18 @@
    THE SYSTEM SHALL create and start a runner.
 5. WHEN a runner is created
    THE SYSTEM SHALL insert a runner tab after Launch Wizard with an LR/LM runtime prefix, M/E/R role letter, and role-scoped number.
+
+## US-6: Responsive Low-Box Layout
+
+**As a** local runner operator
+**I want** the TUI body to use fewer, wider panels
+**So that** the interface stays legible in small terminals and does not waste wide terminals.
+
+### Acceptance Criteria
+
+1. WHEN the terminal is narrow
+   THE SYSTEM SHALL render body panels as a single full-width stack.
+2. WHEN the terminal is wide
+   THE SYSTEM SHALL render body panels in two masonry-balanced columns.
+3. WHEN Dashboard model details, Launch Wizard sections, or runner details are visible
+   THE SYSTEM SHALL use the responsive layout rules without reintroducing the old diagnostic panel cluster.

@@ -18,16 +18,20 @@ default runner or centers the web UI workflow.
 ## Rendering
 
 The shell has three fixed regions: status header, tab bar, and bottom action
-bar. The body shows one tab at a time. Dashboard renders a single status panel.
-Launch Wizard renders one config panel. Runner tabs render one basic status and
-control panel.
+bar. The body shows one tab at a time and uses the shared responsive panel grid:
+narrow terminals render one full-width stack, while wide terminals render two
+masonry-balanced columns. Dashboard renders one status panel unless a model role
+dropdown is open, in which case the dropdown becomes a second panel. Launch
+Wizard renders choices and local models as two responsive sections. Runner tabs
+render runner details and route/control actions as two responsive sections.
 
 ## Interaction
 
 Bubble Tea runs with alternate screen and mouse cell-motion support. Mouse
 clicks route to tabs, bottom F1 menu, dashboard model role dropdowns, wizard
-runtime/variant/role/model controls, and START. Keyboard navigation keeps Tab,
-Shift+Tab, number keys, Enter, and F1.
+runtime/variant/role/model controls, START, and runner tab bottom-bar actions.
+Keyboard navigation keeps Tab, Shift+Tab, number keys, Enter, F1, and runner
+start/stop/restart keys.
 
 ## Runner Creation
 

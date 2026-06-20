@@ -1524,10 +1524,7 @@ func (m Model) fullView() string {
 		builder.WriteString("\n")
 		builder.WriteString(renderPanelSpec(m.wizardCommandEditSpec(), m.width))
 	}
-	builder.WriteString("\n\n")
-	builder.WriteString(m.footerView())
-
-	return builder.String()
+	return pinFooterToBottom(builder.String(), m.footerView(), m.height)
 }
 
 func (m Model) managedScreenView() string {
@@ -5673,6 +5670,28 @@ func fitLinesToHeight(value string, height int) string {
 		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func pinFooterToBottom(body string, footer string, height int) string {
+	if height <= 0 {
+		return joinPanels(body, footer)
+	}
+	footerLines := strings.Split(footer, "\n")
+	if len(footerLines) > height {
+		return strings.Join(footerLines[len(footerLines)-height:], "\n")
+	}
+	bodyHeight := height - len(footerLines)
+	bodyLines := []string{}
+	if body != "" {
+		bodyLines = strings.Split(body, "\n")
+	}
+	if len(bodyLines) > bodyHeight {
+		return joinPanels(body, footer)
+	}
+	for len(bodyLines) < bodyHeight {
+		bodyLines = append(bodyLines, "")
+	}
+	return strings.Join(append(bodyLines, footerLines...), "\n")
 }
 
 func viewLineCount(value string) int {

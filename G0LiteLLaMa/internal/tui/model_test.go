@@ -533,6 +533,26 @@ func TestTopAndBottomBarsTakeFullWidth(t *testing.T) {
 	}
 }
 
+func TestFullViewBottomBarStaysOnTerminalBottom(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 24
+
+	lines := strings.Split(model.View().Content, "\n")
+	if got := len(lines); got != model.height {
+		t.Fatalf("view line count = %d, want %d:\n%s", got, model.height, model.View().Content)
+	}
+	if bottom := lines[model.height-1]; !strings.Contains(bottom, "Menu") {
+		t.Fatalf("bottom row missing action bar: %q\n%s", bottom, model.View().Content)
+	}
+}
+
 func TestBottomBarMouseActionsDoNotRequireFKeys(t *testing.T) {
 	t.Parallel()
 
@@ -978,6 +998,27 @@ func TestGlobalActionsOpenAsBottomLeftMenu(t *testing.T) {
 	}
 	if strings.Contains(next.(Model).View().Content, "Global menu") {
 		t.Fatalf("global menu did not close after F1 mouse click:\n%s", next.(Model).View().Content)
+	}
+}
+
+func TestGlobalMenuOpensFromBottomLeftAboveActionBar(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 30
+
+	next, cmd := model.Update(leftClick(2, model.height-1))
+	if cmd != nil {
+		t.Fatalf("menu click returned unexpected command")
+	}
+	opened := next.(Model)
+	if got, want := lineNumberContaining(opened.View().Content, "Global menu"), opened.globalMenuTopRow()+1; got != want {
+		t.Fatalf("global menu row = %d, want %d:\n%s", got, want, opened.View().Content)
 	}
 }
 

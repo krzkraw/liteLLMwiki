@@ -12,10 +12,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = $PSScriptRoot
-$LiteRtRuntimeRoot = Join-Path $RepoRoot "native\litert-runtimes"
-$LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
+$LiteRtRuntimeRoot = Join-Path $RepoRoot "G0LiteLLaMa\litert-runtimes"
+$LlamaRuntimeRoot = Join-Path $RepoRoot "G0LiteLLaMa\llama-runtimes"
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-  $ConfigPath = Join-Path $RepoRoot "native\runtime-config\backends.json"
+  $ConfigPath = Join-Path $RepoRoot "G0LiteLLaMa\runtime-config\backends.json"
 }
 Set-Location $RepoRoot
 

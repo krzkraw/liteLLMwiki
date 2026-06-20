@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-config_path="${RUNTIME_BACKEND_CONFIG:-$repo_root/native/runtime-config/backends.json}"
+config_path="${RUNTIME_BACKEND_CONFIG:-$repo_root/G0LiteLLaMa/runtime-config/backends.json}"
 litert_test_model="${LITERT_TEST_MODEL:-}"
 llama_test_model="${LLAMA_TEST_MODEL:-}"
 litert_lm_bin="${LITERT_LM_BIN:-}"
@@ -10,8 +10,8 @@ llama_server_bin="${LLAMA_SERVER_BIN:-}"
 litert_model_id="${LITERT_TEST_MODEL_ID:-gemma4-e2b}"
 litert_prompt="${LITERT_TEST_PROMPT:-Say ok.}"
 llama_prompt="${LLAMA_TEST_PROMPT:-Say ok.}"
-litert_runtime_root="$repo_root/native/litert-runtimes"
-llama_runtime_root="$repo_root/native/llama-runtimes"
+litert_runtime_root="$repo_root/G0LiteLLaMa/litert-runtimes"
+llama_runtime_root="$repo_root/G0LiteLLaMa/llama-runtimes"
 
 cd "$repo_root"
 
@@ -20,7 +20,7 @@ usage() {
 Usage: ./configure.sh [--config path] [--litert-model path] [--llama-model path] [--litert-bin path] [--llama-bin path]
 
 Environment overrides:
-  RUNTIME_BACKEND_CONFIG  JSON file to update. Defaults to native/runtime-config/backends.json.
+  RUNTIME_BACKEND_CONFIG  JSON file to update. Defaults to G0LiteLLaMa/runtime-config/backends.json.
   LITERT_TEST_MODEL       LiteRT model used by backend probes.
   LLAMA_TEST_MODEL        llama.cpp GGUF model used by backend probes.
   LITERT_LM_BIN           litert-lm executable override.

@@ -1,6 +1,6 @@
 .DS_Store
 
-# JavaScript dependencies and build output
+# Local/generated dependency and build output
 node_modules/
 dist/
 coverage/
@@ -17,17 +17,17 @@ models/*
 *.litertlm.partial
 *.litertlm.parts/
 
-# Native sidecar release/debug artifacts
-native/sidecar-artifacts/*
-!native/sidecar-artifacts/README.md
-native/litert-runtimes/*
-!native/litert-runtimes/README.md
-native/llama-runtimes/*
-!native/llama-runtimes/README.md
-native/sidecar/dist/
-native/sidecar/bin/
-native/sidecar/litert-sidecar
-native/sidecar/litert-sidecar.exe
+# G0LiteLLaMa release/debug artifacts
+native/
+G0LiteLLaMa/dist/*
+!G0LiteLLaMa/dist/README.md
+G0LiteLLaMa/litert-runtimes/*
+!G0LiteLLaMa/litert-runtimes/README.md
+G0LiteLLaMa/llama-runtimes/*
+!G0LiteLLaMa/llama-runtimes/README.md
+G0LiteLLaMa/bin/
+G0LiteLLaMa/g0litellama
+G0LiteLLaMa/g0litellama.exe
 
 # Local runtime scratch
 tmp/

@@ -10,10 +10,10 @@ $Summary = [System.Collections.Generic.List[string]]::new()
 $SelectedModelDownloadKeys = [System.Collections.Generic.List[string]]::new()
 $ModelsNextcloudBase = $null
 $ModelsNextcloudToken = $null
-$LiteRtRuntimeRoot = Join-Path $RepoRoot "native\litert-runtimes"
+$LiteRtRuntimeRoot = Join-Path $RepoRoot "G0LiteLLaMa\litert-runtimes"
 $LiteRtSelectedFile = Join-Path $LiteRtRuntimeRoot ".selected"
 $LiteRtPackageSpec = "litert-lm==0.13.1"
-$LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
+$LlamaRuntimeRoot = Join-Path $RepoRoot "G0LiteLLaMa\llama-runtimes"
 $LlamaSelectedFile = Join-Path $LlamaRuntimeRoot ".selected"
 $LlamaReleaseBase = "https://github.com/ggml-org/llama.cpp/releases/download/b9736"
 
@@ -322,10 +322,10 @@ function Write-LiteRtRuntimeAction {
   Write-Host ""
   Write-Host "LiteRT runtime needs to be installed downloaded, here is the command or URL I would use:"
   Write-Host "Runtime: $($Definition.Label)"
-  Write-Host "Folder: native/litert-runtimes/$($Definition.Folder)"
+  Write-Host "Folder: G0LiteLLaMa/litert-runtimes/$($Definition.Folder)"
   Write-Host "Package: $($Definition.Package)"
   Write-Host "URL: $($Definition.Url)"
-  Write-Host "Command: `$env:UV_TOOL_DIR = 'native/litert-runtimes/$($Definition.Folder)/tool'; `$env:UV_TOOL_BIN_DIR = 'native/litert-runtimes/$($Definition.Folder)/bin'; uv tool install --force $($Definition.Package)"
+  Write-Host "Command: `$env:UV_TOOL_DIR = 'G0LiteLLaMa/litert-runtimes/$($Definition.Folder)/tool'; `$env:UV_TOOL_BIN_DIR = 'G0LiteLLaMa/litert-runtimes/$($Definition.Folder)/bin'; uv tool install --force $($Definition.Package)"
   Write-Host "Fallback command: uv tool install $($Definition.Package)"
 }
 
@@ -386,7 +386,7 @@ function Ensure-LiteRtRuntime {
         throw "uv tool install failed"
       }
     } -ExpectedResult "litert-lm is available on PATH" `
-      -Description "Install LiteRT-LM so the sidecar can start a native LiteRT runtime."
+      -Description "Install LiteRT-LM so the G0LiteLLaMa can start a native LiteRT runtime."
     return
   }
 
@@ -404,7 +404,7 @@ function Ensure-LiteRtRuntime {
       if ($SelectedKeys.Contains($Definition.Key)) {
         $Checked = "[x]"
       }
-      Write-Host ("  {0}) {1} {2}: {3} -> native/litert-runtimes/{4}" -f ($RuntimeIndex + 1), $Checked, $Definition.Key, $Definition.Label, $Definition.Folder)
+      Write-Host ("  {0}) {1} {2}: {3} -> G0LiteLLaMa/litert-runtimes/{4}" -f ($RuntimeIndex + 1), $Checked, $Definition.Key, $Definition.Label, $Definition.Folder)
       Write-Host "      $($Definition.Url)"
     }
     Write-Host "  a: toggle all"
@@ -450,7 +450,7 @@ function Ensure-LiteRtRuntime {
                 return $false
               }
               return -not [string]::IsNullOrWhiteSpace((Find-LiteRtLmInDir -Directory $ExpectedPath))
-            } -ExpectedResult "litert-lm exists under native/litert-runtimes/$($Selected.Folder)"
+            } -ExpectedResult "litert-lm exists under G0LiteLLaMa/litert-runtimes/$($Selected.Folder)"
           }
         }
       }
@@ -469,7 +469,7 @@ function Ensure-LiteRtRuntime {
       }
       Invoke-WaitForUserAction -Label "litert-lm" -Check {
         -not [string]::IsNullOrWhiteSpace((Find-InstalledLiteRtLm))
-      } -ExpectedResult "litert-lm is available on PATH or under native/litert-runtimes"
+      } -ExpectedResult "litert-lm is available on PATH or under G0LiteLLaMa/litert-runtimes"
       Add-Summary "OK: litert-lm"
       return
     }
@@ -660,7 +660,7 @@ function Write-LlamaRuntimeAction {
   Write-Host ""
   Write-Host "llama.cpp runtime needs to be installed downloaded, here is the command or URL I would use:"
   Write-Host "Runtime: $($Definition.Label)"
-  Write-Host "Folder: native/llama-runtimes/$($Definition.Folder)"
+  Write-Host "Folder: G0LiteLLaMa/llama-runtimes/$($Definition.Folder)"
   Write-Host "URL: $($Definition.Url)"
   Write-Host "sha256: $($Definition.Sha256.Replace('sha256:', ''))"
   if ($Definition.ExtraUrl) {
@@ -689,8 +689,8 @@ function Ensure-LlamaRuntime {
     } -Action {
       Start-Process "https://github.com/ggml-org/llama.cpp/releases"
       throw "Manual install required"
-    } -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes" `
-      -Description "Install llama.cpp so the sidecar can start a llama-server runtime."
+    } -ExpectedResult "llama-server is available on PATH or under G0LiteLLaMa/llama-runtimes" `
+      -Description "Install llama.cpp so the G0LiteLLaMa can start a llama-server runtime."
     return
   }
 
@@ -710,7 +710,7 @@ function Ensure-LlamaRuntime {
       if ($SelectedKeys.Contains($Definition.Key)) {
         $Checked = "[x]"
       }
-      Write-Host ("  {0}) {1} {2}: {3} -> native/llama-runtimes/{4}" -f ($RuntimeIndex + 1), $Checked, $Definition.Key, $Definition.Label, $Definition.Folder)
+      Write-Host ("  {0}) {1} {2}: {3} -> G0LiteLLaMa/llama-runtimes/{4}" -f ($RuntimeIndex + 1), $Checked, $Definition.Key, $Definition.Label, $Definition.Folder)
       Write-Host "      $($Definition.Url)"
       if ($Definition.ExtraUrl) {
         Write-Host "      CUDA DLLs: $($Definition.ExtraUrl)"
@@ -759,7 +759,7 @@ function Ensure-LlamaRuntime {
                 return $false
               }
               return -not [string]::IsNullOrWhiteSpace((Find-LlamaServerInDir -Directory $ExpectedPath))
-            } -ExpectedResult "llama-server exists under native/llama-runtimes/$($Selected.Folder)"
+            } -ExpectedResult "llama-server exists under G0LiteLLaMa/llama-runtimes/$($Selected.Folder)"
           }
         }
       }
@@ -778,7 +778,7 @@ function Ensure-LlamaRuntime {
       }
       Invoke-WaitForUserAction -Label "llama-server" -Check {
         -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
-      } -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes"
+      } -ExpectedResult "llama-server is available on PATH or under G0LiteLLaMa/llama-runtimes"
       Add-Summary "OK: llama-server"
       return
     }
@@ -1028,7 +1028,6 @@ function New-ModelDownloadDefinition {
 function Get-ModelDownloadDefinitions {
   return @(
     New-ModelDownloadDefinition "gemma4-litert" $true "Gemma 4 E2B native LiteRT model" "models/litert/main/gemma-4-E2B-it.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm" $true
-    New-ModelDownloadDefinition "gemma4-web-litert" $true "Gemma 4 E2B web model" "models/litert/browser/gemma-4-E2B-it-web.litertlm" "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm" $true
     New-ModelDownloadDefinition "embeddinggemma-litert" $true "EmbeddingGemma LiteRT embedding model" "models/litert/embedding/embeddinggemma-300M_seq2048_mixed-precision.tflite" "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite" $true
     New-ModelDownloadDefinition "gemma4-gguf" $false "Gemma 4 E2B llama.cpp GGUF model" "models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf" $false
     New-ModelDownloadDefinition "qwen35-2b-gguf" $false "Qwen3.5 2B llama.cpp GGUF model" "models/llamacpp/main/Qwen3.5-2B-IQ4_NL.gguf" "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf" $false
@@ -1060,7 +1059,7 @@ function Select-ModelsToDownload {
   while ($true) {
     Write-Host ""
     Write-Host "Select models to download"
-    Write-Host "Default selected: gemma4-litert, gemma4-web-litert, embeddinggemma-litert, qwen3-reranker-q4km"
+    Write-Host "Default selected: gemma4-litert, embeddinggemma-litert, qwen3-reranker-q4km"
     for ($ModelIndex = 0; $ModelIndex -lt $Definitions.Count; $ModelIndex += 1) {
       $Definition = $Definitions[$ModelIndex]
       $Checked = "[ ]"
@@ -1129,27 +1128,13 @@ function Ensure-SelectedModels {
 
 Initialize-ModelsNextcloud -Share $modelsNextcloud
 
-function Ensure-BunDependencies {
-  Invoke-ConfirmOrWait -Label "Bun dependencies" -CommandText "bun install" -Check {
-    (Test-Path (Join-Path $RepoRoot "bun.lock")) -and
-      (Test-Path (Join-Path $RepoRoot "node_modules")) -and
-      (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
-  } -Action {
-    & bun install
-    if ($LASTEXITCODE -ne 0) {
-      throw "bun install failed"
-    }
-  } -ExpectedResult "bun.lock, node_modules, and public/vendor/litert-lm/core/wasm exist" `
-    -Description "Install Bun packages and regenerate the LiteRT-LM WASM vendor files."
-}
-
 function Offer-BackendConfiguration {
   $CommandText = ".\configure.ps1"
-  $ExpectedResult = "native\runtime-config\backends.json contains runtime backend test results"
+  $ExpectedResult = "G0LiteLLaMa\runtime-config\backends.json contains runtime backend test results"
 
   $Choice = Read-OptionalTaskChoice `
     -Label "Run backend configuration tests" `
-    -Description "Optionally test LiteRT and llama.cpp backends now. Results hide not-working combinations in the sidecar TUI." `
+    -Description "Optionally test LiteRT and llama.cpp backends now. Results hide not-working combinations in the G0LiteLLaMa TUI." `
     -CommandText $CommandText `
     -ExpectedResult $ExpectedResult
 
@@ -1169,7 +1154,7 @@ function Offer-BackendConfiguration {
 
   if ($Choice -eq "manual") {
     Invoke-WaitForUserAction -Label "backend configuration tests" -Check {
-      $Path = Join-Path $RepoRoot "native\runtime-config\backends.json"
+      $Path = Join-Path $RepoRoot "G0LiteLLaMa\runtime-config\backends.json"
       (Test-Path $Path) -and ((Get-Item $Path).Length -gt 0)
     } -ExpectedResult $ExpectedResult
     Add-Summary "OK: backend configuration tests"
@@ -1184,21 +1169,14 @@ function Print-InstallTasks {
   Write-Host "Install tasks"
   Write-Host "-------------"
   Write-TaskStatus "git" { Test-Command "git" } "available" "needs install"
-  Write-TaskStatus "bun" { Test-Command "bun" } "available" "needs install"
   Write-TaskStatus "go" { Test-Command "go" } "available" "needs install"
   Write-TaskStatus "curl" { Test-Command "curl" } "available" "needs install"
   Write-TaskStatus "uv" { Test-Command "uv" } "available" "needs install"
   Write-TaskStatus "LiteRT runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLocalLiteRtLm)) } "available" "needs selection or manual install"
   Write-TaskStatus "llama.cpp runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLocalLlamaServer)) } "available" "needs selection or manual install"
-  Write-TaskStatus "Bun dependencies" {
-    (Test-Path (Join-Path $RepoRoot "bun.lock")) -and
-    (Test-Path (Join-Path $RepoRoot "node_modules")) -and
-      (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
-  } "already installed" "needs bun install"
   Write-ModelTaskStatuses
-  Write-TaskPending "bun test - will run"
-  Write-TaskPending "web production build - will run"
-  Write-TaskPending "sidecar artifacts build - will run"
+  Write-TaskPending "Go tests - will run"
+  Write-TaskPending "G0LiteLLaMa artifacts build - will run"
   Write-TaskPending "backend configuration tests - optional"
 }
 
@@ -1211,10 +1189,9 @@ function Print-Summary {
   }
   Write-Host ""
   Write-Host "Next command:"
-  Write-Host ".\launch-all.ps1"
+  Write-Host ".\launch-g0litellama.ps1"
 }
 
-$BunCommand = 'powershell -c "irm bun.sh/install.ps1|iex"'
 $GitCommand = Get-PackageInstallCommand "Git.Git" "git" "Install Git from https://git-scm.com/download/win"
 $GoCommand = Get-PackageInstallCommand "GoLang.Go" "golang" "Install Go from https://go.dev/dl/"
 $CurlCommand = Get-PackageInstallCommand "cURL.cURL" "curl" "Install curl with winget, choco, or from https://curl.se/windows/"
@@ -1223,21 +1200,26 @@ $UvCommand = Get-PackageInstallCommand "astral-sh.uv" "uv" "Install uv from http
 Print-InstallTasks
 
 Ensure-Dependency "git" "git" $GitCommand
-Ensure-Dependency "bun" "bun" $BunCommand
 Ensure-Dependency "go" "go" $GoCommand
 Ensure-Dependency "curl" "curl" $CurlCommand
 Ensure-Dependency "uv" "uv" $UvCommand
 Ensure-LiteRtRuntime
 Ensure-LlamaRuntime
 
-Ensure-BunDependencies
-
 Select-ModelsToDownload
 Ensure-SelectedModels
 
-Invoke-RunLogged "bun test" { & bun run test }
-Invoke-RunLogged "web production build" { & bun run build }
-Invoke-RunLogged "sidecar artifacts build" { & bun run build:sidecar }
+Invoke-RunLogged "Go tests" {
+  Push-Location (Join-Path $RepoRoot "G0LiteLLaMa")
+  try {
+    & go test ./...
+  } finally {
+    Pop-Location
+  }
+}
+Invoke-RunLogged "G0LiteLLaMa artifacts build" {
+  & (Join-Path $RepoRoot "G0LiteLLaMa\scripts\build-release.ps1") -OutDir (Join-Path $RepoRoot "G0LiteLLaMa\dist")
+}
 Offer-BackendConfiguration
 
 Print-Summary

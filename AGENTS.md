@@ -1,93 +1,63 @@
 # AGENTS.md
 
 This file is the operating contract for autonomous agents working in
-`liteLLMwiki`. Read it before project work.
+`liteLLMwiki`.
 
 ## Project Description
 
-`liteLLMwiki` is a local Gemma workbench. It contains a React/Rspack web UI for
-browser-side LiteRT-LM chat, folder summarization, and knowledge graph display,
-plus a Go sidecar that lets the browser control a native `litert-lm` runtime
-over WebSockets and an OpenAI-compatible API surface.
+`liteLLMwiki` now ships only the native Go runner, renamed to `G0LiteLLaMa`.
+The React/Rspack web UI and Bun package scripts were removed. The Go process
+serves OpenAI-compatible `/v1/*` routes and native `/g0litellama/v1/*` control
+routes.
 
-This repo intentionally does not track model binaries. Models are external
-artifacts owned outside Git and should be placed locally under `models/` or
-selected from disk in the UI.
+Model binaries are external artifacts. Keep them under `models/`; do not track
+them in Git.
 
 ## Source Of Truth
 
 - `README.md` - human setup, structure, model policy, and verification commands.
-- `package.json` - Bun scripts and dependency versions.
-- `native/sidecar/README.md` - sidecar runtime contract and release commands.
-- `native/sidecar/go.mod` - Go module definition.
+- `G0LiteLLaMa/README.md` - runtime contract and release commands.
+- `G0LiteLLaMa/go.mod` - Go module definition.
 
 ## Project Map
 
-- `src/` - React app, provider clients, folder indexing, summaries, graph UI.
-- `tests/` - stylesheet/layout contract tests.
-- `scripts/` - smoke tests, model download/check helpers, sidecar build script.
-- `models/` - ignored local model directory; keep only `README.md` tracked.
-- `native/sidecar-artifacts/` - ignored sidecar release artifact output; keep
-  only `README.md` tracked.
-- `native/runtime-config/` - ignored local runtime/backend test results; keep
-  only docs and ignore rules tracked.
-- `native/litert-runtimes/` - ignored repo-local uv tool installs for
-  `litert-lm`; keep only `README.md` tracked.
-- `native/llama-runtimes/` - ignored downloaded llama.cpp runtime archives
-  extracted by the interactive installers; keep only `README.md` tracked.
-- `native/sidecar/cmd/` - Go sidecar entry point.
-- `native/sidecar/internal/` - Go sidecar runtime, proxy, server, WebSocket logic.
-- `native/sidecar/internal/catalog/` - required model catalog and Hugging Face
-  download manager.
-- `native/sidecar/internal/supervisor/` - multi-runner process supervisor and
-  route authority.
-- `native/sidecar/internal/tui/` - Bubble Tea terminal dashboard.
-- `native/sidecar/e2e/` - sidecar TUI and runtime/backend E2E tests.
-- `native/sidecar/scripts/` - release and real-runtime smoke helpers.
+- `G0LiteLLaMa/cmd/` - Go entry point.
+- `G0LiteLLaMa/internal/` - runtime, proxy, server, supervisor, and TUI code.
+- `G0LiteLLaMa/e2e/` - TUI and runtime/backend E2E tests.
+- `G0LiteLLaMa/scripts/` - release and real-runtime smoke helpers.
+- `G0LiteLLaMa/dist/` - ignored release artifacts; keep only `README.md`.
+- `G0LiteLLaMa/runtime-config/` - ignored backend probe results.
+- `G0LiteLLaMa/litert-runtimes/` - ignored local LiteRT-LM installs.
+- `G0LiteLLaMa/llama-runtimes/` - ignored local llama.cpp installs.
+- `models/` - ignored local model directory; keep only `README.md`.
 
 ## Verification Commands
 
 Run from the repository root unless noted.
 
-Use Bun directly for all JavaScript and web commands. Do not use npm, npx,
-yarn, or pnpm as command runners in this repository.
-
 ```bash
-# Web tests
-bun test
-
-# Web production build
-bun run build
-
 # Script syntax checks
-bash -n configure.sh install.sh
+bash -n configure.sh install.sh launch-g0litellama.sh clean.sh
 
-# Go sidecar tests
-cd native/sidecar && go test ./...
+# Go tests
+cd G0LiteLLaMa && go test ./...
 
-# Sidecar TUI/runtime backend E2E; real runtime combos skip unless configured
-bun run e2e:sidecar
+# E2E planner/TUI checks; real runtime combos skip unless configured
+cd G0LiteLLaMa && scripts/runtime-backend-e2e.sh
 
-# Sidecar release artifacts
-bun run build:sidecar
-
-# Browser smoke, dev server required
-bun run smoke
-bun run smoke:model
-bun run smoke:executable
+# Release artifacts
+cd G0LiteLLaMa && scripts/build-release.sh dist
 ```
 
-`bun run smoke:model` requires an external model file under `models/`.
-`bun run e2e:sidecar` always runs the TUI harness and backend-config planner;
-real responsiveness checks read `native/runtime-config/backends.json` or
+Real backend checks read `G0LiteLLaMa/runtime-config/backends.json` or
 `RUNTIME_BACKEND_CONFIG` and skip missing models/runtimes with clear reasons
-unless `SIDECAR_E2E_REAL=1` is set. Real native runtime smoke requires
+unless `G0LITELLAMA_E2E_REAL=1` is set. Real LiteRT smoke requires
 `LITERT_LM_BIN=/path/to/litert-lm`.
 
 ## Required First Steps
 
 1. Inspect the current git status with `git status --short`.
-2. Read the relevant README, package manifest, and sidecar README before edits.
+2. Read the relevant README and `G0LiteLLaMa/README.md` before edits.
 3. Preserve user changes. Do not reset, clean, stash, or discard work unless the
    user explicitly asks.
 4. Keep model files, generated release binaries, dependency folders, build
@@ -96,33 +66,26 @@ unless `SIDECAR_E2E_REAL=1` is set. Real native runtime smoke requires
 ## Model And Artifact Rules
 
 - Never add Git LFS to this repository.
-- Never commit `.litertlm` files, `.litertlm.parts/`, partial downloads, or
-  model caches.
-- Keep the sidecar model catalog and installer model selector aligned. The
-  default installer model selection is `gemma4-litert`, `gemma4-web-litert`,
-  `embeddinggemma-litert`, and `qwen3-reranker-q4km`; optional llama.cpp main
-  and embedding models remain selectable but are not default-ticked.
-- Never commit `public/vendor/`; it is regenerated by `bun install`.
-- Never commit `native/sidecar-artifacts/litert-sidecar-*/` or
-  `native/sidecar/dist/`; build them locally when needed.
+- Never commit `.litertlm` files, `.litertlm.parts/`, partial downloads, GGUF
+  model files, or model caches.
+- Keep the model catalog and installer model selector aligned. The default
+  installer model selection is `gemma4-litert`, `embeddinggemma-litert`, and
+  `qwen3-reranker-q4km`.
+- Never commit generated files under `G0LiteLLaMa/dist/` except
+  `G0LiteLLaMa/dist/README.md`.
 - Never commit downloaded LiteRT-LM uv tool folders under
-  `native/litert-runtimes/`; install them locally when needed.
+  `G0LiteLLaMa/litert-runtimes/`.
 - Never commit downloaded llama.cpp runtime folders or CUDA DLLs under
-  `native/llama-runtimes/`; install them locally when needed.
-- Never commit generated `native/runtime-config/backends.json`; it records
-  machine-specific backend test results.
+  `G0LiteLLaMa/llama-runtimes/`.
+- Never commit generated `G0LiteLLaMa/runtime-config/backends.json`.
 
 ## Workflow Rules
 
 - Prefer existing project patterns over new abstractions.
 - Keep changes scoped to the user request.
-- Use Bun directly for JavaScript tasks; do not wrap Bun scripts through other
-  package-manager command runners.
 - Update `README.md` and this file when setup, commands, structure, or model
   policy changes.
-- Use exact commands for verification evidence; do not rely on summaries when
-  exact output matters.
-- If browser behavior changes, verify in a browser controller when available.
+- Use exact commands for verification evidence.
 - If verification cannot run, state exactly what was skipped and why.
 
 ## Git Rules
@@ -131,8 +94,6 @@ unless `SIDECAR_E2E_REAL=1` is set. Real native runtime smoke requires
 - Do not commit local models or generated artifacts.
 - Do not force-push, rewrite history, run `git clean`, or delete untracked user
   files unless the user explicitly asks.
-- For direct commits, use concise conventional subjects when no stricter format
-  is requested.
 
 ## Pending Plans
 

@@ -5,10 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 models_nextcloud="${MODELS_NEXTCLOUD:-}"
 models_nextcloud_base=""
 models_nextcloud_token=""
-litert_runtime_root="$repo_root/native/litert-runtimes"
+litert_runtime_root="$repo_root/G0LiteLLaMa/litert-runtimes"
 litert_selected_file="$litert_runtime_root/.selected"
 litert_package_spec="litert-lm==0.13.1"
-llama_runtime_root="$repo_root/native/llama-runtimes"
+llama_runtime_root="$repo_root/G0LiteLLaMa/llama-runtimes"
 llama_selected_file="$llama_runtime_root/.selected"
 llama_release_base="https://github.com/ggml-org/llama.cpp/releases/download/b9736"
 ansiGreen=""
@@ -311,8 +311,8 @@ print_litert_runtime_action() {
   IFS='|' read -r folder label package_spec url <<< "$spec"
 
   printf '\nLiteRT runtime needs to be installed downloaded, here is the command or URL I would use:\n'
-  printf 'Runtime: %s\nFolder: native/litert-runtimes/%s\nPackage: %s\nURL: %s\n' "$label" "$folder" "$package_spec" "$url"
-  printf 'Command: UV_TOOL_DIR="native/litert-runtimes/%s/tool" UV_TOOL_BIN_DIR="native/litert-runtimes/%s/bin" uv tool install --force %s\n' "$folder" "$folder" "$package_spec"
+  printf 'Runtime: %s\nFolder: G0LiteLLaMa/litert-runtimes/%s\nPackage: %s\nURL: %s\n' "$label" "$folder" "$package_spec" "$url"
+  printf 'Command: UV_TOOL_DIR="G0LiteLLaMa/litert-runtimes/%s/tool" UV_TOOL_BIN_DIR="G0LiteLLaMa/litert-runtimes/%s/bin" uv tool install --force %s\n' "$folder" "$folder" "$package_spec"
   printf 'Fallback command: uv tool install %s\n' "$package_spec"
 }
 
@@ -396,7 +396,7 @@ ensure_litert_runtime() {
           fi
         done
       fi
-      printf '  %d) %s %s: %s -> native/litert-runtimes/%s\n' "$((index + 1))" "$checked" "$option" "$label" "$folder"
+      printf '  %d) %s %s: %s -> G0LiteLLaMa/litert-runtimes/%s\n' "$((index + 1))" "$checked" "$option" "$label" "$folder"
       printf '      %s\n' "$url"
     done
     printf '  a: toggle all\n'
@@ -432,7 +432,7 @@ ensure_litert_runtime() {
             print_litert_runtime_action "$option"
             wait_for_user_action "LiteRT runtime $option" \
               "test -n \"\$(find_litert_lm_in_dir '$litert_runtime_root/$folder' || true)\"" \
-              "litert-lm exists under native/litert-runtimes/$folder"
+              "litert-lm exists under G0LiteLLaMa/litert-runtimes/$folder"
           fi
         done
         spec="$(litert_runtime_spec "$primary_key")"
@@ -448,7 +448,7 @@ ensure_litert_runtime() {
         fi
         wait_for_user_action "litert-lm" \
           "command -v litert-lm >/dev/null 2>&1 || test -n \"\$(installed_litert_lm || true)\"" \
-          "litert-lm is available on PATH or under native/litert-runtimes"
+          "litert-lm is available on PATH or under G0LiteLLaMa/litert-runtimes"
         add_summary "OK: litert-lm"
         return 0
         ;;
@@ -633,7 +633,7 @@ print_llama_runtime_action() {
   IFS='|' read -r folder label url sha256 extra_url extra_sha256 <<< "$spec"
 
   printf '\nllama.cpp runtime needs to be installed downloaded, here is the command or URL I would use:\n'
-  printf 'Runtime: %s\nFolder: native/llama-runtimes/%s\nURL: %s\nsha256: %s\n' "$label" "$folder" "$url" "${sha256#sha256:}"
+  printf 'Runtime: %s\nFolder: G0LiteLLaMa/llama-runtimes/%s\nURL: %s\nsha256: %s\n' "$label" "$folder" "$url" "${sha256#sha256:}"
   if [[ -n "$extra_url" ]]; then
     printf 'CUDA DLL URL: %s\nsha256: %s\n' "$extra_url" "${extra_sha256#sha256:}"
   fi
@@ -745,7 +745,7 @@ ensure_llama_runtime() {
           fi
         done
       fi
-      printf '  %d) %s %s: %s -> native/llama-runtimes/%s\n' "$((index + 1))" "$checked" "$option" "$label" "$folder"
+      printf '  %d) %s %s: %s -> G0LiteLLaMa/llama-runtimes/%s\n' "$((index + 1))" "$checked" "$option" "$label" "$folder"
       printf '      %s\n' "$url"
       if [[ -n "$extra_url" ]]; then
         printf '      CUDA DLLs: %s\n' "$extra_url"
@@ -784,7 +784,7 @@ ensure_llama_runtime() {
             print_llama_runtime_action "$option"
             wait_for_user_action "llama.cpp runtime $option" \
               "test -n \"\$(find_llama_server_in_dir '$llama_runtime_root/$folder' || true)\"" \
-              "llama-server exists under native/llama-runtimes/$folder"
+              "llama-server exists under G0LiteLLaMa/llama-runtimes/$folder"
           fi
         done
         spec="$(llama_runtime_spec "$primary_key")"
@@ -800,7 +800,7 @@ ensure_llama_runtime() {
         fi
         wait_for_user_action "llama-server" \
           "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\"" \
-          "llama-server is available on PATH or under native/llama-runtimes"
+          "llama-server is available on PATH or under G0LiteLLaMa/llama-runtimes"
         add_summary "OK: llama-server"
         return 0
         ;;
@@ -878,9 +878,6 @@ dependency_install_command() {
   local dependency="$1"
 
   case "$dependency" in
-    bun)
-      printf 'curl -fsSL https://bun.com/install | bash\n'
-      ;;
     go)
       if has_command brew; then
         printf 'brew install go\n'
@@ -1176,7 +1173,6 @@ Command: curl -L --fail -o '$relative_path' '$download_url'"
 model_download_specs() {
   cat <<'MODELS'
 gemma4-litert|1|Gemma 4 E2B native LiteRT model|models/litert/main/gemma-4-E2B-it.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm|true
-gemma4-web-litert|1|Gemma 4 E2B web model|models/litert/browser/gemma-4-E2B-it-web.litertlm|https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm|true
 embeddinggemma-litert|1|EmbeddingGemma LiteRT embedding model|models/litert/embedding/embeddinggemma-300M_seq2048_mixed-precision.tflite|https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq2048_mixed-precision.tflite|true
 gemma4-gguf|0|Gemma 4 E2B llama.cpp GGUF model|models/llamacpp/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf|false
 qwen35-2b-gguf|0|Qwen3.5 2B llama.cpp GGUF model|models/llamacpp/main/Qwen3.5-2B-IQ4_NL.gguf|https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-IQ4_NL.gguf|false
@@ -1224,7 +1220,7 @@ select_models_to_download() {
 
   while true; do
     printf '\nSelect models to download\n'
-    printf 'Default selected: gemma4-litert, gemma4-web-litert, embeddinggemma-litert, qwen3-reranker-q4km\n'
+    printf 'Default selected: gemma4-litert, embeddinggemma-litert, qwen3-reranker-q4km\n'
     for index in "${!specs[@]}"; do
       spec="${specs[$index]}"
       IFS='|' read -r key default_selected label relative_path url may_need_token <<< "$spec"
@@ -1307,21 +1303,13 @@ ensure_selected_models() {
   done < <(model_download_specs)
 }
 
-ensure_bun_dependencies() {
-  confirm_or_wait "Bun dependencies" "bun install" \
-    "test -f '$repo_root/bun.lock' && test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" \
-    "cd '$repo_root' && bun install" "required" \
-    "bun.lock, node_modules, and public/vendor/litert-lm/core/wasm exist" \
-    "Install Bun packages and regenerate the LiteRT-LM WASM vendor files."
-}
-
 offer_backend_configuration() {
   local command_text="./configure.sh"
-  local expected_result="native/runtime-config/backends.json contains runtime backend test results"
+  local expected_result="G0LiteLLaMa/runtime-config/backends.json contains runtime backend test results"
   local choice
 
   if prompt_optional_task_choice "Run backend configuration tests" \
-    "Optionally test LiteRT and llama.cpp backends now. Results hide not-working combinations in the sidecar TUI." \
+    "Optionally test LiteRT and llama.cpp backends now. Results hide not-working combinations in the G0LiteLLaMa TUI." \
     "$command_text" \
     "$expected_result"; then
     choice=0
@@ -1343,7 +1331,7 @@ offer_backend_configuration() {
       ;;
     2)
       wait_for_user_action "backend configuration tests" \
-        "test -s '$repo_root/native/runtime-config/backends.json'" \
+        "test -s '$repo_root/G0LiteLLaMa/runtime-config/backends.json'" \
         "$expected_result"
       add_summary "OK: backend configuration tests"
       ;;
@@ -1354,17 +1342,14 @@ print_install_tasks() {
   printf '\nInstall tasks\n'
   printf '%s\n' '-------------'
   print_task_status "git" "command -v git >/dev/null 2>&1" "available" "needs install"
-  print_task_status "bun" "command -v bun >/dev/null 2>&1" "available" "needs install"
   print_task_status "go" "command -v go >/dev/null 2>&1" "available" "needs install"
   print_task_status "curl" "command -v curl >/dev/null 2>&1" "available" "needs install"
   print_task_status "uv" "command -v uv >/dev/null 2>&1" "available" "needs install"
   print_task_status "LiteRT runtime" "test -n \"\$(installed_local_litert_lm || true)\"" "available" "needs selection or manual install"
   print_task_status "llama.cpp runtime" "test -n \"\$(installed_local_llama_server || true)\"" "available" "needs selection or manual install"
-  print_task_status "Bun dependencies" "test -f '$repo_root/bun.lock' && test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" "already installed" "needs bun install"
   print_model_task_statuses
-  print_task_pending "bun test - will run"
-  print_task_pending "web production build - will run"
-  print_task_pending "sidecar artifacts build - will run"
+  print_task_pending "Go tests - will run"
+  print_task_pending "G0LiteLLaMa artifacts build - will run"
   print_task_pending "backend configuration tests - optional"
 }
 
@@ -1375,13 +1360,12 @@ print_summary() {
     printf '%s\n' "$item"
   done
   printf '\nNext command:\n'
-  printf './launch-all.sh\n'
+  printf './launch-g0litellama.sh\n'
 }
 
 main() {
-  local bun_cmd git_cmd go_cmd curl_cmd uv_cmd llama_url
+  local git_cmd go_cmd curl_cmd uv_cmd llama_url
 
-  bun_cmd="$(dependency_install_command bun)"
   git_cmd="$(dependency_install_command git)"
   go_cmd="$(dependency_install_command go)"
   curl_cmd="$(dependency_install_command curl)"
@@ -1392,20 +1376,16 @@ main() {
 
   ensure_package_tool "git" "git" "git"
   ensure_dependency "curl" "curl" "${curl_cmd:-Install curl with your OS package manager.}"
-  ensure_dependency "bun" "bun" "${bun_cmd:-curl -fsSL https://bun.com/install | bash}"
   ensure_dependency "go" "go" "${go_cmd:-Install Go from https://go.dev/dl/}"
   ensure_dependency "uv" "uv" "${uv_cmd:-curl -LsSf https://astral.sh/uv/install.sh | sh}"
   ensure_litert_runtime
   ensure_llama_runtime
 
-  ensure_bun_dependencies
-
   select_models_to_download
   ensure_selected_models
 
-  run_logged "bun test" bun run test
-  run_logged "web production build" bun run build
-  run_logged "sidecar artifacts build" bun run build:sidecar
+  run_logged "Go tests" bash -c "cd '$repo_root/G0LiteLLaMa' && go test ./..."
+  run_logged "G0LiteLLaMa artifacts build" "$repo_root/G0LiteLLaMa/scripts/build-release.sh" "$repo_root/G0LiteLLaMa/dist"
   offer_backend_configuration
 
   print_summary

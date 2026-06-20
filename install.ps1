@@ -6,12 +6,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = $PSScriptRoot
-$SmokePort = if ($env:INSTALL_SMOKE_PORT) { [int]$env:INSTALL_SMOKE_PORT } else { 5177 }
-$SmokeUrl = "http://127.0.0.1:$SmokePort/"
 $Summary = [System.Collections.Generic.List[string]]::new()
 $SelectedModelDownloadKeys = [System.Collections.Generic.List[string]]::new()
-$DevServerProcess = $null
-$DevServerStdinPath = $null
 $ModelsNextcloudBase = $null
 $ModelsNextcloudToken = $null
 $LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
@@ -28,12 +24,6 @@ function Add-Summary {
 function Test-Command {
   param([string]$Name)
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
-}
-
-function Test-IsWindows {
-  return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
-    [System.Runtime.InteropServices.OSPlatform]::Windows
-  )
 }
 
 function Write-GreenCheck {
@@ -132,126 +122,6 @@ function Invoke-RunLogged {
   }
   Write-GreenCheck "$Label - done"
   Add-Summary "PASS: $Label"
-}
-
-function Write-SmokeTaskBox {
-  param(
-    [string]$Label,
-    [string]$CommandText,
-    [string]$ExpectedResult
-  )
-
-  Write-Host ""
-  Write-Host "+------------------------------------------------------------+"
-  Write-Host "| Task: $Label"
-  Write-Host "| Description: Automated browser smoke verification failed. Retry it, run it manually, or continue with a skipped smoke entry."
-  Write-Host "| Command or URL I would use:"
-  foreach ($Line in ($CommandText -split "`r?`n")) {
-    Write-BoxLine "  $Line"
-  }
-  Write-Host "| Expected result: $ExpectedResult"
-  Write-BoxLine "Do you want me to do it?"
-  Write-Host "| Choices:"
-  Write-BoxLine "  [Y] Yes - retry it now"
-  Write-BoxLine "  [N] No - continue without this smoke check"
-  Write-BoxLine "  [M] Manual & wait - I will do it and press Enter"
-  Write-Host "+------------------------------------------------------------+"
-}
-
-function Read-SmokeChoice {
-  param(
-    [string]$Label,
-    [string]$CommandText,
-    [string]$ExpectedResult
-  )
-
-  Write-SmokeTaskBox -Label $Label -CommandText $CommandText -ExpectedResult $ExpectedResult
-  while ($true) {
-    $Answer = Read-Host "Choice [Y/N/M]"
-    if ($Answer -match "^(y|yes)$") {
-      return "yes"
-    }
-    if ($Answer -match "^(n|no)$") {
-      return "no"
-    }
-    if ($Answer -match "^(m|manual)$") {
-      return "manual"
-    }
-    Write-Host "Choose Y, N, or M."
-  }
-}
-
-function Invoke-SmokeAction {
-  param([scriptblock]$Action)
-
-  try {
-    & $Action
-    return $LASTEXITCODE -eq 0
-  } catch {
-    Write-Host $_
-    return $false
-  }
-}
-
-function Invoke-WaitForSmokeManual {
-  param(
-    [string]$Label,
-    [string]$ExpectedResult
-  )
-
-  Write-Host "I will wait."
-  Write-Host "Expected result: $ExpectedResult"
-  Read-Host "Press Enter after the expected result is true: $Label" | Out-Null
-  Write-GreenCheck "$Label - manual confirmation recorded"
-  Add-Summary "MANUAL: $Label"
-}
-
-function Invoke-SmokeOrWait {
-  param(
-    [string]$Label,
-    [string]$CommandText,
-    [scriptblock]$Action
-  )
-
-  $ExpectedResult = "smoke command completes successfully"
-
-  Write-Host ""
-  Write-Host "==> $Label"
-  if (Invoke-SmokeAction -Action $Action) {
-    Write-GreenCheck "$Label - done"
-    Add-Summary "PASS: $Label"
-    return
-  }
-
-  Write-Host "Smoke browser automation failed."
-  Write-Host "Command or URL I would use:"
-  Write-Host $CommandText
-  Write-Host "Expected result: $ExpectedResult"
-  $Choice = Read-SmokeChoice -Label $Label -CommandText $CommandText -ExpectedResult $ExpectedResult
-
-  if ($Choice -eq "yes") {
-    Write-Host ""
-    Write-Host "==> $Label retry"
-    if (Invoke-SmokeAction -Action $Action) {
-      Write-GreenCheck "$Label - done"
-      Add-Summary "PASS: $Label"
-      return
-    }
-
-    Write-Host "Smoke browser automation failed."
-    Write-Host "The task failed. Here is the command or URL again:"
-    Write-Host $CommandText
-    Invoke-WaitForSmokeManual -Label $Label -ExpectedResult $ExpectedResult
-    return
-  }
-
-  if ($Choice -eq "manual") {
-    Invoke-WaitForSmokeManual -Label $Label -ExpectedResult $ExpectedResult
-    return
-  }
-
-  Write-Host "Continuing without this smoke check."
-  Add-Summary "SKIP: $Label"
 }
 
 function Initialize-ModelsNextcloud {
@@ -926,42 +796,6 @@ function Ensure-BunDependencies {
     -Description "Install Bun packages and regenerate the LiteRT-LM WASM vendor files."
 }
 
-function Test-PlaywrightChromium {
-  if (-not (Test-Command "bun")) {
-    return $false
-  }
-
-  Push-Location $RepoRoot
-  try {
-    $CheckScript = @'
-import { existsSync } from "fs";
-
-try {
-  const { chromium } = await import("playwright");
-  process.exit(existsSync(chromium.executablePath()) ? 0 : 1);
-} catch {
-  process.exit(1);
-}
-'@
-    & bun --eval $CheckScript *> $null
-    return $LASTEXITCODE -eq 0
-  } finally {
-    Pop-Location
-  }
-}
-
-function Ensure-PlaywrightChromium {
-  Invoke-ConfirmOrWait -Label "Playwright Chromium" -CommandText "bunx playwright install chromium" -Check {
-    Test-PlaywrightChromium
-  } -Action {
-    & bunx playwright install chromium
-    if ($LASTEXITCODE -ne 0) {
-      throw "bunx playwright install chromium failed"
-    }
-  } -ExpectedResult "Playwright Chromium executable exists for smoke tests" `
-    -Description "Install the Playwright Chromium browser artifact used by smoke UI tests."
-}
-
 function Print-InstallTasks {
   Write-Host ""
   Write-Host "Install tasks"
@@ -975,177 +809,13 @@ function Print-InstallTasks {
   Write-TaskStatus "llama.cpp runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer)) } "available" "needs selection or manual install"
   Write-TaskStatus "Bun dependencies" {
     (Test-Path (Join-Path $RepoRoot "bun.lock")) -and
-      (Test-Path (Join-Path $RepoRoot "node_modules")) -and
+    (Test-Path (Join-Path $RepoRoot "node_modules")) -and
       (Test-Path (Join-Path $RepoRoot "public\vendor\litert-lm\core\wasm"))
   } "already installed" "needs bun install"
-  Write-TaskStatus "Playwright Chromium" { Test-PlaywrightChromium } "available" "needs bunx playwright install chromium"
   Write-ModelTaskStatuses
   Write-TaskPending "bun test - will run"
   Write-TaskPending "web production build - will run"
   Write-TaskPending "sidecar artifacts build - will run"
-  Write-TaskPending "smoke UI - will run"
-  Write-TaskPending "smoke executable sidecar - will run"
-  Write-TaskPending "smoke web model - will run when the web model is present"
-}
-
-function Wait-ForUrl {
-  param([string]$Url)
-
-  for ($Index = 0; $Index -lt 80; $Index += 1) {
-    try {
-      Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 | Out-Null
-      return $true
-    } catch {
-      Start-Sleep -Milliseconds 250
-    }
-  }
-
-  return $false
-}
-
-function Stop-DevServer {
-  if ($null -ne $script:DevServerProcess) {
-    Stop-ProcessTree -Process $script:DevServerProcess
-    $script:DevServerProcess = $null
-  }
-
-  if (-not [string]::IsNullOrWhiteSpace($script:DevServerStdinPath)) {
-    Remove-Item -Force -ErrorAction SilentlyContinue $script:DevServerStdinPath
-    $script:DevServerStdinPath = $null
-  }
-}
-
-function Stop-ProcessTree {
-  param([System.Diagnostics.Process]$Process)
-
-  if ($null -eq $Process) {
-    return
-  }
-
-  $ProcessId = $Process.Id
-  try {
-    if ($Process.HasExited) {
-      return
-    }
-  } catch {
-    return
-  }
-
-  if ((Test-IsWindows) -and (Test-Command "taskkill.exe")) {
-    & taskkill.exe /PID $ProcessId /T /F *> $null
-    try {
-      [void]$Process.WaitForExit(5000)
-    } catch {
-      # Process may already be gone after taskkill.
-    }
-    return
-  }
-
-  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
-  try {
-    [void]$Process.WaitForExit(5000)
-  } catch {
-    # Process may already be gone.
-  }
-}
-
-function Get-BunStartProcessSpec {
-  $RunningOnWindows = Test-IsWindows
-
-  if ($RunningOnWindows) {
-    foreach ($Name in @("bun.exe")) {
-      $Command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
-      if ($null -ne $Command) {
-        return [pscustomobject]@{
-          FilePath = $Command.Source
-          PrefixArgs = [string[]]@()
-        }
-      }
-    }
-
-    $ComSpec = $env:ComSpec
-    if ([string]::IsNullOrWhiteSpace($ComSpec)) {
-      $ComSpec = "cmd.exe"
-    }
-
-    return [pscustomobject]@{
-      FilePath = $ComSpec
-      PrefixArgs = [string[]]@("/d", "/s", "/c", "bun")
-    }
-  }
-
-  $BunCommand = Get-Command "bun" -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($null -ne $BunCommand) {
-    return [pscustomobject]@{
-      FilePath = $BunCommand.Source
-      PrefixArgs = [string[]]@()
-    }
-  }
-
-  return [pscustomobject]@{
-    FilePath = "bun"
-    PrefixArgs = [string[]]@()
-  }
-}
-
-function Run-SmokeTests {
-  Write-Host ""
-  Write-Host "==> Starting temporary web UI for smoke tests at $SmokeUrl"
-
-  $StdoutLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-rspack.stdout.log"
-  $StderrLogPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-rspack.stderr.log"
-  $StdinPath = Join-Path ([System.IO.Path]::GetTempPath()) "litert-wiki-install-rspack.stdin.txt"
-  Remove-Item -Force -ErrorAction SilentlyContinue $StdoutLogPath, $StderrLogPath
-  Set-Content -Path $StdinPath -Value "" -NoNewline
-  $script:DevServerStdinPath = $StdinPath
-  $BunSpec = Get-BunStartProcessSpec
-  $BunArguments = @($BunSpec.PrefixArgs) + @(
-    "run",
-    "dev",
-    "--host",
-    "127.0.0.1",
-    "--port",
-    [string]$SmokePort
-  )
-  $script:DevServerProcess = Start-Process -FilePath $BunSpec.FilePath -ArgumentList $BunArguments `
-    -WorkingDirectory $RepoRoot `
-    -RedirectStandardInput $StdinPath `
-    -RedirectStandardOutput $StdoutLogPath `
-    -RedirectStandardError $StderrLogPath `
-    -PassThru
-
-  if (-not (Wait-ForUrl $SmokeUrl)) {
-    if (Test-Path $StdoutLogPath) {
-      Get-Content $StdoutLogPath
-    }
-    if (Test-Path $StderrLogPath) {
-      Get-Content $StderrLogPath
-    }
-    throw "Temporary web UI did not become ready."
-  }
-
-  try {
-    Invoke-SmokeOrWait -Label "smoke UI" -CommandText "`$env:SMOKE_URL = '$SmokeUrl'`nbun run smoke" -Action {
-      $env:SMOKE_URL = $SmokeUrl
-      & bun run smoke
-    }
-    Invoke-SmokeOrWait -Label "smoke executable sidecar" -CommandText "`$env:SMOKE_URL = '$SmokeUrl'`nbun run smoke:executable" -Action {
-      $env:SMOKE_URL = $SmokeUrl
-      & bun run smoke:executable
-    }
-
-    $WebModel = Join-Path $RepoRoot "models\litert\browser\gemma-4-E2B-it-web.litertlm"
-    if ((Test-Path $WebModel) -and ((Get-Item $WebModel).Length -gt 0)) {
-      Invoke-SmokeOrWait -Label "smoke web model" -CommandText "`$env:SMOKE_URL = '$SmokeUrl'`nbun run smoke:model" -Action {
-        $env:SMOKE_URL = $SmokeUrl
-        & bun run smoke:model
-      }
-    } else {
-      Add-Summary "SKIP: smoke web model, models/litert/browser/gemma-4-E2B-it-web.litertlm missing"
-    }
-  } finally {
-    Stop-DevServer
-  }
 }
 
 function Print-Summary {
@@ -1160,35 +830,29 @@ function Print-Summary {
   Write-Host ".\launch-all.ps1"
 }
 
-try {
-  $BunCommand = 'powershell -c "irm bun.sh/install.ps1|iex"'
-  $GitCommand = Get-PackageInstallCommand "Git.Git" "git" "Install Git from https://git-scm.com/download/win"
-  $GoCommand = Get-PackageInstallCommand "GoLang.Go" "golang" "Install Go from https://go.dev/dl/"
-  $CurlCommand = Get-PackageInstallCommand "cURL.cURL" "curl" "Install curl with winget, choco, or from https://curl.se/windows/"
-  $UvCommand = Get-PackageInstallCommand "astral-sh.uv" "uv" "Install uv from https://docs.astral.sh/uv/getting-started/installation/"
+$BunCommand = 'powershell -c "irm bun.sh/install.ps1|iex"'
+$GitCommand = Get-PackageInstallCommand "Git.Git" "git" "Install Git from https://git-scm.com/download/win"
+$GoCommand = Get-PackageInstallCommand "GoLang.Go" "golang" "Install Go from https://go.dev/dl/"
+$CurlCommand = Get-PackageInstallCommand "cURL.cURL" "curl" "Install curl with winget, choco, or from https://curl.se/windows/"
+$UvCommand = Get-PackageInstallCommand "astral-sh.uv" "uv" "Install uv from https://docs.astral.sh/uv/getting-started/installation/"
 
-  Print-InstallTasks
+Print-InstallTasks
 
-  Ensure-Dependency "git" "git" $GitCommand
-  Ensure-Dependency "bun" "bun" $BunCommand
-  Ensure-Dependency "go" "go" $GoCommand
-  Ensure-Dependency "curl" "curl" $CurlCommand
-  Ensure-Dependency "uv" "uv" $UvCommand
-  Ensure-Dependency "litert-lm" "litert-lm" "uv tool install litert-lm"
-  Ensure-LlamaRuntime
+Ensure-Dependency "git" "git" $GitCommand
+Ensure-Dependency "bun" "bun" $BunCommand
+Ensure-Dependency "go" "go" $GoCommand
+Ensure-Dependency "curl" "curl" $CurlCommand
+Ensure-Dependency "uv" "uv" $UvCommand
+Ensure-Dependency "litert-lm" "litert-lm" "uv tool install litert-lm"
+Ensure-LlamaRuntime
 
-  Ensure-BunDependencies
-  Ensure-PlaywrightChromium
+Ensure-BunDependencies
 
-  Select-ModelsToDownload
-  Ensure-SelectedModels
+Select-ModelsToDownload
+Ensure-SelectedModels
 
-  Invoke-RunLogged "bun test" { & bun run test }
-  Invoke-RunLogged "web production build" { & bun run build }
-  Invoke-RunLogged "sidecar artifacts build" { & bun run build:sidecar }
-  Run-SmokeTests
+Invoke-RunLogged "bun test" { & bun run test }
+Invoke-RunLogged "web production build" { & bun run build }
+Invoke-RunLogged "sidecar artifacts build" { & bun run build:sidecar }
 
-  Print-Summary
-} finally {
-  Stop-DevServer
-}
+Print-Summary

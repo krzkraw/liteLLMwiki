@@ -41,7 +41,7 @@ describe("interactive installer scripts", () => {
       expect(contents).toContain("✓");
       expect(contents).toContain("bun");
       expect(contents).toContain("Gemma 4 E2B web model");
-      expect(contents).toContain("smoke executable sidecar");
+      expect(contents).toContain("sidecar artifacts build");
       expect(contents).toContain("Green");
     }
   });
@@ -78,10 +78,10 @@ describe("interactive installer scripts", () => {
       expect(contents).toContain("go");
       expect(contents).toContain("git");
       expect(contents).toContain("curl");
-      expect(contents).toContain("Playwright Chromium");
       expect(contents).toContain("litert-lm");
       expect(contents).toContain("llama-server");
-      expect(contents).toContain("bunx playwright install chromium");
+      expect(contents).not.toContain("Playwright Chromium");
+      expect(contents).not.toContain("bunx playwright install chromium");
       expect(contents).toContain("uv tool install litert-lm");
     }
   });
@@ -200,75 +200,34 @@ describe("interactive installer scripts", () => {
     );
   });
 
-  it("installs Bun dependencies, builds artifacts, runs smoke checks, and prints a summary", () => {
+  it("installs Bun dependencies, builds artifacts, and prints a summary without browser smoke", () => {
     for (const scriptName of ["install.sh", "install.ps1"]) {
       const contents = readRootScript(scriptName);
 
       expect(contents).toContain("bun install");
-      expect(contents).toContain("bunx playwright install chromium");
       expect(contents).toContain("bun run build");
       expect(contents).toContain("bun run build:sidecar");
-      expect(contents).toContain("bun run smoke");
-      expect(contents).toContain("bun run smoke:executable");
       expect(contents).not.toContain(`${oldPackageRunner} run`);
+      expect(contents).not.toContain("bunx playwright install chromium");
+      expect(contents).not.toContain("bun run smoke");
+      expect(contents).not.toContain("bun run smoke:executable");
+      expect(contents).not.toContain("bun run smoke:model");
       expect(contents).toContain("Summary");
       expect(contents).toContain("launch-all");
     }
   });
 
-  it("keeps browser smoke launch failures recoverable during install", () => {
-    const shell = readRootScript("install.sh");
-    const powershell = readRootScript("install.ps1");
+  it("does not keep temporary smoke server plumbing in installers", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
 
-    expect(shell).toContain("run_smoke_or_wait");
-    expect(shell).toContain("Smoke browser automation failed.");
-    expect(shell).toContain('add_summary "SKIP: $label"');
-    expect(shell).toContain('run_smoke_or_wait "smoke UI"');
-    expect(shell).toContain('expected_result="smoke command completes successfully"');
-    expect(shell).toContain("[N] No - continue without this smoke check");
-
-    expect(powershell).toContain("Invoke-SmokeOrWait");
-    expect(powershell).toContain("Smoke browser automation failed.");
-    expect(powershell).toContain('Add-Summary "SKIP: $Label"');
-    expect(powershell).toContain('Invoke-SmokeOrWait -Label "smoke UI"');
-    expect(powershell).toContain('$ExpectedResult = "smoke command completes successfully"');
-    expect(powershell).toContain("[N] No - continue without this smoke check");
-  });
-
-  it("uses separate PowerShell smoke server stdout and stderr log files", () => {
-    const contents = readRootScript("install.ps1");
-
-    expect(contents).toContain("$StdoutLogPath");
-    expect(contents).toContain("$StderrLogPath");
-    expect(contents).toContain("-RedirectStandardOutput $StdoutLogPath");
-    expect(contents).toContain("-RedirectStandardError $StderrLogPath");
-    expect(contents).not.toContain(
-      "-RedirectStandardOutput $LogPath -RedirectStandardError $LogPath",
-    );
-  });
-
-  it("uses a Windows executable Bun shim for PowerShell Start-Process", () => {
-    const contents = readRootScript("install.ps1");
-
-    expect(contents).toContain("Get-BunStartProcessSpec");
-    expect(contents).toContain("bun.exe");
-    expect(contents).toContain("$BunSpec = Get-BunStartProcessSpec");
-    expect(contents).toContain("Start-Process -FilePath $BunSpec.FilePath");
-    expect(contents).toContain("-ArgumentList $BunArguments");
-    expect(contents).not.toContain('Start-Process -FilePath "bun"');
-  });
-
-  it("isolates the PowerShell smoke dev server from the interactive console", () => {
-    const contents = readRootScript("install.ps1");
-
-    expect(contents).toContain("Stop-ProcessTree");
-    expect(contents).toContain("taskkill.exe");
-    expect(contents).toContain("/T");
-    expect(contents).toContain("/F");
-    expect(contents).toContain("$DevServerStdinPath");
-    expect(contents).toContain("$StdinPath");
-    expect(contents).toContain("-RedirectStandardInput $StdinPath");
-    expect(contents).toContain("$script:DevServerProcess = $null");
-    expect(contents).not.toContain("-NoNewWindow");
+      expect(contents).not.toContain("run_smoke");
+      expect(contents).not.toContain("Smoke browser automation failed.");
+      expect(contents).not.toContain("Starting temporary web UI for smoke tests");
+      expect(contents).not.toContain("Wait-ForUrl");
+      expect(contents).not.toContain("wait_for_url");
+      expect(contents).not.toContain("Stop-DevServer");
+      expect(contents).not.toContain("cleanup_dev_server");
+    }
   });
 });

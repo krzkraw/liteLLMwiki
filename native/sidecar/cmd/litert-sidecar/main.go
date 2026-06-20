@@ -54,6 +54,7 @@ func main() {
 	modelCatalog := catalog.NewDefault(catalog.FindModelRoot())
 	mode := sidecarMode(*headless)
 	stdoutTee, stderrTee := terminalLogTees(mode)
+	startDefaultRunner := shouldStartDefaultRunner(mode)
 	runtimeSupervisor := supervisor.New(supervisor.Config{
 		DefaultLiteRT: supervisor.LiteRTConfig{
 			Launch:     *launchRuntime,
@@ -65,16 +66,19 @@ func main() {
 			ModelID:    *modelID,
 			Verbose:    *runtimeVerbose,
 		},
-		Logs:        logs,
-		StdoutTee:   stdoutTee,
-		StderrTee:   stderrTee,
-		ImportModel: *importModel,
+		DisableDefaultLiteRT: !startDefaultRunner,
+		Logs:                 logs,
+		StdoutTee:            stdoutTee,
+		StderrTee:            stderrTee,
+		ImportModel:          *importModel,
 		OnStatusChange: func(supervisor.Snapshot) {
 			statusEvents.Publish()
 		},
 	})
-	if err := runtimeSupervisor.StartRunner(ctx, supervisor.DefaultMainRunnerID); err != nil {
-		log.Printf("litert-lm runtime is not ready: %v", err)
+	if startDefaultRunner {
+		if err := runtimeSupervisor.StartRunner(ctx, supervisor.DefaultMainRunnerID); err != nil {
+			log.Printf("litert-lm runtime is not ready: %v", err)
+		}
 	}
 
 	initialUpstream := *upstream
@@ -165,8 +169,10 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown sidecar: %v", err)
 	}
-	if err := runtimeSupervisor.StopRunner(shutdownCtx, supervisor.DefaultMainRunnerID); err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("stop litert-lm runtime: %v", err)
+	if startDefaultRunner {
+		if err := runtimeSupervisor.StopRunner(shutdownCtx, supervisor.DefaultMainRunnerID); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("stop litert-lm runtime: %v", err)
+		}
 	}
 }
 
@@ -182,6 +188,10 @@ func terminalLogTees(mode launchMode) (io.Writer, io.Writer) {
 		return os.Stdout, os.Stderr
 	}
 	return nil, nil
+}
+
+func shouldStartDefaultRunner(mode launchMode) bool {
+	return mode == sidecarModeHeadless
 }
 
 type supervisorRuntimeController struct {

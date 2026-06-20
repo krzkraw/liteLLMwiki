@@ -85,6 +85,17 @@ func TestTerminalLogTeesRemainEnabledInHeadlessMode(t *testing.T) {
 	}
 }
 
+func TestDefaultRunnerIsLazyInTUIMode(t *testing.T) {
+	t.Parallel()
+
+	if shouldStartDefaultRunner(sidecarModeTUI) {
+		t.Fatalf("TUI mode should not start a default runner before the launch wizard")
+	}
+	if !shouldStartDefaultRunner(sidecarModeHeadless) {
+		t.Fatalf("headless mode should preserve the legacy default runner for automation")
+	}
+}
+
 func TestSupervisorRuntimeControllerMapsLegacyExternalConfig(t *testing.T) {
 	t.Parallel()
 

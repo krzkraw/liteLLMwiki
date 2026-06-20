@@ -59,6 +59,22 @@ func TestSupervisorCreatesDefaultLiteRTRunner(t *testing.T) {
 	}
 }
 
+func TestSupervisorCanStartWithoutDefaultLiteRTRunner(t *testing.T) {
+	t.Parallel()
+
+	supervisor := New(Config{
+		DisableDefaultLiteRT: true,
+	})
+
+	snapshot := supervisor.Snapshot()
+	if len(snapshot.Runners) != 0 {
+		t.Fatalf("runners = %#v, want no default runner", snapshot.Runners)
+	}
+	if _, ok := snapshot.Routes[RoleMain]; ok {
+		t.Fatalf("main route = %q, want no default route", snapshot.Routes[RoleMain])
+	}
+}
+
 func TestSupervisorRoutesByRunnerRole(t *testing.T) {
 	t.Parallel()
 

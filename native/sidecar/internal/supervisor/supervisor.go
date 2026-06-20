@@ -72,12 +72,13 @@ const (
 )
 
 type Config struct {
-	DefaultLiteRT  LiteRTConfig
-	Logs           LogSink
-	StdoutTee      io.Writer
-	StderrTee      io.Writer
-	ImportModel    bool
-	OnStatusChange func(Snapshot)
+	DefaultLiteRT        LiteRTConfig
+	DisableDefaultLiteRT bool
+	Logs                 LogSink
+	StdoutTee            io.Writer
+	StderrTee            io.Writer
+	ImportModel          bool
+	OnStatusChange       func(Snapshot)
 }
 
 type LiteRTConfig struct {
@@ -230,7 +231,9 @@ func New(config Config) *Supervisor {
 		importModel:    config.ImportModel,
 		onStatusChange: config.OnStatusChange,
 	}
-	supervisor.addDefaultLiteRTRunner(config.DefaultLiteRT)
+	if !config.DisableDefaultLiteRT {
+		supervisor.addDefaultLiteRTRunner(config.DefaultLiteRT)
+	}
 	return supervisor
 }
 

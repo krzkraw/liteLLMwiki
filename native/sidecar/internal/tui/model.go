@@ -25,6 +25,24 @@ import (
 const refreshInterval = time.Second
 const defaultChatEndpoint = "http://127.0.0.1:9379/v1/chat/completions"
 
+const (
+	dashboardModelRowY    = 8
+	dashboardModelMainX   = 23
+	dashboardModelEmbedX  = 33
+	dashboardModelRerankX = 49
+
+	wizardRuntimeRowY     = 6
+	wizardRuntimeLlamaX   = 24
+	wizardVariantRowY     = 8
+	wizardRoleRowY        = 10
+	wizardRoleMainX       = 18
+	wizardRoleEmbeddingX  = 25
+	wizardRoleRerankingX  = 37
+	wizardModelListStartY = 13
+	wizardStartRowY       = 18
+	wizardStartX          = 6
+)
+
 type tab struct {
 	id    string
 	label string
@@ -151,6 +169,8 @@ type Model struct {
 	wizardModelSelection   int
 	llamaRuntimeRoot       string
 	llamaRuntimeVariants   []llamaRuntimeVariant
+	dashboardModelDropdown string
+	globalMenuOpen         bool
 }
 
 var panelBorder = lipgloss.RoundedBorder()
@@ -226,6 +246,7 @@ func Run(
 		}),
 		tea.WithContext(ctx),
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 	_, err := program.Run()
 	return err
@@ -249,6 +270,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateEditKey(msg)
 		}
 		return m.updateKey(msg)
+	case tea.MouseMsg:
+		return m.updateMouse(msg)
 	case tickMsg:
 		m.refresh()
 		m.clampScrollOffset()
@@ -261,7 +284,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = m.runtimeActionNotice(msg)
 	case runnerCreateMsg:
 		m.refresh()
-		m.setActiveTab("models")
+		if msg.err == nil {
+			m.setActiveTab("runner:" + msg.runner.ID)
+		}
 		m.notice = m.runnerCreateNotice(msg)
 	case modelDownloadMsg:
 		m.refresh()
@@ -287,6 +312,106 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Type != tea.MouseLeft || msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+
+	if m.handleTabClick(msg.X, msg.Y) {
+		return m, nil
+	}
+	if m.handleBottomBarClick(msg.X, msg.Y) {
+		return m, nil
+	}
+
+	switch m.activeTabID() {
+	case "dashboard":
+		return m.updateDashboardMouse(msg.X, msg.Y), nil
+	case "wizard":
+		return m.updateWizardMouse(msg.X, msg.Y)
+	default:
+		return m, nil
+	}
+}
+
+func (m *Model) handleBottomBarClick(x int, y int) bool {
+	if m.height <= 0 || y < m.height-1 || x > 8 {
+		return false
+	}
+	m.globalMenuOpen = !m.globalMenuOpen
+	return true
+}
+
+func (m *Model) handleTabClick(x int, y int) bool {
+	if y != 2 {
+		return false
+	}
+	position := 0
+	for index, item := range m.tabs() {
+		label := fmt.Sprintf("%d %s", index+1, item.label)
+		width := lipgloss.Width(label) + 2
+		if x >= position && x < position+width {
+			m.active = index
+			m.resetScroll()
+			return true
+		}
+		position += width + 1
+	}
+	return false
+}
+
+func (m Model) updateDashboardMouse(x int, y int) Model {
+	if y != dashboardModelRowY {
+		return m
+	}
+	switch {
+	case x >= dashboardModelRerankX:
+		m.dashboardModelDropdown = "reranking"
+	case x >= dashboardModelEmbedX:
+		m.dashboardModelDropdown = "embedding"
+	case x >= dashboardModelMainX:
+		m.dashboardModelDropdown = "main"
+	default:
+		m.dashboardModelDropdown = ""
+	}
+	return m
+}
+
+func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
+	switch y {
+	case wizardRuntimeRowY:
+		if x >= wizardRuntimeLlamaX {
+			m.wizardRuntime = "llamacpp"
+			m.wizardBackend = m.firstAvailableLlamaType()
+		} else {
+			m.wizardRuntime = "litert"
+			m.wizardBackend = "cpu"
+		}
+		m.wizardModelSelection = 0
+		m.normalizeWizardSelection()
+	case wizardVariantRowY:
+		m.setWizardVariantFromMouse(x)
+	case wizardRoleRowY:
+		switch {
+		case x >= wizardRoleRerankingX:
+			m.setWizardRole("reranking")
+		case x >= wizardRoleEmbeddingX:
+			m.setWizardRole("embedding")
+		case x >= wizardRoleMainX:
+			m.setWizardRole("main")
+		}
+	case wizardStartRowY:
+		if x >= wizardStartX && x < wizardStartX+12 {
+			return m, m.wizardCreateCmd()
+		}
+	default:
+		if y >= wizardModelListStartY {
+			m.setWizardModelFromMouse(y)
+		}
+	}
+	return m, nil
+}
+
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.managedScreen {
 		if next, ok := m.updateScrollKey(msg); ok {
@@ -297,6 +422,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
 		return m, tea.Quit
+	case tea.KeyF1:
+		m.globalMenuOpen = !m.globalMenuOpen
+		return m, nil
 	case tea.KeyRight, tea.KeyTab:
 		m.active = (m.active + 1) % len(m.tabs())
 		m.resetScroll()
@@ -627,10 +755,8 @@ func (m Model) View() string {
 func (m Model) fullView() string {
 	var builder strings.Builder
 	builder.WriteString(m.headerView())
-	builder.WriteString("\n\n")
+	builder.WriteString("\n")
 	builder.WriteString(m.tabBar())
-	builder.WriteString("\n\n")
-	builder.WriteString(m.missionControlView())
 	builder.WriteString("\n\n")
 	if strings.TrimSpace(m.notice) != "" {
 		builder.WriteString(noticeStyle.Render(m.notice))
@@ -639,14 +765,14 @@ func (m Model) fullView() string {
 
 	builder.WriteString(m.activeContentView())
 	builder.WriteString("\n\n")
-	builder.WriteString(m.commandRailView())
+	builder.WriteString(m.footerView())
 
 	return builder.String()
 }
 
 func (m Model) managedScreenView() string {
 	top := m.managedTopView()
-	footer := m.commandRailView()
+	footer := m.footerView()
 	bodyHeight := managedBodyHeight(m.height, top, footer)
 	if bodyHeight <= 0 {
 		topHeight := m.height - viewLineCount(footer) - 2
@@ -683,10 +809,8 @@ func (m Model) managedStartupView() string {
 func (m Model) managedTopView() string {
 	var builder strings.Builder
 	builder.WriteString(m.headerView())
-	builder.WriteString("\n\n")
+	builder.WriteString("\n")
 	builder.WriteString(m.tabBar())
-	builder.WriteString("\n\n")
-	builder.WriteString(m.missionControlView())
 	if strings.TrimSpace(m.notice) != "" {
 		builder.WriteString("\n\n")
 		builder.WriteString(noticeStyle.Render(m.notice))
@@ -700,14 +824,6 @@ func (m Model) activeContentView() string {
 		return m.dashboardView()
 	case "wizard":
 		return m.wizardView()
-	case "chat":
-		return m.chatView()
-	case "models":
-		return m.modelsView()
-	case "logs":
-		return m.logsView()
-	case "settings":
-		return m.settingsView()
 	default:
 		if runner, ok := m.activeRunner(); ok {
 			return m.runnerView(runner)
@@ -781,7 +897,10 @@ func (m Model) activeTabID() string {
 }
 
 func (m Model) tabs() []tab {
-	result := []tab{{id: "dashboard", label: m.dashboardTabLabel()}}
+	result := []tab{
+		{id: "dashboard", label: "Dashboard"},
+		{id: "wizard", label: "Launch Wizard"},
+	}
 	for _, runner := range m.snapshot.Runners {
 		label := runner.ID
 		if len(label) > 18 {
@@ -792,14 +911,6 @@ func (m Model) tabs() []tab {
 			label: runnerStateGlyph(runner.State) + " " + label,
 		})
 	}
-	result = append(
-		result,
-		tab{id: "wizard", label: m.wizardTabLabel()},
-		tab{id: "chat", label: m.chatTabLabel()},
-		tab{id: "models", label: m.modelsTabLabel()},
-		tab{id: "logs", label: m.logsTabLabel()},
-		tab{id: "settings", label: m.settingsTabLabel()},
-	)
 	return result
 }
 
@@ -890,10 +1001,9 @@ func (m Model) activeRunner() (server.RunnerSnapshot, bool) {
 func (m Model) headerView() string {
 	parts := []string{
 		titleStyle.Render("◆ LiteRT sidecar"),
-		"Runtime: " + statusBadge(m.runtime.State),
+		"LiteRT: " + runtimeUseBadge(m.runtimeAliveCount("litert")),
+		"llama.cpp: " + runtimeUseBadge(m.runtimeAliveCount("llamacpp")),
 		fmt.Sprintf("Runners: %d", len(m.snapshot.Runners)),
-		fmt.Sprintf("Routes: %d", len(m.snapshot.Routes)),
-		fmt.Sprintf("Logs: %d", len(m.logEntries)),
 	}
 	if m.width > 0 || m.height > 0 {
 		parts = append(parts, fmt.Sprintf("Viewport: %dx%d", m.width, m.height))
@@ -913,6 +1023,24 @@ func (m Model) runnerByID(id string) (server.RunnerSnapshot, bool) {
 		}
 	}
 	return server.RunnerSnapshot{}, false
+}
+
+func (m Model) runtimeAliveCount(runtimeName string) int {
+	count := 0
+	for _, runner := range m.snapshot.Runners {
+		if runner.Runtime != runtimeName || !runnerIsAlive(runner) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func runtimeUseBadge(alive int) string {
+	if alive > 0 {
+		return statusBadge("active")
+	}
+	return statusBadge("idle")
 }
 
 func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
@@ -1052,6 +1180,49 @@ func (m Model) commandRailView() string {
 	return renderCommandRail(m.commandRailLines())
 }
 
+func (m Model) footerView() string {
+	if !m.globalMenuOpen {
+		return m.bottomActionBarView()
+	}
+	return joinPanels(m.globalMenuView(), m.bottomActionBarView())
+}
+
+func (m Model) globalMenuView() string {
+	return renderPanel(
+		"Global menu",
+		[]string{
+			"Tab/Click tabs  change view",
+			"F1/click F1     close menu",
+			"Esc Quit",
+		},
+		"39",
+	)
+}
+
+func (m Model) bottomActionBarView() string {
+	parts := []string{
+		"F1 Menu",
+		"Tab Next",
+		"Shift+Tab Prev",
+		"Esc Quit",
+	}
+	switch m.activeTabID() {
+	case "dashboard":
+		parts = append(parts, "Dashboard: click model roles")
+	case "wizard":
+		parts = append(parts, "Wizard: click toggles | Enter Start")
+	default:
+		if runner, ok := m.activeRunner(); ok {
+			parts = append(parts, fmt.Sprintf("Runner %s: s Start | x Stop | r Restart", runner.ID))
+		}
+	}
+	line := strings.Join(parts, " | ")
+	if m.width > 0 {
+		line = truncateToWidth(line, m.width)
+	}
+	return activeTabStyle.Render(line)
+}
+
 func (m Model) commandRailLines() []string {
 	scrollLine := ""
 	if m.managedScreen {
@@ -1132,26 +1303,81 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 }
 
 func (m Model) dashboardView() string {
-	return m.panelGrid(
-		panelSpec{"System health / Specs", m.systemHealthLines(), "82"},
-		panelSpec{"Signal board / Readiness", m.signalBoardLines(), "82"},
-		panelSpec{"Runtime topology", m.runtimeTopologyLines(), "45"},
-		panelSpec{"Topology graph / Visual route authority", m.topologyGraphLines(), "39"},
-		panelSpec{"Backend matrix / Runnable backends", m.backendMatrixLines(), "214"},
-		panelSpec{"Route map / Routes", m.routeMapLines(), "205"},
-		panelSpec{"Recent activity", m.recentActivityLines(6), "244"},
-		panelSpec{
-			"Hotkeys",
-			[]string{
-				"Tab/Right: next tab",
-				"Shift+Tab/Left: previous tab",
-				"Number keys: jump tabs",
-				"Runner tabs: s Start, x Stop, r Restart",
-				"Esc/Ctrl+C: quit",
-			},
-			"205",
-		},
-	)
+	lines := []string{
+		"Runners by runtime",
+		fmt.Sprintf("LiteRT      %d alive", m.runtimeAliveCount("litert")),
+		fmt.Sprintf("llama.cpp   %d alive", m.runtimeAliveCount("llamacpp")),
+		"",
+		"Runners by role",
+		fmt.Sprintf("Main        %d alive", m.roleAliveCount("main")),
+		fmt.Sprintf("Embedding   %d alive", m.roleAliveCount("embedding")),
+		fmt.Sprintf("Reranking   %d alive", m.roleAliveCount("reranking")),
+		"",
+		fmt.Sprintf(
+			"Models ---- Main %d -- Embedding %d -- Reranking %d",
+			m.presentModelCount("main"),
+			m.presentModelCount("embedding"),
+			m.presentModelCount("reranking"),
+		),
+	}
+	if m.dashboardModelDropdown != "" {
+		lines = append(lines, "")
+		lines = append(lines, m.modelDropdownLines(m.dashboardModelDropdown)...)
+	}
+	return renderPanelWidth("Status", lines, "45", m.width)
+}
+
+func (m Model) roleAliveCount(role string) int {
+	count := 0
+	for _, runner := range m.snapshot.Runners {
+		if runner.Role != role || !runnerIsAlive(runner) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func runnerIsAlive(runner server.RunnerSnapshot) bool {
+	return strings.EqualFold(runner.State, "running")
+}
+
+func (m Model) presentModelCount(role string) int {
+	count := 0
+	for _, entry := range m.models {
+		if entry.Role == role && entry.State == catalog.StatePresent {
+			count++
+		}
+	}
+	return count
+}
+
+func (m Model) modelDropdownLines(role string) []string {
+	title := roleDisplayName(role) + " models"
+	lines := []string{title}
+	found := false
+	for _, entry := range m.models {
+		if entry.Role != role || entry.State != catalog.StatePresent {
+			continue
+		}
+		found = true
+		lines = append(lines, "• "+entry.ID+"  "+entry.Filename)
+	}
+	if !found {
+		lines = append(lines, "No local "+role+" models.")
+	}
+	return lines
+}
+
+func roleDisplayName(role string) string {
+	switch role {
+	case "embedding":
+		return "Embedding"
+	case "reranking":
+		return "Reranking"
+	default:
+		return "Main"
+	}
 }
 
 func (m Model) signalBoardLines() []string {
@@ -1408,48 +1634,22 @@ func (m Model) recentActivityLines(limit int) []string {
 }
 
 func (m Model) runnerView(runner server.RunnerSnapshot) string {
-	settings := []string{
+	lines := []string{
+		formatKV("State", fallback(runner.State, "unknown")),
 		formatKV("Runtime", fallback(runner.Runtime, "unknown")),
 		formatKV("Role", fallback(runner.Role, "unknown")),
 		formatKV("Backend", fallback(runner.Backend, "default")),
-		formatKV("Executable", fallback(runner.Executable, "auto-discover")),
-		formatKV("Version", fallback(runner.Version, "unknown")),
 		formatKV("Model path", fallback(runner.ModelPath, "not configured")),
 		formatKV("Model ID", fallback(runner.ModelID, "not configured")),
-		formatKV("Host", fallback(runner.Host, "127.0.0.1")),
-		formatKV("Port", fallbackInt(runner.Port, "auto")),
-		formatKV("Launch", runnerLaunchMode(runner)),
-		formatKV("Verbose", strconv.FormatBool(runner.Verbose)),
 		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
-		formatKV("HF token", "not shown"),
-	}
-
-	details := []string{
-		formatKV("State", statusBadge(runner.State)),
 		formatKV("PID", fallbackInt(runner.PID, "not running")),
-		formatKV("Command", commandLine(runner.Command)),
-		formatKV("Capabilities", capabilitiesLine(runner.Capabilities)),
-		formatKV("Last error", fallback(runner.LastError, "none")),
-		formatKV("Log sequence", fallbackUint(runner.LogSequence, "none")),
+		"",
+		"Actions ---- s Start -- x Stop -- r Restart",
 	}
 	if runner.Detail != "" {
-		details = append(details, formatKV("Detail", runner.Detail))
+		lines = append(lines, formatKV("Detail", runner.Detail))
 	}
-
-	return m.panelGrid(
-		panelSpec{"Runner " + runner.ID + " / Runner health", m.runnerHealthLines(runner), "82"},
-		panelSpec{"Runner signal board / Readiness", m.runnerSignalLines(runner), "82"},
-		panelSpec{"Endpoint map", m.runnerEndpointLines(runner), "45"},
-		panelSpec{"Operation flow", runnerOperationLines(runner), "214"},
-		panelSpec{"Control surface", m.runnerControlLines(runner), "39"},
-		panelSpec{"Runtime command", []string{commandLine(runner.Command)}, "214"},
-		panelSpec{"Capabilities matrix", runnerCapabilityLines(runner), "205"},
-		m.runnerEditorSpec(runner),
-		panelSpec{"Settings matrix", runnerSettingsMatrixLines(runner), "39"},
-		panelSpec{"Settings", settings, "45"},
-		panelSpec{"Details", details, "214"},
-		panelSpec{"Recent runner logs", m.runnerLogLines(runner.ID, 6), "244"},
-	)
+	return renderPanelWidth("Runner "+runner.ID, lines, "82", m.width)
 }
 
 func (m Model) runnerSignalLines(runner server.RunnerSnapshot) []string {
@@ -1753,22 +1953,56 @@ func (m Model) runnerEditorSpec(runner server.RunnerSnapshot) panelSpec {
 }
 
 func (m Model) wizardView() string {
-	return m.panelGrid(
-		panelSpec{"Launch Wizard / Runtime and variant", m.wizardSelectionLines(), "214"},
-		panelSpec{"Downloaded models", m.wizardModelLines(), "82"},
-		panelSpec{"Dry-run command preview", m.wizardDryRunLines(), "45"},
-		panelSpec{
-			"Wizard route authority",
-			[]string{
-				"main -> /v1/chat/completions",
-				"embedding -> /v1/embeddings",
-				"reranking -> /v1/rerank",
-				"Created runners appear as first-class runner tabs.",
-				"Models tab opens this same filtered creation flow.",
-			},
-			"39",
-		},
-	)
+	lines := []string{
+		"runtime ---- " + selectedToken("litert", m.wizardRuntime == "litert") + " " +
+			selectedToken("llama.cpp", m.wizardRuntime == "llamacpp"),
+		"",
+		m.wizardVariantToggleLine(),
+		"",
+		"model role ---- " +
+			selectedToken("main", m.wizardRole == "main") + " " +
+			selectedToken("embedding", m.wizardRole == "embedding") + " " +
+			selectedToken("reranking", m.wizardRole == "reranking"),
+		"",
+		"local models",
+	}
+	candidates := m.wizardCandidateModels()
+	if len(candidates) == 0 {
+		lines = append(lines, "  no local models match this runtime, variant, and role")
+	} else {
+		selected := clampInt(m.wizardModelSelection, 0, len(candidates)-1)
+		for index, entry := range candidates {
+			prefix := "  "
+			if index == selected {
+				prefix = "> "
+			}
+			lines = append(lines, prefix+entry.Filename)
+		}
+	}
+	lines = append(lines, "", "[ START ]")
+	return renderPanelWidth("Launch Wizard", lines, "214", m.width)
+}
+
+func selectedToken(label string, selected bool) string {
+	if selected {
+		return "[" + label + "]"
+	}
+	return label
+}
+
+func (m Model) wizardVariantToggleLine() string {
+	if m.wizardRuntime == "llamacpp" {
+		parts := make([]string, 0, len(llamaTypeOptions()))
+		for _, option := range llamaTypeOptions() {
+			parts = append(parts, selectedToken(option, m.wizardBackend == option))
+		}
+		return "llama type ---- " + strings.Join(parts, " ")
+	}
+	parts := make([]string, 0, len(litertBackendOptions()))
+	for _, option := range litertBackendOptions() {
+		parts = append(parts, selectedToken(option, m.wizardBackend == option))
+	}
+	return "LiteRT backend ---- " + strings.Join(parts, " ")
 }
 
 func (m Model) wizardSelectionLines() []string {
@@ -2444,6 +2678,9 @@ func (m Model) wizardCreateCmd() tea.Cmd {
 		defer cancel()
 
 		runner, err := m.runnerController.CreateRunner(ctx, spec)
+		if err == nil {
+			runner, err = m.runnerController.StartRunner(ctx, runner.ID)
+		}
 		return runnerCreateMsg{
 			label:  entry.ID,
 			runner: runner,
@@ -2819,8 +3056,10 @@ func postChatCompletion(
 func (m *Model) toggleWizardRuntime() {
 	if m.wizardRuntime == "litert" {
 		m.wizardRuntime = "llamacpp"
+		m.wizardBackend = m.firstAvailableLlamaType()
 	} else {
 		m.wizardRuntime = "litert"
+		m.wizardBackend = "cpu"
 	}
 	m.wizardVariantSelection = 0
 	m.wizardModelSelection = 0
@@ -2829,9 +3068,15 @@ func (m *Model) toggleWizardRuntime() {
 
 func (m *Model) cycleWizardVariant() {
 	if m.wizardRuntime == "llamacpp" {
-		if len(m.llamaRuntimeVariants) > 0 {
-			m.wizardVariantSelection = (m.wizardVariantSelection + 1) % len(m.llamaRuntimeVariants)
+		options := llamaTypeOptions()
+		current := 0
+		for index, option := range options {
+			if option == m.wizardBackend {
+				current = index
+				break
+			}
 		}
+		m.wizardBackend = options[(current+1)%len(options)]
 		m.normalizeWizardSelection()
 		return
 	}
@@ -2866,6 +3111,30 @@ func (m *Model) cycleWizardModel(delta int) {
 	}
 }
 
+func (m *Model) setWizardVariantFromMouse(x int) {
+	if m.wizardRuntime == "llamacpp" {
+		options := llamaTypeOptions()
+		index := clampInt((x-17)/8, 0, len(options)-1)
+		m.wizardBackend = options[index]
+		m.normalizeWizardSelection()
+		return
+	}
+	options := litertBackendOptions()
+	index := clampInt((x-22)/6, 0, len(options)-1)
+	m.wizardBackend = options[index]
+	m.normalizeWizardSelection()
+}
+
+func (m *Model) setWizardModelFromMouse(y int) {
+	candidates := m.wizardCandidateModels()
+	if len(candidates) == 0 {
+		m.wizardModelSelection = 0
+		return
+	}
+	index := clampInt(y-wizardModelListStartY, 0, len(candidates)-1)
+	m.wizardModelSelection = index
+}
+
 func (m *Model) normalizeWizardSelection() {
 	if m.wizardRuntime != "litert" && m.wizardRuntime != "llamacpp" {
 		m.wizardRuntime = "litert"
@@ -2875,6 +3144,9 @@ func (m *Model) normalizeWizardSelection() {
 	}
 	if m.wizardRuntime == "litert" && !containsString(litertBackendOptions(), m.wizardBackend) {
 		m.wizardBackend = "cpu"
+	}
+	if m.wizardRuntime == "llamacpp" && !containsString(llamaTypeOptions(), m.wizardBackend) {
+		m.wizardBackend = m.firstAvailableLlamaType()
 	}
 	if len(m.llamaRuntimeVariants) == 0 {
 		m.wizardVariantSelection = 0
@@ -2906,6 +3178,11 @@ func (m Model) wizardVariantLabel() string {
 func (m Model) selectedLlamaRuntimeVariant() (llamaRuntimeVariant, bool) {
 	if len(m.llamaRuntimeVariants) == 0 {
 		return llamaRuntimeVariant{}, false
+	}
+	for _, variant := range m.llamaRuntimeVariants {
+		if llamaRuntimeType(variant.Name) == m.wizardBackend {
+			return variant, true
+		}
 	}
 	index := clampInt(m.wizardVariantSelection, 0, len(m.llamaRuntimeVariants)-1)
 	return m.llamaRuntimeVariants[index], true
@@ -2958,26 +3235,44 @@ func (m Model) wizardRunnerSpec() (server.RunnerSpec, catalog.Entry, error) {
 	}
 
 	spec := catalogRunnerSpec(entry, runnerPreset{
-		id:      runnerIDForCatalogEntry(entry),
+		id:      m.nextRunnerID(entry.Runtime, entry.Role),
 		role:    entry.Role,
 		backend: backend,
 		exe:     executable,
-		modelID: modelIDForCatalogEntry(entry),
+		modelID: entry.ID,
 		port:    m.nextWizardPort(entry.Role),
 	})
 	return spec, entry, nil
 }
 
-func runnerIDForCatalogEntry(entry catalog.Entry) string {
-	return strings.Join([]string{entry.Role, entry.Runtime, entry.ID}, "-")
+func (m Model) nextRunnerID(runtimeName string, role string) string {
+	prefix := "LR"
+	if runtimeName == "llamacpp" {
+		prefix = "LM"
+	}
+	roleCode := roleLetter(role)
+	next := 1
+	for _, runner := range m.snapshot.Runners {
+		parts := strings.Split(runner.ID, "-")
+		if len(parts) != 3 || parts[1] != roleCode {
+			continue
+		}
+		value, err := strconv.Atoi(parts[2])
+		if err == nil && value >= next {
+			next = value + 1
+		}
+	}
+	return fmt.Sprintf("%s-%s-%d", prefix, roleCode, next)
 }
 
-func modelIDForCatalogEntry(entry catalog.Entry) string {
-	switch entry.ID {
-	case "gemma4-litert":
-		return "gemma4-e2b"
+func roleLetter(role string) string {
+	switch role {
+	case "embedding":
+		return "E"
+	case "reranking":
+		return "R"
 	default:
-		return entry.ID
+		return "M"
 	}
 }
 
@@ -3008,6 +3303,35 @@ func defaultPortForRole(role string) int {
 
 func litertBackendOptions() []string {
 	return []string{"cpu", "gpu", "npu"}
+}
+
+func llamaTypeOptions() []string {
+	return []string{"cpu", "gpu", "openvino", "cuda13", "cuda12", "sycl"}
+}
+
+func (m Model) firstAvailableLlamaType() string {
+	for _, variant := range m.llamaRuntimeVariants {
+		return llamaRuntimeType(variant.Name)
+	}
+	return "cpu"
+}
+
+func llamaRuntimeType(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "cuda-13") || strings.Contains(lower, "cuda13") || strings.Contains(lower, "cuda-13."):
+		return "cuda13"
+	case strings.Contains(lower, "cuda-12") || strings.Contains(lower, "cuda12") || strings.Contains(lower, "cuda-12."):
+		return "cuda12"
+	case strings.Contains(lower, "openvino"):
+		return "openvino"
+	case strings.Contains(lower, "sycl"):
+		return "sycl"
+	case strings.Contains(lower, "vulkan"), strings.Contains(lower, "hip"), strings.Contains(lower, "radeon"), strings.Contains(lower, "opencl"):
+		return "gpu"
+	default:
+		return "cpu"
+	}
 }
 
 func containsString(values []string, needle string) bool {
@@ -3301,6 +3625,17 @@ func renderCommandRail(lines []string) string {
 	return mutedStyle.Render(strings.Join(lines, "\n"))
 }
 
+func truncateToWidth(value string, width int) string {
+	if width <= 0 || lipgloss.Width(value) <= width {
+		return value
+	}
+	runes := []rune(value)
+	for len(runes) > 0 && lipgloss.Width(string(runes)) > width {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes)
+}
+
 func joinPanels(panels ...string) string {
 	visible := make([]string, 0, len(panels))
 	for _, panel := range panels {
@@ -3357,10 +3692,7 @@ func (m Model) scrollStatusLine() string {
 }
 
 func (m Model) commandRailSizingView() string {
-	if !m.managedScreen {
-		return m.commandRailViewWithScrollLine("")
-	}
-	return m.commandRailViewWithScrollLine("Scroll: Up/Down line | PgUp/PgDn page | Home/End content")
+	return m.footerView()
 }
 
 func (m *Model) resetScroll() {

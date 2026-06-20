@@ -19,83 +19,41 @@ go build -o litert-sidecar ./cmd/litert-sidecar
 terminal dashboard. Use `./litert-sidecar --headless` for browser automation,
 smoke tests, CI, or any process without a TTY.
 
-The TUI uses the same runtime and runner controller methods as the HTTP routes
-and WebSocket `api.request` bridge. It opens with a colorized status header,
-rounded panels, runtime/runner/route/log counters, and a status-rich tab bar.
-The tab bar keeps number-key navigation stable while showing dashboard runner
-counts, per-runner state glyphs, model readiness, log count, and Settings API
-readiness. Every page also includes a mission-control strip that keeps the
-active view, runtime state, runner readiness, route authority, model readiness,
-and shared WebSocket/controller API path visible before page-specific panels.
-On wide terminals the dashboard pairs panels into two-column rows for faster
-scanning.
-Every tab ends with a context command rail that keeps global navigation,
-tab-specific actions, and the matching controller or WebSocket/API path visible
-without switching pages.
-The Launch Wizard tab lets the user choose `litert` or `llamacpp`, then a
-runtime variant, role, and downloaded applicable catalog model. LiteRT variants
-are backend choices such as `cpu`, `gpu`, and `npu`; llama.cpp variants are
-installed folders under `native/llama-runtimes` such as `llama-win-cpu-x64` or
-`llama-win-cuda-13.3-x64`. The selected llama folder's `llama-server`
-executable is written into the runner spec. The wizard shows a dry-run command
-preview and creates runners through the same `RunnerController.CreateRunner`
-path as `POST /sidecar/v1/runners`. The Chat tab selects the running main
-runner, provides an inline prompt composer and transcript, and sends
-non-streaming chat requests through the sidecar `/v1/chat/completions` proxy so
-route authority stays shared with the browser API.
-Its dashboard lists runtime specs, a visual topology graph, route authority,
-runnable backend cards, runtime topology, route maps, recent activity, and a
-signal board with readiness meters for runtime, runners, routes, required model
-artifacts, and logs.
-Each configured runner gets its own tab with health, a per-runner readiness
-signal board, endpoint, control surface, operation flow, runtime command,
-capability matrix, settings, process details, and recent log panels. The signal
-board summarizes runner state, route, process, model, capabilities, log cache,
-and the next useful action. On wide terminals runner tabs pair high-signal
-panels into two-column rows so health, routes, controls, settings, details, and
-logs stay visible without a long single-column scan. The operation flow shows
-the runner state, model file, runtime/backend, upstream, role route, controller
-methods, and matching WebSocket `api.request` paths. Runner controls use `s`
-start, `x` stop, and `r` restart. Runner tabs include a settings matrix that
-lists each edit key, current value, `PATCH` field, and
-`RunnerController.UpdateRunner` method.
-They edit settings through the same update method behind
-`PATCH /sidecar/v1/runners/{id}`: `b` backend, `p` port, `h` host, `i` model ID,
-`m` model path, `e` executable, `u` upstream, `f` Hugging Face token, `l`
-launch mode, `v` verbose, `t` runtime, and `o` role. Typed edits show the
-current value, accept a replacement value, save with Enter, and cancel with Esc;
-HF token edits mask the typed value and only report `set` or `cleared`. The
-Settings tab lists the matching WebSocket messages and sidecar API paths,
-exposes default runtime controls with `s` start release, `d` start debug, `x`
-stop, `r` restart release, and `g` restart debug, and includes a runtime config
-editor for the same `runtime.start` and `runtime.restart` config fields used by
-WebSocket clients. On wide terminals it pairs the runtime summary with the
-config editor and the shared action map with live runner parity so API coverage
-is visible without losing the control surface. Its shared action map shows each
-TUI key beside the controller method and matching WebSocket/API route it uses.
-Its live runner API parity panel is generated from `RunnerController.Snapshot()`
-and lists each runner's role, state, routed OpenAI path, `RunnerController`
-methods, and concrete `api.request` PATCH/start/stop/restart paths. Its API
-parity panel groups direct WebSocket messages, sidecar `api.request` routes,
-and the `/v1/*` upstream proxy, with each row naming the backing controller,
-catalog, log broadcaster, or supervisor route-authority method.
-Settings keys edit `e` runtime executable, `h` runtime host, `p` runtime port,
-`m` model file, `i` model ID, `u` upstream, and `f` Hugging Face token, plus
-`l` launch runtime, `a` import model, and `v` runtime verbose toggles. The
-Models tab can download the next missing required catalog artifact with `d` by
-calling the same catalog download method behind
-`POST /sidecar/v1/models/download`; `w` opens the filtered Launch Wizard for
-runner creation through `POST /sidecar/v1/runners`. The Models tab renders a
-readiness panel for required artifacts, a launch-wizard action parity panel, and
-catalog cards that show runtime, role, target file, progress, and any download
-error for each artifact. On wide terminals it pairs readiness beside actions so
-download state and runnable creation stay visible together.
-The Logs tab turns the `LogBroadcaster` cache into a live diagnostics view with
-cache health, source/stream activity, recent events, and the matching
-WebSocket `logs.subscribe` path. On wide terminals it pairs log signal state
-beside source activity so noisy runtime output stays scannable.
+The interactive TUI starts lazy: it does not create or start a default runtime
+runner before the user chooses one in the Launch Wizard. Headless mode preserves
+the legacy default LiteRT runner startup for browser smoke tests and automation.
 
-By default it:
+The TUI is currently focused on the native runner basics. It shows only a
+Dashboard tab, a Launch Wizard tab, and runner tabs created from the wizard.
+Chat, Models, Logs, and Settings tabs are intentionally hidden while the native
+runner workflow is being stabilized. The status header reports LiteRT and
+llama.cpp independently as `active` or `idle` based on whether each runtime has
+any running runner.
+
+The Dashboard contains a single status widget: live runner counts by runtime,
+live runner counts by role, and model-file counts by role. Clicking the Main,
+Embedding, or Reranking model count opens a small local-model list for that
+role. The old system-health, topology, signal-board, route-map, backend-card,
+recent-activity, and command-rail panels are no longer part of the dashboard.
+
+The bottom line is the action surface, htop-style. It always shows global
+actions and the current tab's actions. `F1` or clicking the F1 area opens a
+bottom-left global menu with navigation and quit actions.
+
+The Launch Wizard is a compact configuration screen. It lets the user click or
+key-select the runtime (`litert` or `llamacpp`), a runtime variant, model role
+(`main`, `embedding`, or `reranking`), and one locally installed matching model.
+LiteRT variants are `cpu`, `gpu`, and `npu`. llama.cpp variants are shown as
+`cpu`, `gpu`, `openvino`, `cuda13`, `cuda12`, and `sycl`, and are mapped to
+installed folders under `native/llama-runtimes`. Pressing Enter or clicking
+`START` creates and starts a runner. New runner tabs are inserted after the
+Launch Wizard and are named by runtime and role, such as `LR-M-1`, `LM-E-1`,
+or `LM-R-1`; numbering is per role.
+
+Runner tabs show a single basic status/control panel with runtime, role,
+backend, model, upstream, PID, and `s`/`x`/`r` start/stop/restart actions.
+
+In headless mode, the sidecar still:
 
 - searches for `litert-lm` on `PATH` or beside the sidecar binary;
 - searches for `models/litert/main/gemma-4-E2B-it.litertlm`;

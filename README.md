@@ -209,16 +209,17 @@ The sidecar opens an interactive terminal dashboard by default. Use
   -runtime-exe /path/to/litert-lm
 ```
 
-The sidecar searches for `litert-lm`, imports
-`models/litert/main/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and starts
-`litert-lm serve --host 127.0.0.1 --port 9381`.
-The TUI Launch Wizard creates additional runners from downloaded catalog models.
-It first toggles `litert` versus `llamacpp`; when `llamacpp` is selected it
-lists installed runtime folders from `native/llama-runtimes` such as
-`llama-win-cpu-x64` or `llama-win-cuda-13.3-x64` and passes that folder's
-`llama-server` executable to the runner. It then filters model choices by role
-(`main`, `embedding`, or `reranking`) and only shows downloaded applicable
-models.
+Interactive TUI launches are lazy: no runtime or runner is started until the
+Launch Wizard creates one. Headless launches preserve the automation path: the
+sidecar searches for `litert-lm`, imports
+`models/litert/main/gemma-4-E2B-it.litertlm` as `gemma4-e2b` when needed, and
+starts `litert-lm serve --host 127.0.0.1 --port 9381`.
+The TUI Launch Wizard creates runners from downloaded catalog models. It toggles
+`litert` versus `llamacpp`; `litert` exposes `cpu`, `gpu`, and `npu` variants,
+while `llamacpp` exposes installed `native/llama-runtimes` choices grouped as
+`cpu`, `gpu`, `openvino`, `cuda13`, `cuda12`, and `sycl`. It then filters model
+choices by role (`main`, `embedding`, or `reranking`) and only shows downloaded
+applicable models.
 
 The sidecar still exposes HTTP endpoints for manual checks and smoke scripts,
 including status:

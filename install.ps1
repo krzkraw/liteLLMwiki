@@ -10,9 +10,12 @@ $Summary = [System.Collections.Generic.List[string]]::new()
 $SelectedModelDownloadKeys = [System.Collections.Generic.List[string]]::new()
 $ModelsNextcloudBase = $null
 $ModelsNextcloudToken = $null
+$LiteRtRuntimeRoot = Join-Path $RepoRoot "native\litert-runtimes"
+$LiteRtSelectedFile = Join-Path $LiteRtRuntimeRoot ".selected"
+$LiteRtPackageSpec = "litert-lm==0.13.1"
 $LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
 $LlamaSelectedFile = Join-Path $LlamaRuntimeRoot ".selected"
-$LlamaReleaseBase = "https://github.com/ggml-org/llama.cpp/releases/download/b9724"
+$LlamaReleaseBase = "https://github.com/ggml-org/llama.cpp/releases/download/b9736"
 
 Set-Location $RepoRoot
 
@@ -177,6 +180,268 @@ function New-LlamaRuntimeDefinition {
   }
 }
 
+function New-LiteRtRuntimeDefinition {
+  param(
+    [string]$Key,
+    [string]$Folder,
+    [string]$Label,
+    [string]$Package,
+    [string]$Url
+  )
+
+  [pscustomobject]@{
+    Key = $Key
+    Folder = $Folder
+    Label = $Label
+    Package = $Package
+    Url = $Url
+  }
+}
+
+function Get-LiteRtRuntimeDefinitions {
+  $Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+  $RunningOnMacOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::OSX
+  )
+
+  $Definitions = @()
+  if ($RunningOnMacOs -and ($Architecture.ToString() -eq "Arm64")) {
+    $Definitions += New-LiteRtRuntimeDefinition "litert-macos-arm64" "litert-macos-arm64" "LiteRT-LM macOS Apple Silicon" $LiteRtPackageSpec "https://pypi.org/project/litert-lm/0.13.1/"
+  }
+  if ($RunningOnMacOs -and ($Architecture.ToString() -eq "X64")) {
+    $Definitions += New-LiteRtRuntimeDefinition "litert-macos-x64" "litert-macos-x64" "LiteRT-LM macOS Intel" $LiteRtPackageSpec "https://pypi.org/project/litert-lm/0.13.1/"
+  }
+
+  return $Definitions
+}
+
+function Find-LiteRtLmInDir {
+  param([string]$Directory)
+
+  foreach ($Name in @("litert-lm.exe", "litert-lm")) {
+    $Match = Get-ChildItem -Path $Directory -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $Match) {
+      return $Match.FullName
+    }
+  }
+
+  return ""
+}
+
+function Find-InstalledLocalLiteRtLm {
+  if (Test-Path $LiteRtSelectedFile) {
+    $RuntimeName = (Get-Content $LiteRtSelectedFile -Raw).Trim()
+    if ($RuntimeName) {
+      $RuntimeDir = Join-Path $LiteRtRuntimeRoot $RuntimeName
+      if (Test-Path $RuntimeDir) {
+        $Match = Find-LiteRtLmInDir -Directory $RuntimeDir
+        if (-not [string]::IsNullOrWhiteSpace($Match)) {
+          return $Match
+        }
+      }
+    }
+  }
+
+  if (Test-Path $LiteRtRuntimeRoot) {
+    return Find-LiteRtLmInDir -Directory $LiteRtRuntimeRoot
+  }
+
+  return ""
+}
+
+function Find-InstalledLiteRtLm {
+  if ($env:LITERT_LM_BIN -and (Test-Path $env:LITERT_LM_BIN)) {
+    return $env:LITERT_LM_BIN
+  }
+
+  $Local = Find-InstalledLocalLiteRtLm
+  if (-not [string]::IsNullOrWhiteSpace($Local)) {
+    return $Local
+  }
+
+  $Command = Get-Command "litert-lm" -ErrorAction SilentlyContinue
+  if ($null -ne $Command) {
+    return $Command.Source
+  }
+
+  return ""
+}
+
+function Write-LiteRtRuntimeAction {
+  param([object]$Definition)
+
+  Write-Host ""
+  Write-Host "LiteRT runtime needs to be installed downloaded, here is the command or URL I would use:"
+  Write-Host "Runtime: $($Definition.Label)"
+  Write-Host "Folder: native/litert-runtimes/$($Definition.Folder)"
+  Write-Host "Package: $($Definition.Package)"
+  Write-Host "URL: $($Definition.Url)"
+  Write-Host "Command: `$env:UV_TOOL_DIR = 'native/litert-runtimes/$($Definition.Folder)/tool'; `$env:UV_TOOL_BIN_DIR = 'native/litert-runtimes/$($Definition.Folder)/bin'; uv tool install --force $($Definition.Package)"
+  Write-Host "Fallback command: uv tool install $($Definition.Package)"
+}
+
+function Install-LiteRtRuntime {
+  param([object]$Definition)
+
+  $TargetDir = Join-Path $LiteRtRuntimeRoot $Definition.Folder
+  $ToolDir = Join-Path $TargetDir "tool"
+  $BinDir = Join-Path $TargetDir "bin"
+
+  Write-LiteRtRuntimeAction -Definition $Definition
+
+  $PreviousToolDir = $env:UV_TOOL_DIR
+  $PreviousToolBinDir = $env:UV_TOOL_BIN_DIR
+  try {
+    New-Item -ItemType Directory -Force -Path $LiteRtRuntimeRoot -ErrorAction Stop | Out-Null
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TargetDir
+    New-Item -ItemType Directory -Force -Path $ToolDir -ErrorAction Stop | Out-Null
+    New-Item -ItemType Directory -Force -Path $BinDir -ErrorAction Stop | Out-Null
+    $env:UV_TOOL_DIR = $ToolDir
+    $env:UV_TOOL_BIN_DIR = $BinDir
+    & uv tool install --force $Definition.Package
+    if ($LASTEXITCODE -ne 0) {
+      throw "uv tool install failed with exit code $LASTEXITCODE"
+    }
+    Set-Content -Path $LiteRtSelectedFile -Value $Definition.Folder -ErrorAction Stop
+  } catch {
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TargetDir
+    throw
+  } finally {
+    $env:UV_TOOL_DIR = $PreviousToolDir
+    $env:UV_TOOL_BIN_DIR = $PreviousToolBinDir
+  }
+
+  Add-Summary "OK: LiteRT runtime $($Definition.Folder)"
+}
+
+function Ensure-LiteRtRuntime {
+  $LocalInstalled = Find-InstalledLocalLiteRtLm
+  if (-not [string]::IsNullOrWhiteSpace($LocalInstalled)) {
+    Write-GreenCheck "LiteRT runtime - already done"
+    Add-Summary "OK: litert-lm at $LocalInstalled"
+    return
+  }
+
+  $Installed = Find-InstalledLiteRtLm
+  if (-not [string]::IsNullOrWhiteSpace($Installed)) {
+    Add-Summary "OK: litert-lm command at $Installed"
+  }
+
+  $Definitions = @(Get-LiteRtRuntimeDefinitions)
+  if ($Definitions.Count -eq 0) {
+    Invoke-ConfirmOrWait -Label "litert-lm" -CommandText "uv tool install $LiteRtPackageSpec" -Check {
+      -not [string]::IsNullOrWhiteSpace((Find-InstalledLiteRtLm))
+    } -Action {
+      & uv tool install $LiteRtPackageSpec
+      if ($LASTEXITCODE -ne 0) {
+        throw "uv tool install failed"
+      }
+    } -ExpectedResult "litert-lm is available on PATH" `
+      -Description "Install LiteRT-LM so the sidecar can start a native LiteRT runtime."
+    return
+  }
+
+  $SelectedKeys = [System.Collections.Generic.List[string]]::new()
+  foreach ($Definition in $Definitions) {
+    [void]$SelectedKeys.Add($Definition.Key)
+  }
+
+  while ($true) {
+    Write-Host ""
+    Write-Host "LiteRT runtime needs to be installed downloaded. Select one or more runtimes:"
+    for ($RuntimeIndex = 0; $RuntimeIndex -lt $Definitions.Count; $RuntimeIndex += 1) {
+      $Definition = $Definitions[$RuntimeIndex]
+      $Checked = "[ ]"
+      if ($SelectedKeys.Contains($Definition.Key)) {
+        $Checked = "[x]"
+      }
+      Write-Host ("  {0}) {1} {2}: {3} -> native/litert-runtimes/{4}" -f ($RuntimeIndex + 1), $Checked, $Definition.Key, $Definition.Label, $Definition.Folder)
+      Write-Host "      $($Definition.Url)"
+    }
+    Write-Host "  a: toggle all"
+    Write-Host "  c: continue"
+    Write-Host "  s: skip, I will install litert-lm myself and press Enter"
+
+    $SelectionText = Read-Host "Toggle numbers, a: toggle all, c: continue, s: skip"
+    if ([string]::IsNullOrWhiteSpace($SelectionText)) {
+      $SelectionText = "c"
+    }
+
+    if ($SelectionText -eq "a") {
+      if ($SelectedKeys.Count -eq $Definitions.Count) {
+        $SelectedKeys.Clear()
+      } else {
+        $SelectedKeys.Clear()
+        foreach ($Definition in $Definitions) {
+          [void]$SelectedKeys.Add($Definition.Key)
+        }
+      }
+      continue
+    }
+
+    if ($SelectionText -eq "c") {
+      if ($SelectedKeys.Count -eq 0) {
+        Write-Host "Select at least one runtime, or use s to skip."
+        continue
+      }
+
+      $PrimaryKey = $SelectedKeys[0]
+      Write-Host "Selected LiteRT runtimes will be installed now."
+      foreach ($SelectedKey in @($SelectedKeys)) {
+        $Selected = $Definitions | Where-Object { $_.Key -eq $SelectedKey } | Select-Object -First 1
+        if ($null -ne $Selected) {
+          try {
+            Install-LiteRtRuntime -Definition $Selected
+          } catch {
+            Write-Host "The task failed. Here is the command or URL again:"
+            Write-LiteRtRuntimeAction -Definition $Selected
+            $ExpectedPath = Join-Path $LiteRtRuntimeRoot $Selected.Folder
+            Invoke-WaitForUserAction -Label "LiteRT runtime $($Selected.Key)" -Check {
+              if (-not (Test-Path $ExpectedPath)) {
+                return $false
+              }
+              return -not [string]::IsNullOrWhiteSpace((Find-LiteRtLmInDir -Directory $ExpectedPath))
+            } -ExpectedResult "litert-lm exists under native/litert-runtimes/$($Selected.Folder)"
+          }
+        }
+      }
+      $Primary = $Definitions | Where-Object { $_.Key -eq $PrimaryKey } | Select-Object -First 1
+      if ($null -ne $Primary) {
+        Set-Content -Path $LiteRtSelectedFile -Value $Primary.Folder
+      }
+      return
+    }
+
+    if ($SelectionText -eq "s") {
+      $Installed = Find-InstalledLiteRtLm
+      if (-not [string]::IsNullOrWhiteSpace($Installed)) {
+        Add-Summary "OK: litert-lm at $Installed"
+        return
+      }
+      Invoke-WaitForUserAction -Label "litert-lm" -Check {
+        -not [string]::IsNullOrWhiteSpace((Find-InstalledLiteRtLm))
+      } -ExpectedResult "litert-lm is available on PATH or under native/litert-runtimes"
+      Add-Summary "OK: litert-lm"
+      return
+    }
+
+    $Tokens = $SelectionText -split "[,\s]+" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($Token in $Tokens) {
+      [int]$ParsedIndex = 0
+      if (([int]::TryParse($Token, [ref]$ParsedIndex)) -and ($ParsedIndex -ge 1) -and ($ParsedIndex -le $Definitions.Count)) {
+        $SelectedKey = $Definitions[$ParsedIndex - 1].Key
+        if ($SelectedKeys.Contains($SelectedKey)) {
+          [void]$SelectedKeys.Remove($SelectedKey)
+        } else {
+          [void]$SelectedKeys.Add($SelectedKey)
+        }
+      } else {
+        Write-Host "Unknown LiteRT runtime selection: $Token"
+      }
+    }
+  }
+}
+
 function Get-LlamaRuntimeDefinitions {
   $Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
   $RunningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
@@ -189,57 +454,79 @@ function Get-LlamaRuntimeDefinitions {
   $Definitions = @()
 
   if ($RunningOnMacOs -and ($Architecture.ToString() -eq "Arm64")) {
-    $Definitions += New-LlamaRuntimeDefinition "macos-arm64" "llama-macos-arm64" "macOS Apple Silicon" "$LlamaReleaseBase/llama-b9724-bin-macos-arm64.tar.gz" "sha256:b4582c69bc58e6b84d16105011d9431eeec9a0d1745d9ca8e48472a285db6b7f"
+    $Definitions += New-LlamaRuntimeDefinition "macos-arm64" "llama-macos-arm64" "macOS Apple Silicon" "$LlamaReleaseBase/llama-b9736-bin-macos-arm64.tar.gz" "sha256:caa5092f2f0442cf6f62e8e3308fdd58e603ca435cb801020adfc1830f79b328"
   }
   if ($RunningOnMacOs -and ($Architecture.ToString() -eq "X64")) {
-    $Definitions += New-LlamaRuntimeDefinition "macos-x64" "llama-macos-x64" "macOS Intel" "$LlamaReleaseBase/llama-b9724-bin-macos-x64.tar.gz" "sha256:4fd4228bd23dbc6ae53805a89b1811861c1b9da5d2ff07bfd9a08fb5f0c87f6e"
+    $Definitions += New-LlamaRuntimeDefinition "macos-x64" "llama-macos-x64" "macOS Intel" "$LlamaReleaseBase/llama-b9736-bin-macos-x64.tar.gz" "sha256:eef042e42534c567a80a8c032d358f6c7e0df410f2ae797e811e040bf688cc60"
   }
   if ($RunningOnWindows -and ($Architecture.ToString() -eq "X64")) {
-    $Definitions += New-LlamaRuntimeDefinition "win-cpu-x64" "llama-win-cpu-x64" "Windows x64 CPU" "$LlamaReleaseBase/llama-b9724-bin-win-cpu-x64.zip" "sha256:e06bafb4e1aaf3745be816d5d072cd965e52ef49ef8e9e93f031e196703780bf"
-    $Definitions += New-LlamaRuntimeDefinition "win-cuda13-x64" "llama-win-cuda-13.3-x64" "Windows x64 CUDA 13.3" "$LlamaReleaseBase/llama-b9724-bin-win-cuda-13.3-x64.zip" "sha256:c16700717a20daebc12a2de2bf1ac711ba43f9565dac9d6fbcdf04099dde975a" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-13.3-x64.zip" "sha256:1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e"
-    $Definitions += New-LlamaRuntimeDefinition "win-cuda12-x64" "llama-win-cuda-12.4-x64" "Windows x64 CUDA 12.4" "$LlamaReleaseBase/llama-b9724-bin-win-cuda-12.4-x64.zip" "sha256:913d47f80a3cad43fe95eda2ed0cf0dbd5fe01d758f66c097fa0a6138021729d" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-12.4-x64.zip" "sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
-    $Definitions += New-LlamaRuntimeDefinition "win-vulkan-x64" "llama-win-vulkan-x64" "Windows x64 Vulkan" "$LlamaReleaseBase/llama-b9724-bin-win-vulkan-x64.zip" "sha256:3e245e75f38477f9c99858cf149a3831988701090d156512eb143f2312b76b44"
-    $Definitions += New-LlamaRuntimeDefinition "win-openvino-x64" "llama-win-openvino-2026.2-x64" "Windows x64 OpenVINO" "$LlamaReleaseBase/llama-b9724-bin-win-openvino-2026.2-x64.zip" "sha256:da36f6380bbeffddd4db58bfbc09077982c465d92123e943e6af679e8ed5d0ec"
-    $Definitions += New-LlamaRuntimeDefinition "win-sycl-x64" "llama-win-sycl-x64" "Windows x64 SYCL" "$LlamaReleaseBase/llama-b9724-bin-win-sycl-x64.zip" "sha256:f660e83887af4a1c62742010a8064ab26aa9befacecaa5c86c6061ae68a3c04f"
-    $Definitions += New-LlamaRuntimeDefinition "win-hip-x64" "llama-win-hip-radeon-x64" "Windows x64 HIP Radeon" "$LlamaReleaseBase/llama-b9724-bin-win-hip-radeon-x64.zip" "sha256:2b861729d7b1620a7ee09ebc8681f2534be9da307f93fd68afb6410f160a016b"
+    $Definitions += New-LlamaRuntimeDefinition "win-cpu-x64" "llama-win-cpu-x64" "Windows x64 CPU" "$LlamaReleaseBase/llama-b9736-bin-win-cpu-x64.zip" "sha256:fdd2971197e234a76fcbe5bae2763fcd70ed20123714beffe90473cc29843f58"
+    $Definitions += New-LlamaRuntimeDefinition "win-cuda13-x64" "llama-win-cuda-13.3-x64" "Windows x64 CUDA 13.3" "$LlamaReleaseBase/llama-b9736-bin-win-cuda-13.3-x64.zip" "sha256:47277e0c0d3864555cb4749a33995319200bc1246dd28bdc9efd7dfce3c44c7a" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-13.3-x64.zip" "sha256:1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e"
+    $Definitions += New-LlamaRuntimeDefinition "win-cuda12-x64" "llama-win-cuda-12.4-x64" "Windows x64 CUDA 12.4" "$LlamaReleaseBase/llama-b9736-bin-win-cuda-12.4-x64.zip" "sha256:688b98a369b2c5b39580a0d62c0f92b570f9f90114205cc1ab5066bb999b0d53" "$LlamaReleaseBase/cudart-llama-bin-win-cuda-12.4-x64.zip" "sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+    $Definitions += New-LlamaRuntimeDefinition "win-vulkan-x64" "llama-win-vulkan-x64" "Windows x64 Vulkan" "$LlamaReleaseBase/llama-b9736-bin-win-vulkan-x64.zip" "sha256:cddafebc991d1b8b4d2e00408391184eb4b9797f59982f0d6d1a5d6b575a37eb"
+    $Definitions += New-LlamaRuntimeDefinition "win-openvino-x64" "llama-win-openvino-2026.2-x64" "Windows x64 OpenVINO" "$LlamaReleaseBase/llama-b9736-bin-win-openvino-2026.2-x64.zip" "sha256:01d40c9a54445b34b7718d0facc4f7a881e4200c5a5583cf7d73fcf6c5ade99e"
+    $Definitions += New-LlamaRuntimeDefinition "win-sycl-x64" "llama-win-sycl-x64" "Windows x64 SYCL" "$LlamaReleaseBase/llama-b9736-bin-win-sycl-x64.zip" "sha256:599886013f00b12afad085cab237b0d457990f0772c98220600022edffca97d8"
+    $Definitions += New-LlamaRuntimeDefinition "win-hip-x64" "llama-win-hip-radeon-x64" "Windows x64 HIP Radeon" "$LlamaReleaseBase/llama-b9736-bin-win-hip-radeon-x64.zip" "sha256:8abd90e7ed77ecdb76a1cb5778ac80b04ab1eb0b32c9979fcd7c520fa43b2eec"
   }
   if ($RunningOnWindows -and ($Architecture.ToString() -eq "Arm64")) {
-    $Definitions += New-LlamaRuntimeDefinition "win-cpu-arm64" "llama-win-cpu-arm64" "Windows arm64 CPU" "$LlamaReleaseBase/llama-b9724-bin-win-cpu-arm64.zip" "sha256:092191286aa8c1d11e909308358e6ac9bd7b5dc83e01d71d96807f6b0cf948bf"
-    $Definitions += New-LlamaRuntimeDefinition "win-opencl-adreno-arm64" "llama-win-opencl-adreno-arm64" "Windows arm64 OpenCL Adreno" "$LlamaReleaseBase/llama-b9724-bin-win-opencl-adreno-arm64.zip" "sha256:3e465918a49382fd466003e2d1658b261e87c68b8aa77c087a441ef3b7dee62c"
+    $Definitions += New-LlamaRuntimeDefinition "win-cpu-arm64" "llama-win-cpu-arm64" "Windows arm64 CPU" "$LlamaReleaseBase/llama-b9736-bin-win-cpu-arm64.zip" "sha256:7729009da59df98d9f7dd86abdbb5807efa7863563bc95dc1a7cd42b61c23b90"
+    $Definitions += New-LlamaRuntimeDefinition "win-opencl-adreno-arm64" "llama-win-opencl-adreno-arm64" "Windows arm64 OpenCL Adreno" "$LlamaReleaseBase/llama-b9736-bin-win-opencl-adreno-arm64.zip" "sha256:6234b6ce3ab2112295430e4ff13f9dba23a2751480b9f1f0e7766d5d2f0b380f"
   }
 
   return $Definitions
 }
 
-function Find-InstalledLlamaServer {
-  foreach ($Name in @("llama-server.exe", "llama-server")) {
-    $Command = Get-Command $Name -ErrorAction SilentlyContinue
-    if ($null -ne $Command) {
-      return $Command.Source
-    }
+function Get-LlamaExecutableNames {
+  if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+    return @("llama-server.exe")
   }
 
-  if (Test-Path $LlamaSelectedFile) {
-    $RuntimeName = (Get-Content $LlamaSelectedFile -Raw).Trim()
-    if ($RuntimeName) {
-      $RuntimeDir = Join-Path $LlamaRuntimeRoot $RuntimeName
-      if (Test-Path $RuntimeDir) {
-        $Match = Get-ChildItem -Path $RuntimeDir -Filter "llama-server*" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $Match) {
-          return $Match.FullName
-        }
-      }
-    }
-  }
+  return @("llama-server")
+}
 
-  if (Test-Path $LlamaRuntimeRoot) {
-    $Match = Get-ChildItem -Path $LlamaRuntimeRoot -Filter "llama-server*" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+function Find-LlamaServerInDir {
+  param([string]$Directory)
+
+  foreach ($Name in Get-LlamaExecutableNames) {
+    $Match = Get-ChildItem -Path $Directory -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $Match) {
       return $Match.FullName
     }
   }
 
   return ""
+}
+
+function Find-InstalledLocalLlamaServer {
+  if (Test-Path $LlamaSelectedFile) {
+    $RuntimeName = (Get-Content $LlamaSelectedFile -Raw).Trim()
+    if ($RuntimeName) {
+      $RuntimeDir = Join-Path $LlamaRuntimeRoot $RuntimeName
+      if (Test-Path $RuntimeDir) {
+        $Match = Find-LlamaServerInDir -Directory $RuntimeDir
+        if (-not [string]::IsNullOrWhiteSpace($Match)) {
+          return $Match
+        }
+      }
+    }
+  }
+
+  if (Test-Path $LlamaRuntimeRoot) {
+    return Find-LlamaServerInDir -Directory $LlamaRuntimeRoot
+  }
+
+  return ""
+}
+
+function Find-InstalledLlamaServer {
+  foreach ($Name in Get-LlamaExecutableNames) {
+    $Command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($null -ne $Command) {
+      return $Command.Source
+    }
+  }
+
+  return Find-InstalledLocalLlamaServer
 }
 
 function Assert-ArchiveSha256 {
@@ -337,11 +624,16 @@ function Write-LlamaRuntimeAction {
 }
 
 function Ensure-LlamaRuntime {
+  $LocalInstalled = Find-InstalledLocalLlamaServer
+  if (-not [string]::IsNullOrWhiteSpace($LocalInstalled)) {
+    Write-GreenCheck "llama.cpp runtime - already done"
+    Add-Summary "OK: llama-server at $LocalInstalled"
+    return
+  }
+
   $Installed = Find-InstalledLlamaServer
   if (-not [string]::IsNullOrWhiteSpace($Installed)) {
-    Write-GreenCheck "llama.cpp runtime - already done"
-    Add-Summary "OK: llama-server at $Installed"
-    return
+    Add-Summary "OK: llama-server command at $Installed"
   }
 
   $Definitions = @(Get-LlamaRuntimeDefinitions)
@@ -357,6 +649,11 @@ function Ensure-LlamaRuntime {
   }
 
   $SelectedKeys = [System.Collections.Generic.List[string]]::new()
+  foreach ($Definition in $Definitions) {
+    if ($Definition.Key.StartsWith("macos-")) {
+      [void]$SelectedKeys.Add($Definition.Key)
+    }
+  }
 
   while ($true) {
     Write-Host ""
@@ -415,8 +712,7 @@ function Ensure-LlamaRuntime {
               if (-not (Test-Path $ExpectedPath)) {
                 return $false
               }
-              $Match = Get-ChildItem -Path $ExpectedPath -Filter "llama-server*" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-              return $null -ne $Match
+              return -not [string]::IsNullOrWhiteSpace((Find-LlamaServerInDir -Directory $ExpectedPath))
             } -ExpectedResult "llama-server exists under native/llama-runtimes/$($Selected.Folder)"
           }
         }
@@ -429,6 +725,11 @@ function Ensure-LlamaRuntime {
     }
 
     if ($SelectionText -eq "s") {
+      $Installed = Find-InstalledLlamaServer
+      if (-not [string]::IsNullOrWhiteSpace($Installed)) {
+        Add-Summary "OK: llama-server at $Installed"
+        return
+      }
       Invoke-WaitForUserAction -Label "llama-server" -Check {
         -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer))
       } -ExpectedResult "llama-server is available on PATH or under native/llama-runtimes"
@@ -805,8 +1106,8 @@ function Print-InstallTasks {
   Write-TaskStatus "go" { Test-Command "go" } "available" "needs install"
   Write-TaskStatus "curl" { Test-Command "curl" } "available" "needs install"
   Write-TaskStatus "uv" { Test-Command "uv" } "available" "needs install"
-  Write-TaskStatus "litert-lm" { Test-Command "litert-lm" } "available" "needs install"
-  Write-TaskStatus "llama.cpp runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLlamaServer)) } "available" "needs selection or manual install"
+  Write-TaskStatus "LiteRT runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLocalLiteRtLm)) } "available" "needs selection or manual install"
+  Write-TaskStatus "llama.cpp runtime" { -not [string]::IsNullOrWhiteSpace((Find-InstalledLocalLlamaServer)) } "available" "needs selection or manual install"
   Write-TaskStatus "Bun dependencies" {
     (Test-Path (Join-Path $RepoRoot "bun.lock")) -and
     (Test-Path (Join-Path $RepoRoot "node_modules")) -and
@@ -843,7 +1144,7 @@ Ensure-Dependency "bun" "bun" $BunCommand
 Ensure-Dependency "go" "go" $GoCommand
 Ensure-Dependency "curl" "curl" $CurlCommand
 Ensure-Dependency "uv" "uv" $UvCommand
-Ensure-Dependency "litert-lm" "litert-lm" "uv tool install litert-lm"
+Ensure-LiteRtRuntime
 Ensure-LlamaRuntime
 
 Ensure-BunDependencies

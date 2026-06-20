@@ -84,6 +84,18 @@ describe("root launcher scripts", () => {
     }
   });
 
+  it("makes installed LiteRT runtimes discoverable by the sidecar", () => {
+    for (const scriptName of ["launch-sidecar.sh", "launch-sidecar.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toMatch(/native[\\/]+litert-runtimes/);
+      expect(contents).toContain("LITERT_RUNTIME");
+      expect(contents).toContain("LITERT_LM_BIN");
+      expect(contents).toContain("litert-lm");
+      expect(contents).toContain("-runtime-exe");
+    }
+  });
+
   it("opens individual launchers in separate terminal windows", () => {
     for (const scriptName of ["launch-webui.sh", "launch-sidecar.sh"]) {
       const contents = readRootScript(scriptName);

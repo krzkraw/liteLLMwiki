@@ -5,9 +5,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 models_nextcloud="${MODELS_NEXTCLOUD:-}"
 models_nextcloud_base=""
 models_nextcloud_token=""
+litert_runtime_root="$repo_root/native/litert-runtimes"
+litert_selected_file="$litert_runtime_root/.selected"
+litert_package_spec="litert-lm==0.13.1"
 llama_runtime_root="$repo_root/native/llama-runtimes"
 llama_selected_file="$llama_runtime_root/.selected"
-llama_release_base="https://github.com/ggml-org/llama.cpp/releases/download/b9724"
+llama_release_base="https://github.com/ggml-org/llama.cpp/releases/download/b9736"
 ansiGreen=""
 ansiReset=""
 summary=()
@@ -181,6 +184,263 @@ nextcloud_model_url() {
   printf '%s/public.php/webdav/%s\n' "$models_nextcloud_base" "$share_path"
 }
 
+litert_executable_name() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'litert-lm.exe\n' ;;
+    *) printf 'litert-lm\n' ;;
+  esac
+}
+
+litert_runtime_spec() {
+  local key="$1"
+
+  case "$key" in
+    litert-macos-arm64)
+      printf 'litert-macos-arm64|LiteRT-LM macOS Apple Silicon|%s|https://pypi.org/project/litert-lm/0.13.1/\n' "$litert_package_spec"
+      ;;
+    litert-macos-x64)
+      printf 'litert-macos-x64|LiteRT-LM macOS Intel|%s|https://pypi.org/project/litert-lm/0.13.1/\n' "$litert_package_spec"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+litert_available_options() {
+  local os_name
+  local arch_name
+
+  os_name="$(uname -s)"
+  arch_name="$(uname -m)"
+
+  case "$os_name:$arch_name" in
+    Darwin:arm64|Darwin:aarch64) printf 'litert-macos-arm64\n' ;;
+    Darwin:x86_64|Darwin:amd64) printf 'litert-macos-x64\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+find_litert_lm_in_dir() {
+  local dir="$1"
+  local executable_name
+
+  executable_name="$(litert_executable_name)"
+  find "$dir" -type f -name "$executable_name" -print -quit
+}
+
+installed_local_litert_lm() {
+  local runtime_name
+  local selected_dir
+
+  if [[ -f "$litert_selected_file" ]]; then
+    runtime_name="$(tr -d '\r\n' < "$litert_selected_file")"
+    selected_dir="$litert_runtime_root/$runtime_name"
+    if [[ -d "$selected_dir" ]]; then
+      find_litert_lm_in_dir "$selected_dir"
+      return 0
+    fi
+  fi
+
+  if [[ -d "$litert_runtime_root" ]]; then
+    find_litert_lm_in_dir "$litert_runtime_root"
+  fi
+}
+
+installed_litert_lm() {
+  if [[ -n "${LITERT_LM_BIN:-}" && -f "${LITERT_LM_BIN:-}" ]]; then
+    printf '%s\n' "$LITERT_LM_BIN"
+    return 0
+  fi
+
+  installed_local_litert_lm && return 0
+
+  if has_command litert-lm; then
+    command -v litert-lm
+  fi
+}
+
+print_litert_runtime_action() {
+  local key="$1"
+  local spec folder label package_spec url
+
+  spec="$(litert_runtime_spec "$key")"
+  IFS='|' read -r folder label package_spec url <<< "$spec"
+
+  printf '\nLiteRT runtime needs to be installed downloaded, here is the command or URL I would use:\n'
+  printf 'Runtime: %s\nFolder: native/litert-runtimes/%s\nPackage: %s\nURL: %s\n' "$label" "$folder" "$package_spec" "$url"
+  printf 'Command: UV_TOOL_DIR="native/litert-runtimes/%s/tool" UV_TOOL_BIN_DIR="native/litert-runtimes/%s/bin" uv tool install --force %s\n' "$folder" "$folder" "$package_spec"
+  printf 'Fallback command: uv tool install %s\n' "$package_spec"
+}
+
+install_litert_runtime() {
+  local key="$1"
+  local spec folder label package_spec url
+  local target_dir tool_dir bin_dir
+
+  spec="$(litert_runtime_spec "$key")"
+  IFS='|' read -r folder label package_spec url <<< "$spec"
+  target_dir="$litert_runtime_root/$folder"
+  tool_dir="$target_dir/tool"
+  bin_dir="$target_dir/bin"
+
+  print_litert_runtime_action "$key"
+
+  if ! mkdir -p "$litert_runtime_root"; then
+    return 1
+  fi
+  if ! rm -rf "$target_dir"; then
+    return 1
+  fi
+  if ! mkdir -p "$tool_dir" "$bin_dir"; then
+    return 1
+  fi
+  if ! UV_TOOL_DIR="$tool_dir" UV_TOOL_BIN_DIR="$bin_dir" uv tool install --force "$package_spec"; then
+    rm -rf "$target_dir"
+    return 1
+  fi
+  find "$target_dir" -type f -name 'litert-lm*' -exec chmod +x {} + 2>/dev/null || true
+  if ! printf '%s\n' "$folder" > "$litert_selected_file"; then
+    return 1
+  fi
+  add_summary "OK: LiteRT runtime $folder"
+}
+
+ensure_litert_runtime() {
+  local local_installed installed
+  local options=()
+  local selected=()
+  local option
+  local spec folder label package_spec url
+  local input token index checked found selected_option
+  local new_selected=()
+  local primary_key primary_folder
+
+  local_installed="$(installed_local_litert_lm || true)"
+  if [[ -n "$local_installed" ]]; then
+    print_green_check "LiteRT runtime - already done"
+    add_summary "OK: litert-lm at $local_installed"
+    return 0
+  fi
+
+  installed="$(installed_litert_lm || true)"
+  if [[ -n "$installed" ]]; then
+    add_summary "OK: litert-lm command at $installed"
+  fi
+
+  while IFS= read -r option; do
+    options+=("$option")
+    selected+=("$option")
+  done < <(litert_available_options || true)
+
+  if [[ "${#options[@]}" -eq 0 ]]; then
+    ensure_optional_tool "litert-lm" "litert-lm" "uv tool install $litert_package_spec" "uv tool install $litert_package_spec"
+    return 0
+  fi
+
+  while true; do
+    printf '\nLiteRT runtime needs to be installed downloaded. Select one or more runtimes:\n'
+    for index in "${!options[@]}"; do
+      option="${options[$index]}"
+      spec="$(litert_runtime_spec "$option")"
+      IFS='|' read -r folder label package_spec url <<< "$spec"
+      checked='[ ]'
+      if [[ "${#selected[@]}" -gt 0 ]]; then
+        for selected_option in "${selected[@]}"; do
+          if [[ "$selected_option" == "$option" ]]; then
+            checked='[x]'
+            break
+          fi
+        done
+      fi
+      printf '  %d) %s %s: %s -> native/litert-runtimes/%s\n' "$((index + 1))" "$checked" "$option" "$label" "$folder"
+      printf '      %s\n' "$url"
+    done
+    printf '  a: toggle all\n'
+    printf '  c: continue\n'
+    printf '  s: skip, I will install litert-lm myself and press Enter\n'
+
+    printf 'Toggle numbers, a: toggle all, c: continue, s: skip: '
+    read -r input
+    input="${input:-c}"
+
+    case "$input" in
+      a|A)
+        if [[ "${#selected[@]}" -eq "${#options[@]}" ]]; then
+          selected=()
+        else
+          selected=("${options[@]}")
+        fi
+        ;;
+      c|C)
+        if [[ "${#selected[@]}" -eq 0 ]]; then
+          printf 'Select at least one runtime, or use s to skip.\n'
+          continue
+        fi
+        primary_key="${selected[0]}"
+        printf 'Selected LiteRT runtimes will be installed now.\n'
+        for option in "${selected[@]}"; do
+          spec="$(litert_runtime_spec "$option")"
+          IFS='|' read -r folder _ <<< "$spec"
+          if install_litert_runtime "$option"; then
+            :
+          else
+            printf 'The task failed. Here is the command or URL again:\n'
+            print_litert_runtime_action "$option"
+            wait_for_user_action "LiteRT runtime $option" \
+              "test -n \"\$(find_litert_lm_in_dir '$litert_runtime_root/$folder' || true)\"" \
+              "litert-lm exists under native/litert-runtimes/$folder"
+          fi
+        done
+        spec="$(litert_runtime_spec "$primary_key")"
+        IFS='|' read -r primary_folder _ <<< "$spec"
+        printf '%s\n' "$primary_folder" > "$litert_selected_file"
+        return 0
+        ;;
+      s|S)
+        installed="$(installed_litert_lm || true)"
+        if [[ -n "$installed" ]]; then
+          add_summary "OK: litert-lm at $installed"
+          return 0
+        fi
+        wait_for_user_action "litert-lm" \
+          "command -v litert-lm >/dev/null 2>&1 || test -n \"\$(installed_litert_lm || true)\"" \
+          "litert-lm is available on PATH or under native/litert-runtimes"
+        add_summary "OK: litert-lm"
+        return 0
+        ;;
+      *)
+        input="${input//,/ }"
+        for token in $input; do
+          if [[ "$token" =~ ^[0-9]+$ ]] && [[ "$token" -ge 1 ]] && [[ "$token" -le "${#options[@]}" ]]; then
+            option="${options[$((token - 1))]}"
+            found=0
+            new_selected=()
+            if [[ "${#selected[@]}" -gt 0 ]]; then
+              for selected_option in "${selected[@]}"; do
+                if [[ "$selected_option" == "$option" ]]; then
+                  found=1
+                else
+                  new_selected+=("$selected_option")
+                fi
+              done
+            fi
+            selected=()
+            if [[ "${#new_selected[@]}" -gt 0 ]]; then
+              selected=("${new_selected[@]}")
+            fi
+            if [[ "$found" -eq 0 ]]; then
+              selected+=("$option")
+            fi
+          else
+            printf 'Unknown LiteRT runtime selection: %s\n' "$token"
+          fi
+        done
+        ;;
+    esac
+  done
+}
+
 llama_executable_name() {
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) printf 'llama-server.exe\n' ;;
@@ -193,37 +453,37 @@ llama_runtime_spec() {
 
   case "$key" in
     macos-arm64)
-      printf 'llama-macos-arm64|macOS Apple Silicon|%s/llama-b9724-bin-macos-arm64.tar.gz|sha256:b4582c69bc58e6b84d16105011d9431eeec9a0d1745d9ca8e48472a285db6b7f||\n' "$llama_release_base"
+      printf 'llama-macos-arm64|macOS Apple Silicon|%s/llama-b9736-bin-macos-arm64.tar.gz|sha256:caa5092f2f0442cf6f62e8e3308fdd58e603ca435cb801020adfc1830f79b328||\n' "$llama_release_base"
       ;;
     macos-x64)
-      printf 'llama-macos-x64|macOS Intel|%s/llama-b9724-bin-macos-x64.tar.gz|sha256:4fd4228bd23dbc6ae53805a89b1811861c1b9da5d2ff07bfd9a08fb5f0c87f6e||\n' "$llama_release_base"
+      printf 'llama-macos-x64|macOS Intel|%s/llama-b9736-bin-macos-x64.tar.gz|sha256:eef042e42534c567a80a8c032d358f6c7e0df410f2ae797e811e040bf688cc60||\n' "$llama_release_base"
       ;;
     win-cpu-x64)
-      printf 'llama-win-cpu-x64|Windows x64 CPU|%s/llama-b9724-bin-win-cpu-x64.zip|sha256:e06bafb4e1aaf3745be816d5d072cd965e52ef49ef8e9e93f031e196703780bf||\n' "$llama_release_base"
+      printf 'llama-win-cpu-x64|Windows x64 CPU|%s/llama-b9736-bin-win-cpu-x64.zip|sha256:fdd2971197e234a76fcbe5bae2763fcd70ed20123714beffe90473cc29843f58||\n' "$llama_release_base"
       ;;
     win-cpu-arm64)
-      printf 'llama-win-cpu-arm64|Windows arm64 CPU|%s/llama-b9724-bin-win-cpu-arm64.zip|sha256:092191286aa8c1d11e909308358e6ac9bd7b5dc83e01d71d96807f6b0cf948bf||\n' "$llama_release_base"
+      printf 'llama-win-cpu-arm64|Windows arm64 CPU|%s/llama-b9736-bin-win-cpu-arm64.zip|sha256:7729009da59df98d9f7dd86abdbb5807efa7863563bc95dc1a7cd42b61c23b90||\n' "$llama_release_base"
       ;;
     win-cuda12-x64)
-      printf 'llama-win-cuda-12.4-x64|Windows x64 CUDA 12.4|%s/llama-b9724-bin-win-cuda-12.4-x64.zip|sha256:913d47f80a3cad43fe95eda2ed0cf0dbd5fe01d758f66c097fa0a6138021729d|%s/cudart-llama-bin-win-cuda-12.4-x64.zip|sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6\n' "$llama_release_base" "$llama_release_base"
+      printf 'llama-win-cuda-12.4-x64|Windows x64 CUDA 12.4|%s/llama-b9736-bin-win-cuda-12.4-x64.zip|sha256:688b98a369b2c5b39580a0d62c0f92b570f9f90114205cc1ab5066bb999b0d53|%s/cudart-llama-bin-win-cuda-12.4-x64.zip|sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6\n' "$llama_release_base" "$llama_release_base"
       ;;
     win-cuda13-x64)
-      printf 'llama-win-cuda-13.3-x64|Windows x64 CUDA 13.3|%s/llama-b9724-bin-win-cuda-13.3-x64.zip|sha256:c16700717a20daebc12a2de2bf1ac711ba43f9565dac9d6fbcdf04099dde975a|%s/cudart-llama-bin-win-cuda-13.3-x64.zip|sha256:1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e\n' "$llama_release_base" "$llama_release_base"
+      printf 'llama-win-cuda-13.3-x64|Windows x64 CUDA 13.3|%s/llama-b9736-bin-win-cuda-13.3-x64.zip|sha256:47277e0c0d3864555cb4749a33995319200bc1246dd28bdc9efd7dfce3c44c7a|%s/cudart-llama-bin-win-cuda-13.3-x64.zip|sha256:1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e\n' "$llama_release_base" "$llama_release_base"
       ;;
     win-vulkan-x64)
-      printf 'llama-win-vulkan-x64|Windows x64 Vulkan|%s/llama-b9724-bin-win-vulkan-x64.zip|sha256:3e245e75f38477f9c99858cf149a3831988701090d156512eb143f2312b76b44||\n' "$llama_release_base"
+      printf 'llama-win-vulkan-x64|Windows x64 Vulkan|%s/llama-b9736-bin-win-vulkan-x64.zip|sha256:cddafebc991d1b8b4d2e00408391184eb4b9797f59982f0d6d1a5d6b575a37eb||\n' "$llama_release_base"
       ;;
     win-openvino-x64)
-      printf 'llama-win-openvino-2026.2-x64|Windows x64 OpenVINO|%s/llama-b9724-bin-win-openvino-2026.2-x64.zip|sha256:da36f6380bbeffddd4db58bfbc09077982c465d92123e943e6af679e8ed5d0ec||\n' "$llama_release_base"
+      printf 'llama-win-openvino-2026.2-x64|Windows x64 OpenVINO|%s/llama-b9736-bin-win-openvino-2026.2-x64.zip|sha256:01d40c9a54445b34b7718d0facc4f7a881e4200c5a5583cf7d73fcf6c5ade99e||\n' "$llama_release_base"
       ;;
     win-sycl-x64)
-      printf 'llama-win-sycl-x64|Windows x64 SYCL|%s/llama-b9724-bin-win-sycl-x64.zip|sha256:f660e83887af4a1c62742010a8064ab26aa9befacecaa5c86c6061ae68a3c04f||\n' "$llama_release_base"
+      printf 'llama-win-sycl-x64|Windows x64 SYCL|%s/llama-b9736-bin-win-sycl-x64.zip|sha256:599886013f00b12afad085cab237b0d457990f0772c98220600022edffca97d8||\n' "$llama_release_base"
       ;;
     win-hip-x64)
-      printf 'llama-win-hip-radeon-x64|Windows x64 HIP Radeon|%s/llama-b9724-bin-win-hip-radeon-x64.zip|sha256:2b861729d7b1620a7ee09ebc8681f2534be9da307f93fd68afb6410f160a016b||\n' "$llama_release_base"
+      printf 'llama-win-hip-radeon-x64|Windows x64 HIP Radeon|%s/llama-b9736-bin-win-hip-radeon-x64.zip|sha256:8abd90e7ed77ecdb76a1cb5778ac80b04ab1eb0b32c9979fcd7c520fa43b2eec||\n' "$llama_release_base"
       ;;
     win-opencl-adreno-arm64)
-      printf 'llama-win-opencl-adreno-arm64|Windows arm64 OpenCL Adreno|%s/llama-b9724-bin-win-opencl-adreno-arm64.zip|sha256:3e465918a49382fd466003e2d1658b261e87c68b8aa77c087a441ef3b7dee62c||\n' "$llama_release_base"
+      printf 'llama-win-opencl-adreno-arm64|Windows arm64 OpenCL Adreno|%s/llama-b9736-bin-win-opencl-adreno-arm64.zip|sha256:6234b6ce3ab2112295430e4ff13f9dba23a2751480b9f1f0e7766d5d2f0b380f||\n' "$llama_release_base"
       ;;
     *)
       return 1
@@ -308,6 +568,24 @@ find_llama_server_in_dir() {
   find "$dir" -type f -name "$executable_name" -print -quit
 }
 
+installed_local_llama_server() {
+  local runtime_name
+  local selected_dir
+
+  if [[ -f "$llama_selected_file" ]]; then
+    runtime_name="$(tr -d '\r\n' < "$llama_selected_file")"
+    selected_dir="$llama_runtime_root/$runtime_name"
+    if [[ -d "$selected_dir" ]]; then
+      find_llama_server_in_dir "$selected_dir"
+      return 0
+    fi
+  fi
+
+  if [[ -d "$llama_runtime_root" ]]; then
+    find_llama_server_in_dir "$llama_runtime_root"
+  fi
+}
+
 print_llama_runtime_action() {
   local key="$1"
   local spec folder label url sha256 extra_url extra_sha256
@@ -323,26 +601,12 @@ print_llama_runtime_action() {
 }
 
 installed_llama_server() {
-  local runtime_name
-  local selected_dir
-
   if has_command llama-server; then
     command -v llama-server
     return 0
   fi
 
-  if [[ -f "$llama_selected_file" ]]; then
-    runtime_name="$(tr -d '\r\n' < "$llama_selected_file")"
-    selected_dir="$llama_runtime_root/$runtime_name"
-    if [[ -d "$selected_dir" ]]; then
-      find_llama_server_in_dir "$selected_dir"
-      return 0
-    fi
-  fi
-
-  if [[ -d "$llama_runtime_root" ]]; then
-    find_llama_server_in_dir "$llama_runtime_root"
-  fi
+  installed_local_llama_server
 }
 
 install_llama_runtime() {
@@ -392,7 +656,7 @@ install_llama_runtime() {
 }
 
 ensure_llama_runtime() {
-  local installed
+  local local_installed installed
   local options=()
   local selected=()
   local option
@@ -401,15 +665,23 @@ ensure_llama_runtime() {
   local new_selected=()
   local primary_key primary_folder
 
+  local_installed="$(installed_local_llama_server || true)"
+  if [[ -n "$local_installed" ]]; then
+    print_green_check "llama.cpp runtime - already done"
+    add_summary "OK: llama-server at $local_installed"
+    return 0
+  fi
+
   installed="$(installed_llama_server || true)"
   if [[ -n "$installed" ]]; then
-    print_green_check "llama.cpp runtime - already done"
-    add_summary "OK: llama-server at $installed"
-    return 0
+    add_summary "OK: llama-server command at $installed"
   fi
 
   while IFS= read -r option; do
     options+=("$option")
+    case "$option" in
+      macos-*) selected+=("$option") ;;
+    esac
   done < <(llama_available_options || true)
 
   if [[ "${#options[@]}" -eq 0 ]]; then
@@ -482,6 +754,11 @@ ensure_llama_runtime() {
         return 0
         ;;
       s|S)
+        installed="$(installed_llama_server || true)"
+        if [[ -n "$installed" ]]; then
+          add_summary "OK: llama-server at $installed"
+          return 0
+        fi
         wait_for_user_action "llama-server" \
           "command -v llama-server >/dev/null 2>&1 || test -n \"\$(installed_llama_server || true)\"" \
           "llama-server is available on PATH or under native/llama-runtimes"
@@ -1007,8 +1284,8 @@ print_install_tasks() {
   print_task_status "go" "command -v go >/dev/null 2>&1" "available" "needs install"
   print_task_status "curl" "command -v curl >/dev/null 2>&1" "available" "needs install"
   print_task_status "uv" "command -v uv >/dev/null 2>&1" "available" "needs install"
-  print_task_status "litert-lm" "command -v litert-lm >/dev/null 2>&1" "available" "needs install"
-  print_task_status "llama.cpp runtime" "test -n \"\$(installed_llama_server || true)\"" "available" "needs selection or manual install"
+  print_task_status "LiteRT runtime" "test -n \"\$(installed_local_litert_lm || true)\"" "available" "needs selection or manual install"
+  print_task_status "llama.cpp runtime" "test -n \"\$(installed_local_llama_server || true)\"" "available" "needs selection or manual install"
   print_task_status "Bun dependencies" "test -f '$repo_root/bun.lock' && test -d '$repo_root/node_modules' && test -d '$repo_root/public/vendor/litert-lm/core/wasm'" "already installed" "needs bun install"
   print_model_task_statuses
   print_task_pending "bun test - will run"
@@ -1043,7 +1320,7 @@ main() {
   ensure_dependency "bun" "bun" "${bun_cmd:-curl -fsSL https://bun.com/install | bash}"
   ensure_dependency "go" "go" "${go_cmd:-Install Go from https://go.dev/dl/}"
   ensure_dependency "uv" "uv" "${uv_cmd:-curl -LsSf https://astral.sh/uv/install.sh | sh}"
-  ensure_optional_tool "litert-lm" "litert-lm" "uv tool install litert-lm" "uv tool install litert-lm"
+  ensure_litert_runtime
   ensure_llama_runtime
 
   ensure_bun_dependencies

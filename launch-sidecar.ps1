@@ -11,6 +11,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = $PSScriptRoot
+$LiteRtRuntimeRoot = Join-Path $RepoRoot "native\litert-runtimes"
+$LiteRtSelectedFile = Join-Path $LiteRtRuntimeRoot ".selected"
 $LlamaRuntimeRoot = Join-Path $RepoRoot "native\llama-runtimes"
 $LlamaSelectedFile = Join-Path $LlamaRuntimeRoot ".selected"
 $SidecarArgs = @()
@@ -262,6 +264,7 @@ if (-not $Inline) {
       "SIDECAR_IMPORT_MODEL",
       "SIDECAR_RUNTIME_VERBOSE",
       "SIDECAR_HEADLESS",
+      "LITERT_RUNTIME",
       "LLAMA_RUNTIME",
       "LLAMA_SERVER_BIN"
     )
@@ -313,6 +316,75 @@ function Get-DefaultSidecarBin {
   return Join-Path $RepoRoot "native\sidecar-artifacts\litert-sidecar-windows-$ArchSuffix\litert-sidecar.exe"
 }
 
+function Get-LiteRtExecutableNames {
+  if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+    return @("litert-lm.exe")
+  }
+
+  return @("litert-lm")
+}
+
+function Find-LiteRtLmBin {
+  if ($env:LITERT_LM_BIN -and (Test-Path $env:LITERT_LM_BIN)) {
+    return $env:LITERT_LM_BIN
+  }
+
+  if ($env:LITERT_RUNTIME) {
+    $RuntimeDir = Join-Path $LiteRtRuntimeRoot $env:LITERT_RUNTIME
+    if (Test-Path $RuntimeDir) {
+      foreach ($Name in Get-LiteRtExecutableNames) {
+        $Match = Get-ChildItem -Path $RuntimeDir -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $Match) {
+          return $Match.FullName
+        }
+      }
+    }
+  }
+
+  if (Test-Path $LiteRtSelectedFile) {
+    $RuntimeName = (Get-Content $LiteRtSelectedFile -Raw).Trim()
+    if ($RuntimeName) {
+      $RuntimeDir = Join-Path $LiteRtRuntimeRoot $RuntimeName
+      if (Test-Path $RuntimeDir) {
+        foreach ($Name in Get-LiteRtExecutableNames) {
+          $Match = Get-ChildItem -Path $RuntimeDir -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $Match) {
+            return $Match.FullName
+          }
+        }
+      }
+    }
+  }
+
+  if (Test-Path $LiteRtRuntimeRoot) {
+    foreach ($Name in Get-LiteRtExecutableNames) {
+      $Match = Get-ChildItem -Path $LiteRtRuntimeRoot -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($null -ne $Match) {
+        return $Match.FullName
+      }
+    }
+  }
+
+  return ""
+}
+
+function Add-LiteRtRuntimeToPath {
+  $LiteRtLmBin = Find-LiteRtLmBin
+  if (-not [string]::IsNullOrWhiteSpace($LiteRtLmBin)) {
+    $env:LITERT_LM_BIN = $LiteRtLmBin
+    $Directory = Split-Path -Parent $LiteRtLmBin
+    $env:PATH = "$Directory$([IO.Path]::PathSeparator)$env:PATH"
+  }
+}
+
+function Get-LlamaExecutableNames {
+  if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+    return @("llama-server.exe")
+  }
+
+  return @("llama-server")
+}
+
 function Find-LlamaServerBin {
   if ($env:LLAMA_SERVER_BIN -and (Test-Path $env:LLAMA_SERVER_BIN)) {
     return $env:LLAMA_SERVER_BIN
@@ -321,9 +393,11 @@ function Find-LlamaServerBin {
   if ($env:LLAMA_RUNTIME) {
     $RuntimeDir = Join-Path $LlamaRuntimeRoot $env:LLAMA_RUNTIME
     if (Test-Path $RuntimeDir) {
-      $Match = Get-ChildItem -Path $RuntimeDir -Filter "llama-server.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-      if ($null -ne $Match) {
-        return $Match.FullName
+      foreach ($Name in Get-LlamaExecutableNames) {
+        $Match = Get-ChildItem -Path $RuntimeDir -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $Match) {
+          return $Match.FullName
+        }
       }
     }
   }
@@ -333,18 +407,22 @@ function Find-LlamaServerBin {
     if ($RuntimeName) {
       $RuntimeDir = Join-Path $LlamaRuntimeRoot $RuntimeName
       if (Test-Path $RuntimeDir) {
-        $Match = Get-ChildItem -Path $RuntimeDir -Filter "llama-server.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $Match) {
-          return $Match.FullName
+        foreach ($Name in Get-LlamaExecutableNames) {
+          $Match = Get-ChildItem -Path $RuntimeDir -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $Match) {
+            return $Match.FullName
+          }
         }
       }
     }
   }
 
   if (Test-Path $LlamaRuntimeRoot) {
-    $Match = Get-ChildItem -Path $LlamaRuntimeRoot -Filter "llama-server.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $Match) {
-      return $Match.FullName
+    foreach ($Name in Get-LlamaExecutableNames) {
+      $Match = Get-ChildItem -Path $LlamaRuntimeRoot -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($null -ne $Match) {
+        return $Match.FullName
+      }
     }
   }
 
@@ -368,6 +446,7 @@ if ((-not $Tui) -and ($Headless -or ($env:SIDECAR_HEADLESS -match "^(1|true|yes)
 }
 
 Add-LlamaRuntimeToPath
+Add-LiteRtRuntimeToPath
 
 Add-ValueFlag "SIDECAR_ADDR" "-addr"
 Add-ValueFlag "SIDECAR_UPSTREAM" "-upstream"

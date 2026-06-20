@@ -119,13 +119,22 @@ while the installer waits and re-checks, or `N` to stop. If an attempted install
 or download fails, it prints the command or URL again and waits for you to
 complete it. Hugging Face tokens are prompted only for downloads that may need
 one and are kept in the current process environment.
-The installer also offers selectable llama.cpp runtime downloads for the
-current platform. Runtime archives are verified by SHA256 and extracted under
-`native/llama-runtimes/` into folders such as `llama-win-cpu-x64`,
-`llama-win-cuda-13.3-x64`, or `llama-macos-arm64`; CUDA choices also extract
-the matching CUDA DLL archive into the same folder. The launch scripts add the
-selected runtime to `PATH` before starting the sidecar. Override discovery with
-`LLAMA_RUNTIME=<folder-name>` or `LLAMA_SERVER_BIN=/path/to/llama-server`.
+The installer also offers selectable local runtime installs for the current
+platform. On macOS, the matching LiteRT-LM and llama.cpp runtime choices are
+preselected by default, so pressing Enter installs the local runtime folders
+even if Homebrew or a global uv tool already provides `litert-lm` or
+`llama-server` on `PATH`.
+
+LiteRT-LM runtimes are installed through uv under `native/litert-runtimes/` into
+folders such as `litert-macos-arm64`. llama.cpp runtime archives are verified
+by SHA256 and extracted under `native/llama-runtimes/` into folders such as
+`llama-win-cpu-x64`, `llama-win-cuda-13.3-x64`, or `llama-macos-arm64`; CUDA
+choices also extract the matching CUDA DLL archive into the same folder. The
+launch scripts add the selected runtime folders to `PATH` before starting the
+sidecar and pass the selected local `litert-lm` with `-runtime-exe`. Override
+discovery with `LITERT_RUNTIME=<folder-name>`,
+`LITERT_LM_BIN=/path/to/litert-lm`, `LLAMA_RUNTIME=<folder-name>`, or
+`LLAMA_SERVER_BIN=/path/to/llama-server`.
 
 ## Web Model
 

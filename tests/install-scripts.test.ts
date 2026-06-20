@@ -90,7 +90,8 @@ describe("interactive installer scripts", () => {
       expect(contents).toContain("llama-server");
       expect(contents).not.toContain("Playwright Chromium");
       expect(contents).not.toContain("bunx playwright install chromium");
-      expect(contents).toContain("uv tool install litert-lm");
+      expect(contents).toContain("uv tool install");
+      expect(contents).toContain("litert-lm==0.13.1");
     }
   });
 
@@ -102,9 +103,38 @@ describe("interactive installer scripts", () => {
       expect(contents).toContain("llama-win-cpu-x64");
       expect(contents).toContain("llama-win-cuda-13.3-x64");
       expect(contents).toContain("cudart-llama-bin-win-cuda-13.3-x64.zip");
-      expect(contents).toContain("llama-b9724-bin-macos-arm64.tar.gz");
+      expect(contents).toContain("llama-b9736-bin-macos-arm64.tar.gz");
+      expect(contents).toContain("sha256:caa5092f2f0442cf6f62e8e3308fdd58e603ca435cb801020adfc1830f79b328");
       expect(contents).toContain("sha256:");
     }
+  });
+
+  it("offers selectable LiteRT runtime installs with local macOS runtime folders", () => {
+    for (const scriptName of ["install.sh", "install.ps1"]) {
+      const contents = readRootScript(scriptName);
+
+      expect(contents).toContain("native/litert-runtimes");
+      expect(contents).toContain("litert-macos-arm64");
+      expect(contents).toContain("litert-macos-x64");
+      expect(contents).toContain("litert-lm==0.13.1");
+      expect(contents).toContain("UV_TOOL_DIR");
+      expect(contents).toContain("UV_TOOL_BIN_DIR");
+      expect(contents).toContain("Selected LiteRT runtimes will be installed now.");
+    }
+  });
+
+  it("offers local runtime selectors even when runtime commands exist on PATH", () => {
+    const shell = readRootScript("install.sh");
+    const powershell = readRootScript("install.ps1");
+
+    expect(shell).toContain("installed_local_llama_server");
+    expect(shell).toContain("installed_local_litert_lm");
+    expect(shell).toContain('add_summary "OK: llama-server command at $installed"');
+    expect(shell).toContain('add_summary "OK: litert-lm command at $installed"');
+    expect(powershell).toContain("Find-InstalledLocalLlamaServer");
+    expect(powershell).toContain("Find-InstalledLocalLiteRtLm");
+    expect(powershell).toContain('Add-Summary "OK: llama-server command at $Installed"');
+    expect(powershell).toContain('Add-Summary "OK: litert-lm command at $Installed"');
   });
 
   it("uses a checkbox-style llama.cpp runtime selector", () => {

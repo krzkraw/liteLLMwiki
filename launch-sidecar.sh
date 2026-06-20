@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+litert_runtime_root="$repo_root/native/litert-runtimes"
+litert_selected_file="$litert_runtime_root/.selected"
 llama_runtime_root="$repo_root/native/llama-runtimes"
 llama_selected_file="$llama_runtime_root/.selected"
 
@@ -83,6 +85,7 @@ launcher_env_assignments() {
     SIDECAR_LAUNCH_RUNTIME \
     SIDECAR_IMPORT_MODEL \
     SIDECAR_RUNTIME_VERBOSE \
+    LITERT_RUNTIME \
     LLAMA_RUNTIME \
     LLAMA_SERVER_BIN
   do
@@ -184,6 +187,59 @@ llama_executable_name() {
   esac
 }
 
+litert_executable_name() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'litert-lm.exe\n' ;;
+    *) printf 'litert-lm\n' ;;
+  esac
+}
+
+find_litert_lm_bin() {
+  local executable_name
+  local runtime_name
+  local candidate
+
+  executable_name="$(litert_executable_name)"
+
+  if [[ -n "${LITERT_LM_BIN:-}" && -f "${LITERT_LM_BIN:-}" ]]; then
+    printf '%s\n' "$LITERT_LM_BIN"
+    return 0
+  fi
+
+  if [[ -n "${LITERT_RUNTIME:-}" ]]; then
+    candidate="$litert_runtime_root/$LITERT_RUNTIME"
+    if [[ -d "$candidate" ]]; then
+      find "$candidate" -type f -name "$executable_name" -print -quit
+      return 0
+    fi
+  fi
+
+  if [[ -f "$litert_selected_file" ]]; then
+    runtime_name="$(tr -d '\r\n' < "$litert_selected_file")"
+    candidate="$litert_runtime_root/$runtime_name"
+    if [[ -d "$candidate" ]]; then
+      find "$candidate" -type f -name "$executable_name" -print -quit
+      return 0
+    fi
+  fi
+
+  if [[ -d "$litert_runtime_root" ]]; then
+    find "$litert_runtime_root" -type f -name "$executable_name" -print -quit
+  fi
+}
+
+configure_litert_runtime_bin() {
+  local litert_lm_bin
+  local litert_lm_dir
+
+  litert_lm_bin="$(find_litert_lm_bin || true)"
+  if [[ -n "$litert_lm_bin" ]]; then
+    export LITERT_LM_BIN="$litert_lm_bin"
+    litert_lm_dir="$(dirname "$litert_lm_bin")"
+    export PATH="$litert_lm_dir:$PATH"
+  fi
+}
+
 find_llama_server_bin() {
   local executable_name
   local runtime_name
@@ -247,6 +303,8 @@ if [[ "${LITERT_SIDECAR_TUI:-}" != "1" ]]; then
 fi
 
 prepend_llama_runtime_path
+
+configure_litert_runtime_bin
 
 add_value_flag "SIDECAR_ADDR" "-addr"
 add_value_flag "SIDECAR_UPSTREAM" "-upstream"

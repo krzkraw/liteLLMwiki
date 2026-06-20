@@ -23,8 +23,8 @@ The interactive TUI starts lazy: it does not create or start a default runtime
 runner before the user chooses one in the Launch Wizard. Headless mode preserves
 the legacy default LiteRT runner startup for browser smoke tests and automation.
 
-The TUI is currently focused on the native runner basics. It shows only a
-Dashboard tab, a Launch Wizard tab, and runner tabs created from the wizard.
+The TUI is currently focused on the native runner basics. It shows a Dashboard
+tab, a Launch Wizard tab, a Setup tab, and runner tabs created from the wizard.
 Chat, Models, Logs, and Settings tabs are intentionally hidden while the native
 runner workflow is being stabilized. The status header reports LiteRT and
 llama.cpp independently as green `active` or red `idle` based on whether each
@@ -50,10 +50,18 @@ key-select the runtime (`litert` or `llamacpp`), a runtime variant, model role
 (`main`, `embedding`, or `reranking`), and one locally installed matching model.
 LiteRT variants are `cpu`, `gpu`, and `npu`. llama.cpp variants are shown as
 `cpu`, `gpu`, `openvino`, `cuda13`, `cuda12`, and `sycl`, and are mapped to
-installed folders under `native/llama-runtimes`. Pressing Enter or clicking
-`START` creates and starts a runner. New runner tabs are inserted after the
-Launch Wizard and are named by runtime and role, such as `LR-M-1`, `LM-E-1`,
-or `LM-R-1`; numbering is per role.
+installed folders under `native/llama-runtimes`. Variants disabled in the Setup
+tab are hidden immediately. Pressing Enter or clicking `START` creates and
+starts a runner. New runner tabs are inserted after the Setup tab and are named
+by runtime and role, such as `LR-M-1`, `LM-E-1`, or `LM-R-1`; numbering is per
+role.
+
+The Setup tab shows LiteRT backends (`cpu`, `gpu`, `npu`) and llama.cpp backend
+types (`cpu`, `gpu`, `openvino`, `cuda13`, `cuda12`, `sycl`) with their current
+enabled or disabled state from `native/runtime-config/backends.json`.
+Up/Down selects a backend row, and Enter or Space toggles it. Toggling writes
+`working: true` for enabled or `working: false` for disabled, creating the local
+backend config file when it does not exist.
 
 Runner tabs show basic status and route/control panels with runtime, role,
 backend, model, upstream, PID, and `s`/`x`/`r` start/stop/restart actions.

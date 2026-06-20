@@ -108,7 +108,9 @@ discovered llama.cpp runtime backend types under `native/llama-runtimes/`.
 Before each test, the script prints the command it plans to use and lets you
 edit it; an empty response runs the default. Results are written to the ignored
 local file `native/runtime-config/backends.json`. Backends marked not working
-are hidden from the sidecar TUI Launch Wizard. Override test models with
+are hidden from the sidecar TUI Launch Wizard. The sidecar TUI Setup tab can
+also enable or disable the same LiteRT and llama.cpp backend entries and writes
+the same local config file. Override test models with
 `LITERT_TEST_MODEL` and `LLAMA_TEST_MODEL`, or pass the matching script
 parameters.
 

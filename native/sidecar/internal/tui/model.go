@@ -31,11 +31,12 @@ const (
 	dashboardModelEmbedX  = 33
 	dashboardModelRerankX = 49
 
-	wizardRuntimeLlamaX  = 24
-	wizardRoleMainX      = 18
-	wizardRoleEmbeddingX = 25
-	wizardRoleRerankingX = 37
-	wizardStartX         = 6
+	wizardRuntimeLlamaX   = 24
+	wizardRoleMainX       = 18
+	wizardRoleEmbeddingX  = 25
+	wizardRoleRerankingX  = 37
+	wizardStartX          = 6
+	setupBackendFirstLine = 3
 
 	runnerBottomStartX   = 63
 	runnerBottomStopX    = 73
@@ -137,6 +138,12 @@ type llamaRuntimeVariant struct {
 	Executable string
 }
 
+type setupBackendRow struct {
+	Runtime      string
+	RuntimeLabel string
+	Backend      string
+}
+
 type Model struct {
 	runtimeController server.RuntimeController
 	runnerController  server.RunnerController
@@ -171,6 +178,7 @@ type Model struct {
 	llamaRuntimeVariants   []llamaRuntimeVariant
 	backendConfigPath      string
 	backendStatus          runtimeconfig.Status
+	setupSelection         int
 	dashboardModelDropdown string
 	globalMenuOpen         bool
 	globalPaletteMenuOpen  bool
@@ -444,6 +452,8 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.updateDashboardMouse(msg.X, msg.Y), nil
 	case "wizard":
 		return m.updateWizardMouse(msg.X, msg.Y)
+	case "setup":
+		return m.updateSetupMouse(msg.X, msg.Y), nil
 	default:
 		return m, nil
 	}
@@ -618,6 +628,15 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateSetupMouse(_ int, y int) Model {
+	index, ok := m.setupBackendIndexFromMouse(y)
+	if !ok {
+		return m
+	}
+	m.setupSelection = index
+	return m.toggleSelectedSetupBackend()
+}
+
 func (m Model) tabBarRow() int {
 	return viewLineCount(m.headerView())
 }
@@ -654,6 +673,15 @@ func (m Model) wizardModelIndexFromMouse(x int, y int) (int, bool) {
 	return index, true
 }
 
+func (m Model) setupBackendIndexFromMouse(y int) (int, bool) {
+	rows := setupBackendRows()
+	row := y - panelContentRow(m.contentTopRow(), setupBackendFirstLine)
+	if row < 0 || row >= len(rows) {
+		return 0, false
+	}
+	return row, true
+}
+
 func (m Model) wizardLocalModelStartRow() int {
 	if m.usesWidePanelGrid() {
 		return panelContentRow(m.contentTopRow(), 0)
@@ -679,6 +707,11 @@ func panelContentRow(panelTop int, line int) int {
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.activeTabID() == "setup" {
+		if next, cmd, ok := m.updateSetupKey(msg); ok {
+			return next, cmd
+		}
+	}
 	if m.managedScreen {
 		if next, ok := m.updateScrollKey(msg); ok {
 			return next, nil
@@ -881,6 +914,26 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) updateSetupKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.Type {
+	case tea.KeyUp:
+		m.setupSelection--
+		m.clampSetupSelection()
+		return m, nil, true
+	case tea.KeyDown:
+		m.setupSelection++
+		m.clampSetupSelection()
+		return m, nil, true
+	case tea.KeyEnter, tea.KeySpace:
+		return m.toggleSelectedSetupBackend(), nil, true
+	case tea.KeyRunes:
+		if msg.String() == " " {
+			return m.toggleSelectedSetupBackend(), nil, true
+		}
+	}
+	return m, nil, false
 }
 
 func (m Model) updateScrollKey(msg tea.KeyMsg) (Model, bool) {
@@ -1091,6 +1144,8 @@ func (m Model) activeContentView() string {
 		return m.dashboardView()
 	case "wizard":
 		return m.wizardView()
+	case "setup":
+		return m.setupView()
 	default:
 		if runner, ok := m.activeRunner(); ok {
 			return m.runnerView(runner)
@@ -1167,6 +1222,7 @@ func (m Model) tabs() []tab {
 	result := []tab{
 		{id: "dashboard", label: "Dashboard"},
 		{id: "wizard", label: "Launch Wizard"},
+		{id: "setup", label: "Setup"},
 	}
 	for _, runner := range m.snapshot.Runners {
 		label := runner.ID
@@ -1239,6 +1295,7 @@ func (m *Model) refresh() {
 	m.llamaRuntimeVariants = m.filterLlamaRuntimeVariants(
 		discoverLlamaRuntimeVariants(m.llamaRuntimeRoot),
 	)
+	m.clampSetupSelection()
 	m.normalizeWizardSelection()
 	if m.active >= len(m.tabs()) {
 		m.active = 0
@@ -1426,6 +1483,8 @@ func (m Model) activeMissionLine() string {
 		return "◆ Dashboard / status.get + /sidecar/v1/status"
 	case "wizard":
 		return "◇ Launch Wizard / RunnerController.CreateRunner"
+	case "setup":
+		return "◇ Setup / native/runtime-config/backends.json"
 	case "chat":
 		if runner, ok := m.selectedChatRunner(); ok {
 			return "● Chat / " + runner.ID + " -> /v1/chat/completions"
@@ -1579,6 +1638,8 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 		items = append(items, bottomActionSegment{id: "hint", label: "Dashboard: click model roles"})
 	case "wizard":
 		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | Enter Start"})
+	case "setup":
+		items = append(items, bottomActionSegment{id: "hint", label: "Setup: Up/Down select | Enter toggle"})
 	default:
 		if runner, ok := m.activeRunner(); ok {
 			items = append(
@@ -1640,6 +1701,13 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 			"Launch Wizard: t Runtime | b Variant | m/e/r Role | n/p Model | Enter create",
 			"API: RunnerController.CreateRunner + POST /sidecar/v1/runners",
 			"API: WebSocket api.request POST /sidecar/v1/runners",
+		)
+	case "setup":
+		lines = append(
+			lines,
+			"Setup: Up/Down backend | Enter/Space toggle enabled state",
+			"Config: "+m.backendConfigPath,
+			"Launch Wizard reads the updated runtime backend status immediately",
 		)
 	case "chat":
 		lines = append(
@@ -1719,6 +1787,107 @@ func (m Model) dashboardStatusLines() []string {
 			m.presentModelCount("reranking"),
 		),
 	}
+}
+
+func (m Model) setupView() string {
+	return renderPanelSpec(
+		panelSpec{"Backend Setup", m.setupBackendLines(), "82"},
+		m.width,
+	)
+}
+
+func (m Model) setupBackendLines() []string {
+	rows := setupBackendRows()
+	selected := clampInt(m.setupSelection, 0, len(rows)-1)
+	lines := []string{
+		"Up/Down selects a backend; Enter/Space toggles enabled state.",
+		"Disabled backends are hidden from Launch Wizard choices.",
+		"Runtime     Backend   State",
+	}
+	for index, row := range rows {
+		marker := " "
+		if index == selected {
+			marker = ">"
+		}
+		lines = append(lines, fmt.Sprintf(
+			"%s %-10s %-9s %s",
+			marker,
+			row.RuntimeLabel,
+			row.Backend,
+			m.setupBackendState(row),
+		))
+	}
+	lines = append(lines, "", "Config: "+m.backendConfigPath)
+	return lines
+}
+
+func (m Model) setupBackendState(row setupBackendRow) string {
+	if m.backendStatus.Visible(row.Runtime, row.Backend) {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func (m Model) toggleSelectedSetupBackend() Model {
+	row, ok := m.selectedSetupBackend()
+	if !ok {
+		return m
+	}
+	nextWorking := !m.backendStatus.Visible(row.Runtime, row.Backend)
+	if err := runtimeconfig.SetBackendWorking(
+		m.backendConfigPath,
+		row.Runtime,
+		row.Backend,
+		nextWorking,
+	); err != nil {
+		m.notice = fmt.Sprintf("update %s/%s backend failed: %v", row.Runtime, row.Backend, err)
+		return m
+	}
+
+	m.refresh()
+	state := "disabled"
+	if nextWorking {
+		state = "enabled"
+	}
+	m.notice = fmt.Sprintf("%s %s/%s backend", state, row.Runtime, row.Backend)
+	return m
+}
+
+func (m Model) selectedSetupBackend() (setupBackendRow, bool) {
+	rows := setupBackendRows()
+	if len(rows) == 0 {
+		return setupBackendRow{}, false
+	}
+	index := clampInt(m.setupSelection, 0, len(rows)-1)
+	return rows[index], true
+}
+
+func (m *Model) clampSetupSelection() {
+	rows := setupBackendRows()
+	if len(rows) == 0 {
+		m.setupSelection = 0
+		return
+	}
+	m.setupSelection = clampInt(m.setupSelection, 0, len(rows)-1)
+}
+
+func setupBackendRows() []setupBackendRow {
+	rows := make([]setupBackendRow, 0, len(litertBackendOptions())+len(llamaTypeOptions()))
+	for _, backend := range litertBackendOptions() {
+		rows = append(rows, setupBackendRow{
+			Runtime:      "litert",
+			RuntimeLabel: "LiteRT",
+			Backend:      backend,
+		})
+	}
+	for _, backend := range llamaTypeOptions() {
+		rows = append(rows, setupBackendRow{
+			Runtime:      "llamacpp",
+			RuntimeLabel: "llama.cpp",
+			Backend:      backend,
+		})
+	}
+	return rows
 }
 
 func (m Model) roleAliveCount(role string) int {
@@ -1856,12 +2025,12 @@ func (m Model) latestLogSource() string {
 func (m Model) dashboardNextAction() string {
 	for index, runner := range m.snapshot.Runners {
 		if strings.EqualFold(runner.State, "running") {
-			return fmt.Sprintf("open runner tab %d %s or Models for downloads", index+2, runner.ID)
+			return fmt.Sprintf("open runner tab %d %s or Models for downloads", index+4, runner.ID)
 		}
 	}
 	for index, runner := range m.snapshot.Runners {
 		if strings.TrimSpace(runner.ID) != "" {
-			return fmt.Sprintf("open runner tab %d %s and press s to start", index+2, runner.ID)
+			return fmt.Sprintf("open runner tab %d %s and press s to start", index+4, runner.ID)
 		}
 	}
 	return "open Models and create a runner"

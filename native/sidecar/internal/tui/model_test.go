@@ -2,8 +2,10 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,7 +34,7 @@ func TestRunEnablesAlternateScreenAndMouseRenderer(t *testing.T) {
 	}
 }
 
-func TestModelStartsWithDashboardAndLaunchWizardOnly(t *testing.T) {
+func TestModelStartsWithDashboardLaunchWizardAndSetupOnly(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(ModelOptions{
@@ -50,6 +52,7 @@ func TestModelStartsWithDashboardAndLaunchWizardOnly(t *testing.T) {
 		"llama.cpp: idle",
 		"1 Dashboard",
 		"2 Launch Wizard",
+		"3 Setup",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("initial TUI missing %q:\n%s", expected, view)
@@ -474,6 +477,117 @@ func TestLaunchWizardHidesConfiguredNotWorkingBackends(t *testing.T) {
 	}
 }
 
+func TestSetupTabRendersBackendStatesFromConfig(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "backends.json")
+	config := `{
+  "version": 1,
+  "runtimes": {
+    "litert": {
+      "cpu": {"working": true},
+      "gpu": {"working": false}
+    },
+    "llamacpp": {
+      "cpu": {"working": false},
+      "openvino": {"working": true},
+      "cuda13": {"working": false}
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write backend config: %v", err)
+	}
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		BackendConfigPath: configPath,
+	})
+	model.setActiveTab("setup")
+	model.width = 140
+	model.height = 36
+
+	view := model.View()
+	compactView := compactSpaces(view)
+	for _, expected := range []string{
+		"3 Setup",
+		"Backend Setup",
+		"LiteRT cpu enabled",
+		"LiteRT gpu disabled",
+		"LiteRT npu enabled",
+		"llama.cpp cpu disabled",
+		"llama.cpp openvino enabled",
+		"llama.cpp cuda13 disabled",
+		"llama.cpp sycl enabled",
+	} {
+		if !strings.Contains(compactView, expected) {
+			t.Fatalf("setup tab missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestSetupToggleWritesConfigAndUpdatesWizardVisibilityImmediately(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "nested", "backends.json")
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cpu-x64"),
+		BackendConfigPath: configPath,
+	})
+	model.setActiveTab("setup")
+	model.width = 140
+	model.height = 36
+
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd != nil {
+		t.Fatalf("setup down key returned unexpected command")
+	}
+	model = next.(Model)
+	if model.setupSelection != 1 {
+		t.Fatalf("setup selection = %d, want gpu row", model.setupSelection)
+	}
+
+	next, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("setup enter returned unexpected command")
+	}
+	model = next.(Model)
+	if got := backendWorkingValue(t, configPath, "litert", "gpu"); got {
+		t.Fatal("setup toggle should write litert gpu working=false")
+	}
+	if got := model.litertBackendOptions(); !reflect.DeepEqual(got, []string{"cpu", "npu"}) {
+		t.Fatalf("litert backend options after disable = %#v, want cpu and npu", got)
+	}
+	model.setActiveTab("wizard")
+	wizardChoices := compactSpaces(strings.Join(model.wizardChoiceLines(), " "))
+	if strings.Contains(wizardChoices, "gpu") {
+		t.Fatalf("wizard should hide disabled gpu immediately:\n%s", strings.Join(model.wizardChoiceLines(), "\n"))
+	}
+
+	model.setActiveTab("setup")
+	next, cmd = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if cmd != nil {
+		t.Fatalf("setup space returned unexpected command")
+	}
+	model = next.(Model)
+	if got := backendWorkingValue(t, configPath, "litert", "gpu"); !got {
+		t.Fatal("setup toggle should write litert gpu working=true")
+	}
+	if got := model.litertBackendOptions(); !reflect.DeepEqual(got, []string{"cpu", "gpu", "npu"}) {
+		t.Fatalf("litert backend options after enable = %#v, want cpu, gpu, and npu", got)
+	}
+	model.setActiveTab("wizard")
+	wizardChoices = compactSpaces(strings.Join(model.wizardChoiceLines(), " "))
+	if !strings.Contains(wizardChoices, "LiteRT backend [cpu] gpu npu") {
+		t.Fatalf("wizard should show enabled gpu immediately:\n%s", strings.Join(model.wizardChoiceLines(), "\n"))
+	}
+}
+
 func TestLaunchWizardOptionBarsDoNotUseDecorativeDashesOrTextFainting(t *testing.T) {
 	t.Parallel()
 
@@ -708,7 +822,7 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	if updated.activeTabID() != "runner:LM-R-1" {
 		t.Fatalf("active tab = %q, want new runner tab", updated.activeTabID())
 	}
-	if !strings.Contains(updated.View(), "3 ● LM-R-1") {
+	if !strings.Contains(updated.View(), "4 ● LM-R-1") {
 		t.Fatalf("new runner tab missing:\n%s", updated.View())
 	}
 }
@@ -729,9 +843,10 @@ func TestRunnerTabsAreInsertedAfterLaunchWizardAndNumberedByRole(t *testing.T) {
 	for _, expected := range []string{
 		"1 Dashboard",
 		"2 Launch Wizard",
-		"3 ● LR-M-1",
-		"4 ● LM-E-1",
-		"5 ◐ LM-M-2",
+		"3 Setup",
+		"4 ● LR-M-1",
+		"5 ● LM-E-1",
+		"6 ◐ LM-M-2",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("tab order missing %q:\n%s", expected, view)
@@ -793,6 +908,37 @@ func lineContainsAll(view string, parts ...string) bool {
 
 func compactSpaces(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func backendWorkingValue(
+	t *testing.T,
+	path string,
+	runtimeName string,
+	backend string,
+) bool {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read backend config: %v", err)
+	}
+	var decoded struct {
+		Runtimes map[string]map[string]struct {
+			Working bool `json:"working"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("decode backend config: %v", err)
+	}
+	runtimeResults, ok := decoded.Runtimes[runtimeName]
+	if !ok {
+		t.Fatalf("runtime %q missing from config %#v", runtimeName, decoded.Runtimes)
+	}
+	result, ok := runtimeResults[backend]
+	if !ok {
+		t.Fatalf("backend %q missing from config %#v", backend, runtimeResults)
+	}
+	return result.Working
 }
 
 func leftClick(x int, y int) tea.MouseMsg {

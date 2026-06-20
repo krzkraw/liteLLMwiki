@@ -169,6 +169,7 @@ type Model struct {
 	llamaRuntimeVariants   []llamaRuntimeVariant
 	dashboardModelDropdown string
 	globalMenuOpen         bool
+	paletteID              string
 }
 
 var panelBorder = lipgloss.RoundedBorder()
@@ -198,6 +199,112 @@ var (
 			Foreground(lipgloss.Color("244"))
 )
 
+type tuiPalette struct {
+	id       string
+	label    string
+	header   string
+	footerBG string
+	footerFG string
+	menu     string
+
+	runtimeBG       string
+	runtimeHeader   string
+	runtimeButton   string
+	runtimeSelected string
+
+	variantBG       string
+	variantHeader   string
+	variantButton   string
+	variantSelected string
+
+	roleBG       string
+	roleHeader   string
+	roleButton   string
+	roleSelected string
+
+	modelBG       string
+	modelSelected string
+	actionBG      string
+	actionFG      string
+}
+
+func tuiPalettes() []tuiPalette {
+	return []tuiPalette{
+		{
+			id:              "neon",
+			label:           "Neon",
+			header:          "45",
+			footerBG:        "17",
+			footerFG:        "250",
+			menu:            "39",
+			runtimeBG:       "17",
+			runtimeHeader:   "51",
+			runtimeButton:   "80",
+			runtimeSelected: "45",
+			variantBG:       "53",
+			variantHeader:   "219",
+			variantButton:   "213",
+			variantSelected: "201",
+			roleBG:          "58",
+			roleHeader:      "229",
+			roleButton:      "222",
+			roleSelected:    "214",
+			modelBG:         "22",
+			modelSelected:   "82",
+			actionBG:        "28",
+			actionFG:        "16",
+		},
+		{
+			id:              "amber",
+			label:           "Amber",
+			header:          "214",
+			footerBG:        "94",
+			footerFG:        "230",
+			menu:            "214",
+			runtimeBG:       "58",
+			runtimeHeader:   "229",
+			runtimeButton:   "222",
+			runtimeSelected: "214",
+			variantBG:       "94",
+			variantHeader:   "230",
+			variantButton:   "216",
+			variantSelected: "208",
+			roleBG:          "52",
+			roleHeader:      "217",
+			roleButton:      "180",
+			roleSelected:    "174",
+			modelBG:         "22",
+			modelSelected:   "148",
+			actionBG:        "34",
+			actionFG:        "16",
+		},
+		{
+			id:              "ocean",
+			label:           "Ocean",
+			header:          "81",
+			footerBG:        "24",
+			footerFG:        "231",
+			menu:            "81",
+			runtimeBG:       "23",
+			runtimeHeader:   "159",
+			runtimeButton:   "117",
+			runtimeSelected: "45",
+			variantBG:       "24",
+			variantHeader:   "153",
+			variantButton:   "110",
+			variantSelected: "75",
+			roleBG:          "18",
+			roleHeader:      "147",
+			roleButton:      "111",
+			roleSelected:    "69",
+			modelBG:         "22",
+			modelSelected:   "84",
+			actionBG:        "35",
+			actionFG:        "16",
+		},
+	}
+}
+
 func NewModel(options ModelOptions) Model {
 	ctx := options.Context
 	if ctx == nil {
@@ -220,6 +327,7 @@ func NewModel(options ModelOptions) Model {
 		wizardBackend:     "cpu",
 		wizardRole:        "main",
 		llamaRuntimeRoot:  options.LlamaRuntimeRoot,
+		paletteID:         "neon",
 	}
 	model.refresh()
 	model.normalizeWizardSelection()
@@ -315,13 +423,13 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.handleTabClick(msg.X, msg.Y) {
-		return m, nil
-	}
-	if next, cmd, ok := m.bottomBarRunnerAction(msg.X, msg.Y); ok {
+	if next, cmd, ok := m.handleBottomBarAction(msg.X, msg.Y); ok {
 		return next, cmd
 	}
-	if m.handleBottomBarClick(msg.X, msg.Y) {
+	if next, cmd, ok := m.handleGlobalMenuClick(msg.X, msg.Y); ok {
+		return next, cmd
+	}
+	if m.handleTabClick(msg.X, msg.Y) {
 		return m, nil
 	}
 
@@ -335,35 +443,96 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *Model) handleBottomBarClick(x int, y int) bool {
-	if m.height <= 0 || y < m.height-1 {
-		return false
-	}
-	if x <= 8 {
-		m.globalMenuOpen = !m.globalMenuOpen
-		return true
-	}
-	return false
-}
-
-func (m Model) bottomBarRunnerAction(x int, y int) (tea.Model, tea.Cmd, bool) {
+func (m Model) handleBottomBarAction(x int, y int) (Model, tea.Cmd, bool) {
 	if m.height <= 0 || y < m.height-1 {
 		return m, nil, false
 	}
-	runner, ok := m.activeRunner()
+	segment, ok := m.bottomActionAt(x)
 	if !ok {
 		return m, nil, false
 	}
-	switch {
-	case x >= runnerBottomRestartX:
-		return m, m.runnerActionCmd("restart", runner.ID), true
-	case x >= runnerBottomStopX:
-		return m, m.runnerActionCmd("stop", runner.ID), true
-	case x >= runnerBottomStartX:
-		return m, m.runnerActionCmd("start", runner.ID), true
+	switch segment.id {
+	case "menu":
+		m.globalMenuOpen = !m.globalMenuOpen
+		return m, nil, true
+	case "next":
+		m.active = (m.active + 1) % len(m.tabs())
+		m.resetScroll()
+		return m, nil, true
+	case "previous":
+		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+		m.resetScroll()
+		return m, nil, true
+	case "quit":
+		return m, tea.Quit, true
+	case "runner-start":
+		if runner, ok := m.activeRunner(); ok {
+			return m, m.runnerActionCmd("start", runner.ID), true
+		}
+	case "runner-stop":
+		if runner, ok := m.activeRunner(); ok {
+			return m, m.runnerActionCmd("stop", runner.ID), true
+		}
+	case "runner-restart":
+		if runner, ok := m.activeRunner(); ok {
+			return m, m.runnerActionCmd("restart", runner.ID), true
+		}
+	}
+	return m, nil, false
+}
+
+func (m Model) bottomActionAt(x int) (bottomActionSegment, bool) {
+	for _, segment := range m.bottomActionSegments() {
+		if x >= segment.start && x < segment.end {
+			return segment, true
+		}
+	}
+	return bottomActionSegment{}, false
+}
+
+func (m Model) handleGlobalMenuClick(x int, y int) (Model, tea.Cmd, bool) {
+	if !m.globalMenuOpen || m.height <= 0 {
+		return m, nil, false
+	}
+	menuTop := m.globalMenuTopRow()
+	if y < menuTop || y >= m.height-1 {
+		return m, nil, false
+	}
+	menuWidth := lipgloss.Width(firstRenderedLine(m.globalMenuMainView()))
+	paletteX := menuWidth + panelGridColumnGap
+	if x >= paletteX {
+		index := y - menuTop - 2
+		palettes := tuiPalettes()
+		if index >= 0 && index < len(palettes) {
+			m.paletteID = palettes[index].id
+			m.globalMenuOpen = false
+			return m, nil, true
+		}
+		return m, nil, false
+	}
+
+	switch y - menuTop {
+	case 2:
+		m.active = (m.active + 1) % len(m.tabs())
+		m.resetScroll()
+		m.globalMenuOpen = false
+		return m, nil, true
+	case 3:
+		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+		m.resetScroll()
+		m.globalMenuOpen = false
+		return m, nil, true
+	case 4:
+		return m, nil, true
+	case 5:
+		return m, tea.Quit, true
 	default:
 		return m, nil, false
 	}
+}
+
+func (m Model) globalMenuTopRow() int {
+	return maxInt(0, m.height-viewLineCount(m.footerView()))
 }
 
 func (m *Model) handleTabClick(x int, y int) bool {
@@ -1083,6 +1252,16 @@ func (m Model) activeRunner() (server.RunnerSnapshot, bool) {
 	return m.runnerByID(id)
 }
 
+func (m Model) palette() tuiPalette {
+	palettes := tuiPalettes()
+	for _, palette := range palettes {
+		if palette.id == m.paletteID {
+			return palette
+		}
+	}
+	return palettes[0]
+}
+
 func (m Model) headerView() string {
 	parts := []string{
 		titleStyle.Render("◆ LiteRT sidecar"),
@@ -1094,11 +1273,14 @@ func (m Model) headerView() string {
 		parts = append(parts, fmt.Sprintf("Viewport: %dx%d", m.width, m.height))
 	}
 
-	return lipgloss.NewStyle().
+	style := lipgloss.NewStyle().
 		Border(panelBorder).
-		BorderForeground(lipgloss.Color("45")).
-		Padding(0, 1).
-		Render(strings.Join(parts, "  "))
+		BorderForeground(lipgloss.Color(m.palette().header)).
+		Padding(0, 1)
+	if m.width > 2 {
+		style = style.Width(m.width - 2)
+	}
+	return style.Render(strings.Join(parts, "  "))
 }
 
 func (m Model) runnerByID(id string) (server.RunnerSnapshot, bool) {
@@ -1176,7 +1358,11 @@ func (m Model) tabBar() string {
 		}
 		parts = append(parts, tabStyle.Render(label))
 	}
-	return strings.Join(parts, " ")
+	line := strings.Join(parts, " ")
+	if m.width > 0 {
+		return lipgloss.NewStyle().Width(m.width).Render(line)
+	}
+	return line
 }
 
 func (m Model) missionControlView() string {
@@ -1280,39 +1466,126 @@ func (m Model) footerView() string {
 }
 
 func (m Model) globalMenuView() string {
+	menu := m.globalMenuMainView()
+	paletteMenu := m.paletteMenuView()
+	return lipgloss.JoinHorizontal(lipgloss.Top, menu, strings.Repeat(" ", panelGridColumnGap), paletteMenu)
+}
+
+func (m Model) globalMenuMainView() string {
 	return renderPanel(
 		"Global menu",
 		[]string{
-			"Tab/Click tabs  change view",
-			"F1/click F1     close menu",
+			"Next tab        change view",
+			"Previous tab    change view",
+			"Palettes >      choose theme",
 			"Esc Quit",
 		},
-		"39",
+		m.palette().menu,
 	)
 }
 
+func (m Model) paletteMenuView() string {
+	palettes := tuiPalettes()
+	lines := make([]string, 0, len(palettes))
+	selectedStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("16")).
+		Background(lipgloss.Color(m.palette().actionBG)).
+		Padding(0, 1)
+	for _, palette := range palettes {
+		label := palette.label
+		if palette.id == m.paletteID {
+			label = selectedStyle.Render("● " + label)
+		} else {
+			label = "  " + label
+		}
+		lines = append(lines, label)
+	}
+	return renderPanel("Palettes", lines, m.palette().menu)
+}
+
 func (m Model) bottomActionBarView() string {
-	parts := []string{
-		"F1 Menu",
-		"Tab Next",
-		"Shift+Tab Prev",
-		"Esc Quit",
+	palette := m.palette()
+	segments := m.bottomActionSegments()
+
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(palette.footerFG)).
+			Background(lipgloss.Color(palette.footerBG))
+		switch segment.id {
+		case "menu":
+			style = style.Bold(true).Foreground(lipgloss.Color(palette.runtimeHeader))
+		case "runner-start":
+			style = style.Bold(true).
+				Foreground(lipgloss.Color(palette.actionFG)).
+				Background(lipgloss.Color(palette.actionBG))
+		case "runner-stop", "runner-restart":
+			style = style.Bold(true).Foreground(lipgloss.Color(palette.variantHeader))
+		case "hint":
+			style = style.Faint(true)
+		}
+		parts = append(parts, style.Render(segment.label))
+	}
+	line := strings.Join(parts, separatorStyle(palette).Render(" | "))
+	if m.width > 0 {
+		line = truncateToWidth(line, maxInt(0, m.width-2))
+	}
+	style := lipgloss.NewStyle().
+		Padding(0, 1).
+		Foreground(lipgloss.Color(palette.footerFG)).
+		Background(lipgloss.Color(palette.footerBG))
+	if m.width > 0 {
+		style = style.Width(m.width)
+	}
+	return style.Render(line)
+}
+
+type bottomActionSegment struct {
+	id    string
+	label string
+	start int
+	end   int
+}
+
+func (m Model) bottomActionSegments() []bottomActionSegment {
+	items := []bottomActionSegment{
+		{id: "menu", label: "Menu"},
+		{id: "next", label: "Tab Next"},
+		{id: "previous", label: "Shift+Tab Prev"},
+		{id: "quit", label: "Esc Quit"},
 	}
 	switch m.activeTabID() {
 	case "dashboard":
-		parts = append(parts, "Dashboard: click model roles")
+		items = append(items, bottomActionSegment{id: "hint", label: "Dashboard: click model roles"})
 	case "wizard":
-		parts = append(parts, "Wizard: click toggles | Enter Start")
+		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | Enter Start"})
 	default:
 		if runner, ok := m.activeRunner(); ok {
-			parts = append(parts, fmt.Sprintf("Runner %s: s Start | x Stop | r Restart", runner.ID))
+			items = append(
+				items,
+				bottomActionSegment{id: "hint", label: fmt.Sprintf("Runner %s", runner.ID)},
+				bottomActionSegment{id: "runner-start", label: "Start"},
+				bottomActionSegment{id: "runner-stop", label: "Stop"},
+				bottomActionSegment{id: "runner-restart", label: "Restart"},
+			)
 		}
 	}
-	line := strings.Join(parts, " | ")
-	if m.width > 0 {
-		line = truncateToWidth(line, m.width)
+
+	position := 1
+	for index := range items {
+		items[index].start = position
+		items[index].end = position + lipgloss.Width(items[index].label)
+		position = items[index].end + 3
 	}
-	return activeTabStyle.Render(line)
+	return items
+}
+
+func separatorStyle(palette tuiPalette) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Faint(true).
+		Foreground(lipgloss.Color(palette.footerFG)).
+		Background(lipgloss.Color(palette.footerBG))
 }
 
 func (m Model) commandRailLines() []string {
@@ -2095,17 +2368,34 @@ func (m Model) wizardView() string {
 
 func (m Model) wizardChoiceLines() []string {
 	return []string{
-		"runtime ---- " + selectedToken("litert", m.wizardRuntime == "litert") + " " +
-			selectedToken("llama.cpp", m.wizardRuntime == "llamacpp"),
+		m.wizardOptionBar(
+			"runtime",
+			[]wizardOption{
+				{label: "litert", selected: m.wizardRuntime == "litert"},
+				{label: "llama.cpp", selected: m.wizardRuntime == "llamacpp"},
+			},
+			m.palette().runtimeBG,
+			m.palette().runtimeHeader,
+			m.palette().runtimeButton,
+			m.palette().runtimeSelected,
+		),
 		"",
 		m.wizardVariantToggleLine(),
 		"",
-		"model role ---- " +
-			selectedToken("main", m.wizardRole == "main") + " " +
-			selectedToken("embedding", m.wizardRole == "embedding") + " " +
-			selectedToken("reranking", m.wizardRole == "reranking"),
+		m.wizardOptionBar(
+			"model role",
+			[]wizardOption{
+				{label: "main", selected: m.wizardRole == "main"},
+				{label: "embedding", selected: m.wizardRole == "embedding"},
+				{label: "reranking", selected: m.wizardRole == "reranking"},
+			},
+			m.palette().roleBG,
+			m.palette().roleHeader,
+			m.palette().roleButton,
+			m.palette().roleSelected,
+		),
 		"",
-		"[ START ]",
+		m.wizardStartLine(),
 	}
 }
 
@@ -2121,7 +2411,24 @@ func (m Model) wizardLocalModelLines() []string {
 		if index == selected {
 			prefix = "> "
 		}
-		lines = append(lines, prefix+entry.Filename)
+		line := prefix + entry.Filename
+		if index == selected {
+			lines = append(lines, m.fullWidthWizardLine(
+				lipgloss.NewStyle().
+					Bold(true).
+					Foreground(lipgloss.Color("16")).
+					Background(lipgloss.Color(m.palette().modelSelected)),
+				line,
+			))
+			continue
+		}
+		lines = append(lines, m.fullWidthWizardLine(
+			lipgloss.NewStyle().
+				Faint(true).
+				Foreground(lipgloss.Color("252")).
+				Background(lipgloss.Color(m.palette().modelBG)),
+			line,
+		))
 	}
 	return lines
 }
@@ -2133,19 +2440,118 @@ func selectedToken(label string, selected bool) string {
 	return label
 }
 
+type wizardOption struct {
+	label    string
+	selected bool
+}
+
+func (m Model) wizardOptionBar(
+	label string,
+	options []wizardOption,
+	background string,
+	header string,
+	button string,
+	selected string,
+) string {
+	headerText := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(header)).
+		Background(lipgloss.Color(background)).
+		Render(label + " ----")
+
+	parts := []string{headerText}
+	for _, option := range options {
+		text := selectedToken(option.label, option.selected)
+		style := lipgloss.NewStyle().
+			Faint(true).
+			Foreground(lipgloss.Color(button)).
+			Background(lipgloss.Color(background)).
+			Padding(0, 1)
+		if option.selected {
+			style = style.
+				Faint(false).
+				Bold(true).
+				Foreground(lipgloss.Color("16")).
+				Background(lipgloss.Color(selected))
+		}
+		parts = append(parts, style.Render(text))
+	}
+
+	return m.fullWidthWizardLine(
+		lipgloss.NewStyle().
+			Faint(true).
+			Foreground(lipgloss.Color(button)).
+			Background(lipgloss.Color(background)),
+		strings.Join(parts, " "),
+	)
+}
+
+func (m Model) wizardStartLine() string {
+	button := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(m.palette().actionFG)).
+		Background(lipgloss.Color(m.palette().actionBG)).
+		Padding(0, 1).
+		Render("[ START ]")
+	return m.fullWidthWizardLine(
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color(m.palette().actionFG)).
+			Background(lipgloss.Color(m.palette().actionBG)),
+		button,
+	)
+}
+
+func (m Model) fullWidthWizardLine(style lipgloss.Style, line string) string {
+	width := m.wizardContentWidth()
+	if width <= 0 {
+		return style.Render(line)
+	}
+	line = truncateToWidth(line, width)
+	style = style.Width(width)
+	return style.Render(line)
+}
+
+func (m Model) wizardContentWidth() int {
+	width := m.width
+	if m.usesWidePanelGrid() {
+		width = m.panelGridColumnWidth()
+	}
+	return panelInnerWidth(width)
+}
+
 func (m Model) wizardVariantToggleLine() string {
 	if m.wizardRuntime == "llamacpp" {
-		parts := make([]string, 0, len(llamaTypeOptions()))
+		options := make([]wizardOption, 0, len(llamaTypeOptions()))
 		for _, option := range llamaTypeOptions() {
-			parts = append(parts, selectedToken(option, m.wizardBackend == option))
+			options = append(options, wizardOption{
+				label:    option,
+				selected: m.wizardBackend == option,
+			})
 		}
-		return "llama type ---- " + strings.Join(parts, " ")
+		return m.wizardOptionBar(
+			"llama type",
+			options,
+			m.palette().variantBG,
+			m.palette().variantHeader,
+			m.palette().variantButton,
+			m.palette().variantSelected,
+		)
 	}
-	parts := make([]string, 0, len(litertBackendOptions()))
+	options := make([]wizardOption, 0, len(litertBackendOptions()))
 	for _, option := range litertBackendOptions() {
-		parts = append(parts, selectedToken(option, m.wizardBackend == option))
+		options = append(options, wizardOption{
+			label:    option,
+			selected: m.wizardBackend == option,
+		})
 	}
-	return "LiteRT backend ---- " + strings.Join(parts, " ")
+	return m.wizardOptionBar(
+		"LiteRT backend",
+		options,
+		m.palette().variantBG,
+		m.palette().variantHeader,
+		m.palette().variantButton,
+		m.palette().variantSelected,
+	)
 }
 
 func (m Model) wizardSelectionLines() []string {
@@ -3757,10 +4163,16 @@ func renderPanelWidth(title string, lines []string, color string, width int) str
 		BorderForeground(lipgloss.Color(color)).
 		Padding(0, 1)
 	if width > style.GetHorizontalFrameSize() {
-		contentWidth := width - style.GetHorizontalFrameSize()
-		style = style.Width(contentWidth)
+		style = style.Width(panelInnerWidth(width))
 	}
 	return style.Render(subtitleStyle.Render(title) + "\n" + body)
+}
+
+func panelInnerWidth(width int) int {
+	if width <= 4 {
+		return 0
+	}
+	return width - 4
 }
 
 func renderCommandRail(lines []string) string {
@@ -3880,6 +4292,14 @@ func viewLineCount(value string) int {
 		return 0
 	}
 	return strings.Count(value, "\n") + 1
+}
+
+func firstRenderedLine(value string) string {
+	if value == "" {
+		return ""
+	}
+	line, _, _ := strings.Cut(value, "\n")
+	return line
 }
 
 func clampInt(value int, minimum int, maximum int) int {

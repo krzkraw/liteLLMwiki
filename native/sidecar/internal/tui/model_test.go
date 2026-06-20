@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/server"
@@ -244,14 +245,14 @@ func TestLaunchWizardMouseUsesRenderedRows(t *testing.T) {
 	runtimeRow := lineNumberContaining(model.View(), "runtime ----")
 	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
 	model = next.(Model)
-	if !strings.Contains(model.View(), "runtime ---- litert [llama.cpp]") {
+	if !strings.Contains(compactSpaces(model.View()), "runtime ---- litert [llama.cpp]") {
 		t.Fatalf("wizard did not select llama.cpp from rendered runtime row:\n%s", model.View())
 	}
 
 	roleRow := lineNumberContaining(model.View(), "model role ----")
 	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
 	model = next.(Model)
-	if !strings.Contains(model.View(), "model role ---- main embedding [reranking]") {
+	if !strings.Contains(compactSpaces(model.View()), "model role ---- main embedding [reranking]") {
 		t.Fatalf("wizard did not select reranking from rendered role row:\n%s", model.View())
 	}
 
@@ -312,7 +313,7 @@ func TestBottomBarListsGlobalMenuAndCurrentTabActions(t *testing.T) {
 	view := model.View()
 	bottom := lastNonEmptyLine(view)
 	for _, expected := range []string{
-		"F1 Menu",
+		"Menu",
 		"Tab Next",
 		"Dashboard: click model roles",
 	} {
@@ -320,12 +321,100 @@ func TestBottomBarListsGlobalMenuAndCurrentTabActions(t *testing.T) {
 			t.Fatalf("bottom action bar missing %q in %q:\n%s", expected, bottom, view)
 		}
 	}
+	if strings.Contains(bottom, "F1") {
+		t.Fatalf("bottom action bar should not depend on F keys on macOS: %q", bottom)
+	}
 
 	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
 	updated := next.(Model)
 	wizardBottom := lastNonEmptyLine(updated.View())
 	if !strings.Contains(wizardBottom, "Wizard: click toggles | Enter Start") {
 		t.Fatalf("wizard bottom action bar = %q:\n%s", wizardBottom, updated.View())
+	}
+}
+
+func TestTopAndBottomBarsTakeFullWidth(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		ManagedScreen:    true,
+	})
+	model.width = 120
+	model.height = 24
+
+	view := model.View()
+	lines := strings.Split(view, "\n")
+	if got := lipgloss.Width(lines[0]); got != model.width {
+		t.Fatalf("top bar width = %d, want %d:\n%s", got, model.width, view)
+	}
+	bottom := lastRenderedLineWithContent(view)
+	if got := lipgloss.Width(bottom); got != model.width {
+		t.Fatalf("bottom bar width = %d, want %d in %q:\n%s", got, model.width, bottom, view)
+	}
+}
+
+func TestBottomBarMouseActionsDoNotRequireFKeys(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 24
+
+	next, cmd := model.Update(leftClick(2, model.height-1))
+	if cmd != nil {
+		t.Fatalf("menu mouse click returned unexpected command")
+	}
+	updated := next.(Model)
+	if !strings.Contains(updated.View(), "Global menu") {
+		t.Fatalf("menu click did not open global menu:\n%s", updated.View())
+	}
+
+	next, cmd = model.Update(leftClick(12, model.height-1))
+	if cmd != nil {
+		t.Fatalf("tab-next mouse click returned unexpected command")
+	}
+	if got := next.(Model).activeTabID(); got != "wizard" {
+		t.Fatalf("tab-next bottom click active tab = %q, want wizard", got)
+	}
+}
+
+func TestLaunchWizardRendersThemedOptionBarsAndModelHighlight(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot: testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+	})
+	model.setActiveTab("wizard")
+	model.width = 120
+	model.height = 36
+
+	choiceLines := model.wizardChoiceLines()
+	expectedWidth := model.width - 4
+	for _, index := range []int{0, 2, 4, 6} {
+		if got := lipgloss.Width(choiceLines[index]); got != expectedWidth {
+			t.Fatalf("wizard option row %d width = %d, want %d: %q", index, got, expectedWidth, choiceLines[index])
+		}
+	}
+
+	modelLines := model.wizardLocalModelLines()
+	if len(modelLines) == 0 {
+		t.Fatalf("expected local model rows")
+	}
+	if got := lipgloss.Width(modelLines[0]); got != expectedWidth {
+		t.Fatalf("selected model row width = %d, want %d: %q", got, expectedWidth, modelLines[0])
+	}
+	if !strings.HasPrefix(strings.TrimSpace(modelLines[0]), "> ") {
+		t.Fatalf("selected model row should keep visible selected marker: %q", modelLines[0])
 	}
 }
 
@@ -358,7 +447,7 @@ func TestGlobalActionsOpenAsBottomLeftMenu(t *testing.T) {
 	updated := next.(Model)
 	for _, expected := range []string{
 		"Global menu",
-		"Tab/Click tabs",
+		"Palettes",
 		"Esc Quit",
 	} {
 		if !strings.Contains(updated.View(), expected) {
@@ -372,6 +461,61 @@ func TestGlobalActionsOpenAsBottomLeftMenu(t *testing.T) {
 	}
 	if strings.Contains(next.(Model).View(), "Global menu") {
 		t.Fatalf("global menu did not close after F1 mouse click:\n%s", next.(Model).View())
+	}
+}
+
+func TestGlobalMenuShowsPaletteChoices(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 30
+
+	next, _ := model.Update(leftClick(2, model.height-1))
+	view := next.(Model).View()
+	for _, expected := range []string{
+		"Global menu",
+		"Palettes",
+		"Neon",
+		"Amber",
+		"Ocean",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("global menu missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestGlobalMenuPaletteChoiceCanBeClicked(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		ManagedScreen:    true,
+	})
+	model.width = 120
+	model.height = 30
+
+	next, _ := model.Update(leftClick(2, model.height-1))
+	opened := next.(Model)
+	paletteX := lipgloss.Width(firstRenderedLine(opened.globalMenuMainView())) + panelGridColumnGap + 3
+	amberRow := opened.globalMenuTopRow() + 3
+	next, cmd := opened.Update(leftClick(paletteX, amberRow))
+	if cmd != nil {
+		t.Fatalf("palette click returned unexpected command")
+	}
+	updated := next.(Model)
+	if got := updated.paletteID; got != "amber" {
+		t.Fatalf("palette = %q, want amber", got)
+	}
+	if updated.globalMenuOpen {
+		t.Fatalf("palette click should close global menu")
 	}
 }
 
@@ -429,7 +573,7 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	runtimeRow := lineNumberContaining(model.View(), "runtime ----")
 	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
 	model = next.(Model)
-	if !strings.Contains(model.View(), "runtime ---- litert [llama.cpp]") {
+	if !strings.Contains(compactSpaces(model.View()), "runtime ---- litert [llama.cpp]") {
 		t.Fatalf("wizard did not select llama.cpp by mouse:\n%s", model.View())
 	}
 
@@ -437,13 +581,14 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
 	model = next.(Model)
 	view := model.View()
+	compactView := compactSpaces(view)
 	for _, expected := range []string{
 		"llama type ---- cpu gpu openvino [cuda13] cuda12 sycl",
 		"model role ---- main embedding [reranking]",
 		"Qwen3-Reranker-0.6B-Q4_K_M.gguf",
 		"[ START ]",
 	} {
-		if !strings.Contains(view, expected) {
+		if !strings.Contains(compactView, expected) {
 			t.Fatalf("wizard missing %q:\n%s", expected, view)
 		}
 	}
@@ -511,6 +656,16 @@ func lastNonEmptyLine(view string) string {
 	return ""
 }
 
+func lastRenderedLineWithContent(view string) string {
+	lines := strings.Split(view, "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		if strings.TrimSpace(lines[index]) != "" {
+			return lines[index]
+		}
+	}
+	return ""
+}
+
 func lineNumberContaining(view string, text string) int {
 	for index, line := range strings.Split(view, "\n") {
 		if strings.Contains(line, text) {
@@ -534,6 +689,10 @@ func lineContainsAll(view string, parts ...string) bool {
 		}
 	}
 	return false
+}
+
+func compactSpaces(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func leftClick(x int, y int) tea.MouseMsg {

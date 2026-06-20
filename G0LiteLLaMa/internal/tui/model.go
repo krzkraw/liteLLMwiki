@@ -618,6 +618,17 @@ func (m Model) buttonHitRegistry() []buttonHit {
 			})
 		}
 	}
+	if m.globalMenuOpen {
+		addTextHit("Next tab", "global-next", "")
+		addTextHit("Previous tab", "global-previous", "")
+		addTextHit("Palette themes", "global-palette", "")
+		addTextHit("Esc Quit", "global-quit", "")
+		if m.globalPaletteMenuOpen {
+			for _, palette := range tuiPalettes() {
+				addTextHit(palette.label, "global-palette-select", palette.id)
+			}
+		}
+	}
 
 	if m.optionModal != nil {
 		addTextHit("[ Save ]", "modal-save", "")
@@ -675,6 +686,29 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 	switch hit.action {
 	case "menu", "next", "previous", "quit", "runner-start", "runner-stop", "runner-restart", "runner-edit-command", "runner-close":
 		return m.handleBottomBarOrRunnerHit(hit)
+	case "global-next":
+		m.active = (m.active + 1) % len(m.tabs())
+		m.resetScroll()
+		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
+		return m, nil, true
+	case "global-previous":
+		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+		m.resetScroll()
+		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
+		return m, nil, true
+	case "global-palette":
+		m.globalPaletteMenuOpen = true
+		return m, nil, true
+	case "global-palette-select":
+		m.paletteID = hit.payload
+		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
+		return m, nil, true
+	case "global-quit":
+		m.globalPaletteMenuOpen = false
+		return m, tea.Quit, true
 	case "wizard-runtime":
 		if hit.payload == "llama.cpp" {
 			m.wizardRuntime = "llamacpp"
@@ -1544,6 +1578,7 @@ func (m Model) managedScreenView() string {
 	if strings.TrimSpace(visibleBody) == "" {
 		visibleBody = mutedStyle.Render("No content in this pane.")
 	}
+	visibleBody = fitLinesToHeight(visibleBody, bodyHeight)
 
 	return fitLinesToHeight(joinPanels(top, visibleBody, footer), m.height)
 }
@@ -2001,15 +2036,15 @@ func (m Model) globalMenuView() string {
 }
 
 func (m Model) globalMenuMainView() string {
-	return renderPanel(
+	return renderMenuPanel(
 		"Global menu",
 		[]string{
-			"Next tab        change view",
-			"Previous tab    change view",
-			"Palette themes > choose colors",
+			"Next tab",
+			"Previous tab",
+			"Palette themes >",
 			"Esc Quit",
 		},
-		m.palette().menu,
+		m.palette(),
 	)
 }
 
@@ -2030,7 +2065,7 @@ func (m Model) paletteMenuView() string {
 		}
 		lines = append(lines, label)
 	}
-	return renderPanel("Palette choices", lines, m.palette().menu)
+	return renderMenuPanel("Palette choices", lines, m.palette())
 }
 
 func (m Model) bottomActionBarView() string {
@@ -5525,6 +5560,20 @@ func renderPanelSpec(panel panelSpec, width int) string {
 
 func renderPanel(title string, lines []string, color string) string {
 	return renderPanelWidth(title, lines, color, 0)
+}
+
+func renderMenuPanel(title string, lines []string, palette tuiPalette) string {
+	body := strings.Join(lines, "\n")
+	if strings.TrimSpace(body) == "" {
+		body = "No data."
+	}
+	return lipgloss.NewStyle().
+		Border(panelBorder).
+		BorderForeground(lipgloss.Color(palette.menu)).
+		Background(lipgloss.Color(palette.footerBG)).
+		Foreground(lipgloss.Color(palette.footerFG)).
+		Padding(0, 1).
+		Render(subtitleStyle.Render(title) + "\n" + body)
 }
 
 func renderPanelWidth(title string, lines []string, color string, width int) string {

@@ -81,6 +81,25 @@ test("mouse click can switch tabs or activate a visible control", async ({ termi
   await expect(terminal.getByText("[ START ]", { strict: false })).toBeVisible();
 });
 
+test("global menu palette click changes palette", async ({ terminal }) => {
+  await expect(terminal.getByText("Menu", { strict: false })).toBeVisible();
+
+  clickText(terminal, "Menu");
+
+  await expect(terminal.getByText("Global menu", { strict: false })).toBeVisible();
+  if (findText(terminal, "change view") || findText(terminal, "choose colors")) {
+    throw new Error("global menu should not show descriptions");
+  }
+
+  clickText(terminal, "Palette themes");
+  await expect(terminal.getByText("Palette choices", { strict: false })).toBeVisible();
+
+  clickText(terminal, "Amber");
+  clickText(terminal, "Menu");
+  clickText(terminal, "Palette themes");
+  await expect(terminal.getByText("● Amber", { strict: false })).toBeVisible();
+});
+
 async function openWizardByKeyboard(terminal) {
   await expect(terminal.getByText("2 Launch Wizard", { strict: false })).toBeVisible();
   terminal.keyPress("2");

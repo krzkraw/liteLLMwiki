@@ -992,7 +992,8 @@ func TestGlobalActionsOpenAsBottomLeftMenu(t *testing.T) {
 		}
 	}
 
-	next, cmd = updated.Update(leftClick(2, updated.height-1))
+	footerRow := lastLineNumberContainingText(updated.View().Content, "Menu")
+	next, cmd = updated.Update(leftClick(2, footerRow))
 	if cmd != nil {
 		t.Fatalf("F1 mouse click returned unexpected command")
 	}

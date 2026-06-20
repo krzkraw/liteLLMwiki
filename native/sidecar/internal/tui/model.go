@@ -960,7 +960,7 @@ func (m Model) tabBar() string {
 }
 
 func (m Model) missionControlView() string {
-	return renderPanel("Mission control / Live state", m.missionControlLines(), "45")
+	return renderPanelWidth("Mission control / Live state", m.missionControlLines(), "45", m.width)
 }
 
 func (m Model) missionControlLines() []string {
@@ -1049,7 +1049,7 @@ func (m Model) compactRouteSummary() string {
 }
 
 func (m Model) commandRailView() string {
-	return renderPanel("Command rail", m.commandRailLines(), "39")
+	return renderCommandRail(m.commandRailLines())
 }
 
 func (m Model) commandRailLines() []string {
@@ -1061,7 +1061,7 @@ func (m Model) commandRailLines() []string {
 }
 
 func (m Model) commandRailViewWithScrollLine(scrollLine string) string {
-	return renderPanel("Command rail", m.commandRailLinesWithScrollLine(scrollLine), "39")
+	return renderCommandRail(m.commandRailLinesWithScrollLine(scrollLine))
 }
 
 func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
@@ -1132,40 +1132,25 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 }
 
 func (m Model) dashboardView() string {
-	health := renderPanel("System health / Specs", m.systemHealthLines(), "82")
-	signalBoard := renderPanel("Signal board / Readiness", m.signalBoardLines(), "82")
-	runtimeTopology := renderPanel("Runtime topology", m.runtimeTopologyLines(), "45")
-	topologyGraph := renderPanel("Topology graph / Visual route authority", m.topologyGraphLines(), "39")
-	backendMatrix := renderPanel("Backend matrix / Runnable backends", m.backendMatrixLines(), "214")
-	routeMap := renderPanel("Route map / Routes", m.routeMapLines(), "205")
-	recentActivity := renderPanel("Recent activity", m.recentActivityLines(6), "244")
-	hotkeys := renderPanel("Hotkeys", []string{
-		"Tab/Right: next tab",
-		"Shift+Tab/Left: previous tab",
-		"Number keys: jump tabs",
-		"Runner tabs: s Start, x Stop, r Restart",
-		"Esc/Ctrl+C: quit",
-	}, "205")
-
-	if m.width >= 150 {
-		return joinPanels(
-			joinPanelRow(health, topologyGraph),
-			signalBoard,
-			joinPanelRow(runtimeTopology, backendMatrix),
-			joinPanelRow(routeMap, recentActivity),
-			hotkeys,
-		)
-	}
-
-	return joinPanels(
-		health,
-		signalBoard,
-		runtimeTopology,
-		topologyGraph,
-		backendMatrix,
-		routeMap,
-		recentActivity,
-		hotkeys,
+	return m.panelGrid(
+		panelSpec{"System health / Specs", m.systemHealthLines(), "82"},
+		panelSpec{"Signal board / Readiness", m.signalBoardLines(), "82"},
+		panelSpec{"Runtime topology", m.runtimeTopologyLines(), "45"},
+		panelSpec{"Topology graph / Visual route authority", m.topologyGraphLines(), "39"},
+		panelSpec{"Backend matrix / Runnable backends", m.backendMatrixLines(), "214"},
+		panelSpec{"Route map / Routes", m.routeMapLines(), "205"},
+		panelSpec{"Recent activity", m.recentActivityLines(6), "244"},
+		panelSpec{
+			"Hotkeys",
+			[]string{
+				"Tab/Right: next tab",
+				"Shift+Tab/Left: previous tab",
+				"Number keys: jump tabs",
+				"Runner tabs: s Start, x Stop, r Restart",
+				"Esc/Ctrl+C: quit",
+			},
+			"205",
+		},
 	)
 }
 
@@ -1451,44 +1436,19 @@ func (m Model) runnerView(runner server.RunnerSnapshot) string {
 		details = append(details, formatKV("Detail", runner.Detail))
 	}
 
-	health := renderPanel("Runner "+runner.ID+" / Runner health", m.runnerHealthLines(runner), "82")
-	signalBoard := renderPanel("Runner signal board / Readiness", m.runnerSignalLines(runner), "82")
-	endpointMap := renderPanel("Endpoint map", m.runnerEndpointLines(runner), "45")
-	operationFlow := renderPanel("Operation flow", runnerOperationLines(runner), "214")
-	controlSurface := renderPanel("Control surface", m.runnerControlLines(runner), "39")
-	runtimeCommand := renderPanel("Runtime command", []string{commandLine(runner.Command)}, "214")
-	capabilities := renderPanel("Capabilities matrix", runnerCapabilityLines(runner), "205")
-	editor := m.runnerEditorView(runner)
-	settingsMatrix := renderPanel("Settings matrix", runnerSettingsMatrixLines(runner), "39")
-	settingsPanel := renderPanel("Settings", settings, "45")
-	detailsPanel := renderPanel("Details", details, "214")
-	logsPanel := renderPanel("Recent runner logs", m.runnerLogLines(runner.ID, 6), "244")
-
-	if m.width >= 150 {
-		return joinPanels(
-			joinPanelRow(health, signalBoard),
-			joinPanelRow(endpointMap, operationFlow),
-			joinPanelRow(controlSurface, runtimeCommand),
-			capabilities,
-			editor,
-			joinPanelRow(settingsMatrix, settingsPanel),
-			joinPanelRow(detailsPanel, logsPanel),
-		)
-	}
-
-	return joinPanels(
-		health,
-		signalBoard,
-		endpointMap,
-		operationFlow,
-		controlSurface,
-		runtimeCommand,
-		capabilities,
-		editor,
-		settingsMatrix,
-		settingsPanel,
-		detailsPanel,
-		logsPanel,
+	return m.panelGrid(
+		panelSpec{"Runner " + runner.ID + " / Runner health", m.runnerHealthLines(runner), "82"},
+		panelSpec{"Runner signal board / Readiness", m.runnerSignalLines(runner), "82"},
+		panelSpec{"Endpoint map", m.runnerEndpointLines(runner), "45"},
+		panelSpec{"Operation flow", runnerOperationLines(runner), "214"},
+		panelSpec{"Control surface", m.runnerControlLines(runner), "39"},
+		panelSpec{"Runtime command", []string{commandLine(runner.Command)}, "214"},
+		panelSpec{"Capabilities matrix", runnerCapabilityLines(runner), "205"},
+		m.runnerEditorSpec(runner),
+		panelSpec{"Settings matrix", runnerSettingsMatrixLines(runner), "39"},
+		panelSpec{"Settings", settings, "45"},
+		panelSpec{"Details", details, "214"},
+		panelSpec{"Recent runner logs", m.runnerLogLines(runner.ID, 6), "244"},
 	)
 }
 
@@ -1768,15 +1728,19 @@ func (m Model) runnerLogLines(runnerID string, limit int) []string {
 }
 
 func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
+	return renderPanelSpec(m.runnerEditorSpec(runner), 0)
+}
+
+func (m Model) runnerEditorSpec(runner server.RunnerSnapshot) panelSpec {
 	if m.edit == nil || m.edit.runner.ID != runner.ID {
-		return ""
+		return panelSpec{}
 	}
 	newValue := m.edit.value
 	if m.edit.secret {
 		newValue = secretEditValue(m.edit.value)
 	}
-	return renderPanel(
-		"Editing "+m.edit.label+" for "+runner.ID,
+	return panelSpec{
+		"Editing " + m.edit.label + " for " + runner.ID,
 		[]string{
 			formatKV("Current", fallback(m.edit.current, "not configured")),
 			"",
@@ -1785,34 +1749,26 @@ func (m Model) runnerEditorView(runner server.RunnerSnapshot) string {
 			"Enter saves through PATCH /sidecar/v1/runners/{id}; Esc cancels.",
 		},
 		"205",
-	)
+	}
 }
 
 func (m Model) wizardView() string {
-	selection := renderPanel("Launch Wizard / Runtime and variant", m.wizardSelectionLines(), "214")
-	models := renderPanel("Downloaded models", m.wizardModelLines(), "82")
-	dryRun := renderPanel("Dry-run command preview", m.wizardDryRunLines(), "45")
-	routeAuthority := renderPanel(
-		"Wizard route authority",
-		[]string{
-			"main -> /v1/chat/completions",
-			"embedding -> /v1/embeddings",
-			"reranking -> /v1/rerank",
-			"Created runners appear as first-class runner tabs.",
-			"Models tab opens this same filtered creation flow.",
+	return m.panelGrid(
+		panelSpec{"Launch Wizard / Runtime and variant", m.wizardSelectionLines(), "214"},
+		panelSpec{"Downloaded models", m.wizardModelLines(), "82"},
+		panelSpec{"Dry-run command preview", m.wizardDryRunLines(), "45"},
+		panelSpec{
+			"Wizard route authority",
+			[]string{
+				"main -> /v1/chat/completions",
+				"embedding -> /v1/embeddings",
+				"reranking -> /v1/rerank",
+				"Created runners appear as first-class runner tabs.",
+				"Models tab opens this same filtered creation flow.",
+			},
+			"39",
 		},
-		"39",
 	)
-
-	if m.width >= 150 {
-		return joinPanels(
-			joinPanelRow(selection, models),
-			dryRun,
-			routeAuthority,
-		)
-	}
-
-	return joinPanels(selection, models, dryRun, routeAuthority)
 }
 
 func (m Model) wizardSelectionLines() []string {
@@ -1914,19 +1870,12 @@ func (m Model) wizardDryRunLines() []string {
 }
 
 func (m Model) chatView() string {
-	runnerPanel := renderPanel("Chat console / Main runner", m.chatRunnerLines(), "82")
-	composer := renderPanel("Composer", m.chatComposerLines(), "214")
-	transcript := renderPanel("Transcript", m.chatTranscriptLines(), "45")
-	parity := renderPanel("API parity / Route authority", m.chatParityLines(), "39")
-
-	if m.width >= 150 {
-		return joinPanels(
-			joinPanelRow(runnerPanel, composer),
-			joinPanelRow(transcript, parity),
-		)
-	}
-
-	return joinPanels(runnerPanel, composer, transcript, parity)
+	return m.panelGrid(
+		panelSpec{"Chat console / Main runner", m.chatRunnerLines(), "82"},
+		panelSpec{"Composer", m.chatComposerLines(), "214"},
+		panelSpec{"Transcript", m.chatTranscriptLines(), "45"},
+		panelSpec{"API parity / Route authority", m.chatParityLines(), "39"},
+	)
 }
 
 func (m Model) chatRunnerLines() []string {
@@ -1998,33 +1947,10 @@ func (m Model) chatParityLines() []string {
 }
 
 func (m Model) modelsView() string {
-	readiness := renderPanel(
-		"Model readiness / Required artifacts",
-		m.modelReadinessLines(),
-		"82",
-	)
-	actions := renderPanel(
-		"Runner creation / Launch Wizard",
-		modelActionLines(),
-		"214",
-	)
-	cards := renderPanel(
-		"Catalog cards / Download state",
-		m.modelCatalogCardLines(),
-		"45",
-	)
-
-	if m.width >= 150 {
-		return joinPanels(
-			joinPanelRow(readiness, actions),
-			cards,
-		)
-	}
-
-	return joinPanels(
-		readiness,
-		actions,
-		cards,
+	return m.panelGrid(
+		panelSpec{"Model readiness / Required artifacts", m.modelReadinessLines(), "82"},
+		panelSpec{"Runner creation / Launch Wizard", modelActionLines(), "214"},
+		panelSpec{"Catalog cards / Download state", m.modelCatalogCardLines(), "45"},
 	)
 }
 
@@ -2104,21 +2030,10 @@ func (m Model) modelCatalogCardLines() []string {
 }
 
 func (m Model) logsView() string {
-	signal := renderPanel("Log signal / Live cache", m.logSignalLines(), "82")
-	sources := renderPanel("Source activity / Streams", m.logSourceActivityLines(), "45")
-	recent := renderPanel("Recent log events", m.recentLogEventLines(16), "244")
-
-	if m.width >= 150 {
-		return joinPanels(
-			joinPanelRow(signal, sources),
-			recent,
-		)
-	}
-
-	return joinPanels(
-		signal,
-		sources,
-		recent,
+	return m.panelGrid(
+		panelSpec{"Log signal / Live cache", m.logSignalLines(), "82"},
+		panelSpec{"Source activity / Streams", m.logSourceActivityLines(), "45"},
+		panelSpec{"Recent log events", m.recentLogEventLines(16), "244"},
 	)
 }
 
@@ -2241,39 +2156,27 @@ func (m Model) settingsView() string {
 		runnerState = "RunnerController connected"
 	}
 
-	settingsPanel := renderPanel("Settings", []string{
-		"Controls",
-		"s Start release   d Start debug   r Restart release   g Restart debug   x Stop runtime",
-		"",
-		formatKV("Runtime controller", runtimeState),
-		formatKV("Runner controller", runnerState),
-		formatKV("HTTP listen", "configured by -addr"),
-		formatKV("Default upstream", fallback(m.runtime.Upstream, "unavailable")),
-		formatKV("Runtime mode", fallback(m.runtime.Mode, "release")),
-		formatKV("Log entries", fmt.Sprintf("%d cached", len(m.logEntries))),
-	}, "45")
-	configEditor := renderPanel("Runtime config editor", m.runtimeConfigLines(), "82")
-	activeEditor := m.runtimeEditorView()
-	actionMap := renderPanel("Shared action map", settingsActionMapLines(), "214")
-	runnerParity := renderPanel("Runner API parity / Live snapshot", m.settingsRunnerParityLines(), "39")
-	webSocketParity := renderPanel("WebSocket API parity", settingsAPIParityLines(), "205")
-
-	if m.width >= 150 {
-		return joinPanels(
-			joinPanelRow(settingsPanel, configEditor),
-			activeEditor,
-			joinPanelRow(actionMap, runnerParity),
-			webSocketParity,
-		)
-	}
-
-	return joinPanels(
-		settingsPanel,
-		configEditor,
-		activeEditor,
-		actionMap,
-		runnerParity,
-		webSocketParity,
+	return m.panelGrid(
+		panelSpec{
+			"Settings",
+			[]string{
+				"Controls",
+				"s Start release   d Start debug   r Restart release   g Restart debug   x Stop runtime",
+				"",
+				formatKV("Runtime controller", runtimeState),
+				formatKV("Runner controller", runnerState),
+				formatKV("HTTP listen", "configured by -addr"),
+				formatKV("Default upstream", fallback(m.runtime.Upstream, "unavailable")),
+				formatKV("Runtime mode", fallback(m.runtime.Mode, "release")),
+				formatKV("Log entries", fmt.Sprintf("%d cached", len(m.logEntries))),
+			},
+			"45",
+		},
+		panelSpec{"Runtime config editor", m.runtimeConfigLines(), "82"},
+		m.runtimeEditorSpec(),
+		panelSpec{"Shared action map", settingsActionMapLines(), "214"},
+		panelSpec{"Runner API parity / Live snapshot", m.settingsRunnerParityLines(), "39"},
+		panelSpec{"WebSocket API parity", settingsAPIParityLines(), "205"},
 	)
 }
 
@@ -2432,15 +2335,19 @@ func (m Model) runtimeConfigLines() []string {
 }
 
 func (m Model) runtimeEditorView() string {
+	return renderPanelSpec(m.runtimeEditorSpec(), 0)
+}
+
+func (m Model) runtimeEditorSpec() panelSpec {
 	if m.runtimeEdit == nil {
-		return ""
+		return panelSpec{}
 	}
 	newValue := m.runtimeEdit.value
 	if m.runtimeEdit.secret {
 		newValue = secretEditValue(m.runtimeEdit.value)
 	}
-	return renderPanel(
-		"Editing "+m.runtimeEdit.label,
+	return panelSpec{
+		"Editing " + m.runtimeEdit.label,
 		[]string{
 			formatKV("Current", fallback(m.runtimeEdit.current, "not configured")),
 			"",
@@ -2449,7 +2356,7 @@ func (m Model) runtimeEditorView() string {
 			"Enter stores this config for runtime.start/runtime.restart; Esc cancels.",
 		},
 		"205",
-	)
+	}
 }
 
 func (m Model) runnerActionCmd(action string, id string) tea.Cmd {
@@ -3312,16 +3219,86 @@ func tick() tea.Cmd {
 	})
 }
 
+const (
+	widePanelGridMinWidth = 150
+	panelGridColumnGap    = 2
+)
+
+type panelSpec struct {
+	title string
+	lines []string
+	color string
+}
+
+func (m Model) panelGrid(panels ...panelSpec) string {
+	width := m.width
+	if width < widePanelGridMinWidth {
+		rendered := make([]string, 0, len(panels))
+		for _, panel := range panels {
+			rendered = append(rendered, renderPanelSpec(panel, width))
+		}
+		return joinPanels(rendered...)
+	}
+
+	columnWidth := (width - panelGridColumnGap) / 2
+	columns := [2][]string{}
+	columnHeights := [2]int{}
+	for _, panel := range panels {
+		rendered := renderPanelSpec(panel, columnWidth)
+		if strings.TrimSpace(rendered) == "" {
+			continue
+		}
+		columnIndex := 0
+		if columnHeights[1] < columnHeights[0] {
+			columnIndex = 1
+		}
+		if len(columns[columnIndex]) > 0 {
+			columnHeights[columnIndex] += 2
+		}
+		columns[columnIndex] = append(columns[columnIndex], rendered)
+		columnHeights[columnIndex] += viewLineCount(rendered)
+	}
+
+	left := joinPanels(columns[0]...)
+	right := joinPanels(columns[1]...)
+	if strings.TrimSpace(right) == "" {
+		return left
+	}
+	if strings.TrimSpace(left) == "" {
+		return right
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", panelGridColumnGap), right)
+}
+
+func renderPanelSpec(panel panelSpec, width int) string {
+	if strings.TrimSpace(panel.title) == "" && len(panel.lines) == 0 {
+		return ""
+	}
+	return renderPanelWidth(panel.title, panel.lines, panel.color, width)
+}
+
 func renderPanel(title string, lines []string, color string) string {
+	return renderPanelWidth(title, lines, color, 0)
+}
+
+func renderPanelWidth(title string, lines []string, color string, width int) string {
 	body := strings.Join(lines, "\n")
 	if strings.TrimSpace(body) == "" {
 		body = "No data."
 	}
-	return lipgloss.NewStyle().
+	style := lipgloss.NewStyle().
 		Border(panelBorder).
 		BorderForeground(lipgloss.Color(color)).
-		Padding(0, 1).
-		Render(subtitleStyle.Render(title) + "\n" + body)
+		Padding(0, 1)
+	if width > style.GetHorizontalFrameSize() {
+		contentWidth := width - style.GetHorizontalFrameSize()
+		style = style.Width(contentWidth)
+	}
+	return style.Render(subtitleStyle.Render(title) + "\n" + body)
+}
+
+func renderCommandRail(lines []string) string {
+	return mutedStyle.Render(strings.Join(lines, "\n"))
 }
 
 func joinPanels(panels ...string) string {
@@ -3333,10 +3310,6 @@ func joinPanels(panels ...string) string {
 		visible = append(visible, panel)
 	}
 	return strings.Join(visible, "\n\n")
-}
-
-func joinPanelRow(left string, right string) string {
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
 }
 
 func managedBodyHeight(totalHeight int, top string, footer string) int {

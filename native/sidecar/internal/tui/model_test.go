@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"litert-sidecar/internal/catalog"
 	"litert-sidecar/internal/server"
@@ -117,8 +118,8 @@ func TestManagedScreenViewLimitsFrameAndScrollsContent(t *testing.T) {
 	if !strings.Contains(view, "Scroll:") {
 		t.Fatalf("managed screen view missing in-app scroll indicator:\n%s", view)
 	}
-	if !strings.Contains(view, "Command rail") {
-		t.Fatalf("managed screen view must keep command rail visible:\n%s", view)
+	if !strings.Contains(view, "Logs: live broadcaster cache | WebSocket logs.subscribe parity") {
+		t.Fatalf("managed screen view must keep command footer visible:\n%s", view)
 	}
 
 	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -165,6 +166,15 @@ func renderedLineCount(value string) int {
 		return 0
 	}
 	return strings.Count(value, "\n") + 1
+}
+
+func visibleLineWidthContaining(view string, needle string) int {
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, needle) {
+			return lipgloss.Width(line)
+		}
+	}
+	return 0
 }
 
 func TestModelRendersPersistentMissionControlStrip(t *testing.T) {
@@ -254,8 +264,10 @@ func TestModelRendersContextCommandRail(t *testing.T) {
 	})
 
 	dashboardView := model.View()
+	if strings.Contains(dashboardView, "Command rail") {
+		t.Fatalf("command help should not render as another boxed card:\n%s", dashboardView)
+	}
 	for _, expected := range []string{
-		"Command rail",
 		"Global: Tab/Right next | Shift+Tab/Left previous | 1-8 jump | Esc quit",
 		"Dashboard: specs + topology + runnable backends",
 		"API: status.get + /sidecar/v1/status",
@@ -522,14 +534,34 @@ func TestDashboardUsesWideTwoColumnLayout(t *testing.T) {
 	model.height = 48
 	view := model.View()
 
-	if !viewLineContainsAll(view, "System health / Specs", "Topology graph / Visual route authority") {
-		t.Fatalf("wide dashboard did not place health and topology graph in one row:\n%s", view)
+	if !viewLineContainsAll(view, "System health / Specs", "Signal board / Readiness") {
+		t.Fatalf("wide dashboard did not start with balanced masonry columns:\n%s", view)
 	}
-	if !viewLineContainsAll(view, "Runtime topology", "Backend matrix / Runnable backends") {
-		t.Fatalf("wide dashboard did not place topology and backend matrix in one row:\n%s", view)
+	if viewLineContainsAll(view, "System health / Specs", "Topology graph / Visual route authority") {
+		t.Fatalf("wide dashboard still uses the old fixed row pairings:\n%s", view)
 	}
-	if !viewLineContainsAll(view, "Route map / Routes", "Recent activity") {
-		t.Fatalf("wide dashboard did not place routes and recent activity in one row:\n%s", view)
+}
+
+func TestDashboardUsesFullWidthSingleColumnWhenNarrow(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RuntimeController: testRuntimeController(),
+		RunnerController:  testRunnerController(),
+		Logs:              server.NewLogBroadcaster(8),
+	})
+	model.width = 120
+	model.height = 42
+	view := model.View()
+
+	if viewLineContainsAll(view, "System health / Specs", "Signal board / Readiness") {
+		t.Fatalf("narrow dashboard should not render side-by-side cards:\n%s", view)
+	}
+	if got := visibleLineWidthContaining(view, "Mission control / Live state"); got < 110 {
+		t.Fatalf("narrow mission control width = %d, want it to take terminal width:\n%s", got, view)
+	}
+	if got := visibleLineWidthContaining(view, "System health / Specs"); got < 110 {
+		t.Fatalf("narrow dashboard card width = %d, want it to take terminal width:\n%s", got, view)
 	}
 }
 
@@ -711,9 +743,6 @@ func TestRunnerTabUsesWideTwoColumnLayout(t *testing.T) {
 	}{
 		{left: "Runner main-litert / Runner health", right: "Runner signal board / Readiness"},
 		{left: "Endpoint map", right: "Operation flow"},
-		{left: "Control surface", right: "Runtime command"},
-		{left: "Settings matrix", right: "Settings"},
-		{left: "Details", right: "Recent runner logs"},
 	} {
 		if !viewLineContainsAll(view, tc.left, tc.right) {
 			t.Fatalf("wide runner tab did not place %q beside %q:\n%s", tc.left, tc.right, view)
@@ -1674,7 +1703,6 @@ func TestSettingsViewUsesWideTwoColumnLayout(t *testing.T) {
 		right string
 	}{
 		{left: "Settings", right: "Runtime config editor"},
-		{left: "Shared action map", right: "Runner API parity / Live snapshot"},
 	} {
 		if !viewLineContainsAll(view, tc.left, tc.right) {
 			t.Fatalf("wide settings tab did not place %q beside %q:\n%s", tc.left, tc.right, view)

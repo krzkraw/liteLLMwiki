@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -229,7 +230,7 @@ func TestDashboardRunnerRoleDropdownKeyboardSelectsRoute(t *testing.T) {
 	}
 }
 
-func TestSelectedChatRunnerUsesActiveMainRoute(t *testing.T) {
+func TestSelectedChatRunnerDefaultsIndependentOfActiveMainRoute(t *testing.T) {
 	t.Parallel()
 
 	controller := newFakeRunnerController([]server.RunnerSnapshot{
@@ -245,78 +246,348 @@ func TestSelectedChatRunnerUsesActiveMainRoute(t *testing.T) {
 	if !ok {
 		t.Fatalf("selected chat runner missing")
 	}
-	if runner.ID != "LM-M-2" {
-		t.Fatalf("selected chat runner = %q, want active route LM-M-2", runner.ID)
+	if runner.ID != "LR-M-1" {
+		t.Fatalf("selected chat runner = %q, want stable first runner LR-M-1", runner.ID)
 	}
 }
 
-func TestChatTabRendersTargetSystemInputTranscriptThinkingAndSettings(t *testing.T) {
+func TestChatTabRendersClickableStreamingLayout(t *testing.T) {
 	t.Parallel()
 
 	model := newChatTestModel(t)
 	view := model.View().Content
 	for _, expected := range []string{
-		"Chat console / main target",
+		"/v1/chat/completions",
+		"lr-m-1",
+		"idle",
+		"0 tok/s",
 		"Prompt settings",
-		"Target",
-		"[main]",
-		"embedding",
-		"reranking",
-		"Input",
-		"Transcript",
-		"Thinking",
+		"Thinking: off",
+		"Target: main",
+		"System: empty",
+		"Temperature: default",
+		"Top P: default",
+		"Max Tokens: default",
+		"Stream: on",
+		"Ready. Input your prompt",
+		"Send",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("chat view missing %q:\n%s", expected, view)
 		}
 	}
-	if !lineContainsAll(view, "Chat console / main target", "Prompt settings") {
-		t.Fatalf("settings should render beside chat target at wide width:\n%s", view)
-	}
-	if lineNumberContaining(view, "Transcript") >= lineNumberContaining(view, "Input") {
-		t.Fatalf("transcript should be above bottom input:\n%s", view)
+	for _, removed := range []string{
+		"Chat console",
+		"Selected runner",
+		"Transcript",
+		"Scroll 0/0",
+		"System prompt input",
+		"@ toggles",
+		"Close with ?",
+	} {
+		if strings.Contains(view, removed) {
+			t.Fatalf("chat view should not contain %q:\n%s", removed, view)
+		}
 	}
 }
 
-func TestChatTargetThinkingSettingsAndSystemPromptControls(t *testing.T) {
+func TestChatInputTreatsPrintableControlsAsText(t *testing.T) {
 	t.Parallel()
 
 	model := newChatTestModel(t)
-	next, cmd := model.Update(textKey("["))
+	for _, value := range []string{"?", "!", "@", "[", "]", "\\"} {
+		next, cmd := model.Update(textKey(value))
+		if cmd != nil {
+			t.Fatalf("%q returned command", value)
+		}
+		model = next.(Model)
+	}
+	if model.chatDraft != "?!@[]\\" {
+		t.Fatalf("chat draft = %q, want punctuation text", model.chatDraft)
+	}
+	if model.chatThinking || model.chatTargetRole != "main" || model.chatSystemEditing || model.chatSettingsOpen {
+		t.Fatalf("printable controls changed chat state: %#v", model)
+	}
+}
+
+func TestChatSlashCommandPopupAndShiftEnter(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	next, cmd := model.Update(textKey("/"))
 	if cmd != nil {
-		t.Fatalf("target cycle returned command")
+		t.Fatalf("slash returned command")
 	}
 	model = next.(Model)
-	if model.chatTargetRole != "embedding" || !strings.Contains(model.View().Content, "[embedding]") {
-		t.Fatalf("target did not cycle to embedding:\n%s", model.View().Content)
+	if !model.chatCommandPopup || !strings.Contains(model.View().Content, "/clear") {
+		t.Fatalf("slash command popup did not open:\n%s", model.View().Content)
 	}
 
-	next, cmd = model.Update(textKey("!"))
+	next, cmd = model.Update(specialKeyWithMod(tea.KeyEnter, tea.ModShift))
 	if cmd != nil {
-		t.Fatalf("thinking toggle returned command")
+		t.Fatalf("shift-enter returned command")
 	}
 	model = next.(Model)
-	if !model.chatThinking || !lineContainsAll(model.View().Content, "Thinking:", "on") {
-		t.Fatalf("thinking toggle failed:\n%s", model.View().Content)
+	if model.chatDraft != "/\n" {
+		t.Fatalf("shift-enter draft = %q, want slash plus newline", model.chatDraft)
 	}
 
-	next, cmd = model.Update(textKey("@"))
+	model = newChatTestModel(t)
+	next, _ = model.Update(textKey("http://x/"))
+	model = next.(Model)
+	if model.chatCommandPopup {
+		t.Fatalf("slash inside text opened command popup:\n%s", model.View().Content)
+	}
+	if model.chatDraft != "http://x/" {
+		t.Fatalf("draft = %q, want slash as text", model.chatDraft)
+	}
+}
+
+func TestChatPromptSettingsAndSendAreClickable(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	view := model.View().Content
+	thinkingRow := lineNumberContaining(view, "Thinking: off")
+	next, cmd := model.Update(leftClick(2, thinkingRow))
 	if cmd != nil {
-		t.Fatalf("system edit open returned command")
+		t.Fatalf("thinking click returned command")
 	}
 	model = next.(Model)
-	if !model.chatSystemEditing || !strings.Contains(model.View().Content, "System prompt input") {
-		t.Fatalf("system prompt composer did not open:\n%s", model.View().Content)
+	if model.chatSettingsDropdown != "thinking" || !strings.Contains(model.View().Content, "on") {
+		t.Fatalf("thinking dropdown did not open:\n%s", model.View().Content)
 	}
-	next, _ = model.Update(textKey("Be brief."))
-	model = next.(Model)
-	next, _ = model.Update(specialKey(tea.KeyEnter))
-	model = next.(Model)
-	if model.chatSystemPrompt != "Be brief." || !strings.Contains(model.View().Content, "Be brief.") {
-		t.Fatalf("system prompt edit failed:\n%s", model.View().Content)
+
+	model = newChatTestModel(t)
+	model.chatDraft = "hello"
+	sendHit, ok := renderedTextHit(model.View().Content, "Send", "chat-send", "")
+	if !ok {
+		t.Fatalf("send hit missing:\n%s", model.View().Content)
 	}
-	if model.chatSystemEditing || !strings.Contains(model.View().Content, "Input") {
-		t.Fatalf("system prompt composer did not return to normal input:\n%s", model.View().Content)
+	next, cmd = model.Update(leftClick(sendHit.start, sendHit.row))
+	model = next.(Model)
+	if cmd == nil {
+		t.Fatalf("send click returned no command")
+	}
+	if !model.chatBusy || model.chatDraft != "" || model.chatMessages[len(model.chatMessages)-1].content != "hello" {
+		t.Fatalf("send click did not submit prompt: busy=%v draft=%q messages=%#v", model.chatBusy, model.chatDraft, model.chatMessages)
+	}
+}
+
+func TestChatErrorRestoresDraft(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.chatDraft = "keep this prompt"
+	next, cmd := model.submitChatPrompt()
+	if cmd == nil {
+		t.Fatalf("submit returned no command")
+	}
+	model = next
+	if model.chatDraft != "" {
+		t.Fatalf("draft should clear while waiting, got %q", model.chatDraft)
+	}
+
+	nextModel, _ := model.Update(chatCompletionMsg{prompt: "keep this prompt", err: errors.New("boom")})
+	model = nextModel.(Model)
+	if model.chatStatus != "error" || model.chatDraft != "keep this prompt" {
+		t.Fatalf("error state = %s draft = %q", model.chatStatus, model.chatDraft)
+	}
+}
+
+func TestChatPromptPopupAnchorsNearSettingAndKeepsFocus(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	view := model.View().Content
+	lineCountBefore := viewLineCount(view)
+	maxHit, ok := renderedTextHit(view, "Max Tokens:", "chat-setting", "max-tokens")
+	if !ok {
+		t.Fatalf("max setting hit missing:\n%s", view)
+	}
+	next, cmd := model.Update(leftClick(maxHit.start, maxHit.row))
+	if cmd != nil {
+		t.Fatalf("max click returned command")
+	}
+	model = next.(Model)
+	view = model.View().Content
+	menuRow := lineNumberContaining(view, "4096")
+	if menuRow < 0 {
+		t.Fatalf("menu should remain visible:\n%s", view)
+	}
+	if got := viewLineCount(view); got != lineCountBefore {
+		t.Fatalf("popup changed layout height from %d to %d:\n%s", lineCountBefore, got, view)
+	}
+	customHit, ok := renderedTextHit(view, "custom...", "chat-dropdown-option", "max:custom")
+	if !ok {
+		t.Fatalf("custom option hit missing:\n%s", view)
+	}
+	next, _ = model.Update(leftClick(customHit.start, customHit.row))
+	model = next.(Model)
+
+	next, _ = model.Update(textKey("777"))
+	model = next.(Model)
+	if model.chatDraft != "" || model.chatCustomValue != "777" {
+		t.Fatalf("custom typing leaked: draft=%q custom=%q", model.chatDraft, model.chatCustomValue)
+	}
+
+	next, _ = model.Update(leftClick(0, model.height-2))
+	model = next.(Model)
+	if model.chatSettingsDropdown != "" || model.chatCustomField != "" {
+		t.Fatalf("outside click did not close popup:\n%s", model.View().Content)
+	}
+}
+
+func TestChatMessageAndInputBoxesUseMessengerAlignment(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.chatMessages = []chatMessage{
+		{role: "assistant", content: "left answer"},
+		{role: "user", content: "right question"},
+	}
+	view := ansi.Strip(model.View().Content)
+	for _, expected := range []string{"[up]", "[down]", "Ready. Input your prompt", "Send"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("boxed chat/input missing %q:\n%s", expected, view)
+		}
+	}
+	assistantLine := lineContaining(view, "left answer")
+	userLine := lineContaining(view, "right question")
+	if strings.Index(userLine, "right question") <= strings.Index(assistantLine, "left answer") {
+		t.Fatalf("user message should be right of assistant:\nassistant=%q\nuser=%q", assistantLine, userLine)
+	}
+}
+
+func TestChatMessageColorOnlyHighlightsUser(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.chatMessages = []chatMessage{
+		{role: "assistant", content: "plain assistant"},
+		{role: "user", content: "colored user"},
+	}
+	lines := model.chatMessageLines(10)
+	assistantLine := lineContaining(strings.Join(lines, "\n"), "plain assistant")
+	userLine := lineContaining(strings.Join(lines, "\n"), "colored user")
+	if strings.Contains(assistantLine, "[48;5;") {
+		t.Fatalf("assistant message should not have a colored background: %q", assistantLine)
+	}
+	if !strings.Contains(userLine, "[48;5;") {
+		t.Fatalf("user message should have a colored background: %q", userLine)
+	}
+}
+
+func TestOverlayLinePreservesBaseStylingOutsidePopup(t *testing.T) {
+	t.Parallel()
+
+	userBubble := lipgloss.NewStyle().Background(lipgloss.Color("53")).Render("colored user")
+	base := "popup area          " + userBubble
+	got := overlayLine(base, "Menu", 0)
+	if !strings.Contains(got, "[48;5;53m") {
+		t.Fatalf("overlay stripped base styling outside popup: %q", got)
+	}
+	if !strings.Contains(ansi.Strip(got), "Menu") || !strings.Contains(ansi.Strip(got), "colored user") {
+		t.Fatalf("overlay lost text: %q", got)
+	}
+}
+
+func TestChatRunnerSelectionPersistsAcrossRouteChanges(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController([]server.RunnerSnapshot{
+		testRunner("LR-M-1", "litert", "main", "running"),
+		testRunner("LM-M-2", "llamacpp", "main", "running"),
+	})
+	controller.routes["main"] = "LR-M-1"
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 34
+	model.setActiveTab("chat")
+
+	runner, ok := model.selectedChatRunner()
+	if !ok || runner.ID != "LR-M-1" {
+		t.Fatalf("initial chat runner = %#v, %v", runner, ok)
+	}
+	controller.routes["main"] = "LM-M-2"
+	model.refresh()
+	runner, ok = model.selectedChatRunner()
+	if !ok || runner.ID != "LR-M-1" {
+		t.Fatalf("chat runner changed after external route update: %#v, %v", runner, ok)
+	}
+}
+
+func TestChatRunnerInitialSelectionIgnoresRouteChurn(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController([]server.RunnerSnapshot{
+		testRunner("LR-M-1", "litert", "main", "running"),
+		testRunner("LM-M-2", "llamacpp", "main", "running"),
+	})
+	controller.routes["main"] = "LM-M-2"
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 34
+	model.setActiveTab("chat")
+
+	runner, ok := model.selectedChatRunner()
+	if !ok || runner.ID != "LR-M-1" {
+		t.Fatalf("chat should default to first stable runner, got %#v ok=%v", runner, ok)
+	}
+}
+
+func TestChatBottomBarClearAndNewActions(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.chatDraft = "draft"
+	model.chatMessages = []chatMessage{{role: "user", content: "old"}}
+	view := model.View().Content
+	for _, label := range []string{"Clear", "New"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("chat bottom bar missing %q:\n%s", label, view)
+		}
+	}
+
+	next, cmd, ok := model.handleButtonHit(buttonHit{action: "chat-clear"})
+	if !ok || cmd != nil {
+		t.Fatalf("clear action returned ok=%v cmd=%v", ok, cmd)
+	}
+	model = next
+	if len(model.chatMessages) != 0 || model.chatDraft != "draft" {
+		t.Fatalf("clear should keep draft and clear messages: draft=%q messages=%#v", model.chatDraft, model.chatMessages)
+	}
+
+	next, cmd, ok = model.handleButtonHit(buttonHit{action: "chat-new"})
+	if !ok || cmd != nil {
+		t.Fatalf("new action returned ok=%v cmd=%v", ok, cmd)
+	}
+	model = next
+	if len(model.chatMessages) != 0 || model.chatDraft != "" {
+		t.Fatalf("new should clear draft and messages: draft=%q messages=%#v", model.chatDraft, model.chatMessages)
+	}
+}
+
+func TestChatLayoutFillsAvailableBodyToFooter(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	view := ansi.Strip(model.View().Content)
+	lines := strings.Split(view, "\n")
+	footerRow := lineNumberContaining(view, "Tab Next")
+	if footerRow <= 0 || footerRow >= len(lines) {
+		t.Fatalf("footer row missing:\n%s", view)
+	}
+	if previous := strings.TrimSpace(lines[footerRow-1]); previous == "" || !strings.Contains(previous, "╰") {
+		t.Fatalf("chat input should sit directly above footer, got previous row %q:\n%s", lines[footerRow-1], view)
 	}
 }
 
@@ -340,6 +611,58 @@ func TestChatTranscriptScrollIsInternal(t *testing.T) {
 	}
 	if model.chatTranscriptScroll == 0 {
 		t.Fatalf("chat transcript scroll did not move")
+	}
+}
+
+func TestChatStreamingChunksUpdateAssistantMessage(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.chatBusy = true
+	model.chatStatus = "processing"
+	model.chatMessages = append(model.chatMessages, chatMessage{role: "user", content: "hello"})
+	chunks := make(chan chatStreamChunkMsg)
+
+	next, cmd := model.Update(chatStreamChunkMsg{content: "hel", chunks: chunks})
+	if cmd == nil {
+		t.Fatalf("stream chunk should keep waiting for the next chunk")
+	}
+	model = next.(Model)
+	if model.chatStatus != "responding" || len(model.chatMessages) != 2 || model.chatMessages[1].content != "hel" {
+		t.Fatalf("first stream chunk failed: status=%s messages=%#v", model.chatStatus, model.chatMessages)
+	}
+
+	next, _ = model.Update(chatStreamChunkMsg{content: "lo"})
+	model = next.(Model)
+	if model.chatMessages[1].content != "hello" {
+		t.Fatalf("second stream chunk content = %q", model.chatMessages[1].content)
+	}
+
+	next, _ = model.Update(chatStreamChunkMsg{done: true})
+	model = next.(Model)
+	if model.chatBusy || model.chatStatus != "idle" {
+		t.Fatalf("stream done left busy=%v status=%s", model.chatBusy, model.chatStatus)
+	}
+}
+
+func TestChatStopCommandCancelsActiveStream(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	cancelled := false
+	model.chatBusy = true
+	model.chatStatus = "responding"
+	model.chatCancel = func() { cancelled = true }
+
+	next, cmd := model.runChatCommand("/stop")
+	if cmd != nil {
+		t.Fatalf("stop returned command")
+	}
+	if !cancelled {
+		t.Fatalf("stop did not call active cancel")
+	}
+	if next.chatBusy || next.chatStatus != "idle" || next.chatCancel != nil {
+		t.Fatalf("stop state = busy %v status %s cancel %v", next.chatBusy, next.chatStatus, next.chatCancel)
 	}
 }
 
@@ -769,6 +1092,30 @@ func TestTopAndBottomBarsTakeFullWidth(t *testing.T) {
 	bottom := lastRenderedLineWithContent(view)
 	if got := ansi.StringWidth(ansi.Strip(bottom)); got != model.width {
 		t.Fatalf("bottom bar width = %d, want %d in %q:\n%s", got, model.width, bottom, view)
+	}
+}
+
+func TestTopBarAppliesBackgroundUnderStatusText(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		ManagedScreen:    true,
+	})
+	model.width = 120
+	model.height = 24
+
+	header := strings.Split(model.View().Content, "\n")[1]
+	for _, expected := range []string{
+		"\x1b[38;5;250;48;5;24mLiteRT:",
+		"\x1b[38;5;250;48;5;24mllama.cpp:",
+		"\x1b[38;5;250;48;5;24mRunners:",
+	} {
+		if !strings.Contains(header, expected) {
+			t.Fatalf("top bar text missing background %q in:\n%q", expected, header)
+		}
 	}
 }
 
@@ -1296,10 +1643,11 @@ func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
 	model = next.(Model)
 	view := model.View().Content
 
-	previewRow := lineNumberContaining(view, "Command Preview")
-	editorRow := lineNumberContaining(view, "CLI Option ctk")
-	if previewRow < 0 || editorRow <= previewRow {
-		t.Fatalf("option editor should render below command preview:\n%s", view)
+	if model.optionModal == nil {
+		t.Fatalf("option editor missing:\n%s", view)
+	}
+	if distance := absInt(model.optionModal.row - (y + 1)); distance > 1 {
+		t.Fatalf("option editor should pop up near clicked row, got click row %d editor row %d:\n%s", y, model.optionModal.row, view)
 	}
 	for _, expected := range []string{
 		"--cache-type-k",
@@ -1311,6 +1659,32 @@ func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("option editor missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestLaunchWizardCLIOptionWholeRowClickOpensPopup(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 180
+	model.height = 40
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+
+	view := model.View().Content
+	_, y := renderedTextPosition(t, view, "KV cache K")
+	next, cmd := model.Update(leftClick(model.width-8, y))
+	if cmd != nil {
+		t.Fatalf("row click returned unexpected command")
+	}
+	if next.(Model).optionModal == nil {
+		t.Fatalf("wide row click did not open option popup:\n%s", next.(Model).View().Content)
 	}
 }
 
@@ -1458,6 +1832,38 @@ func TestGlobalMenuOpensFromBottomLeftAboveActionBar(t *testing.T) {
 	opened := next.(Model)
 	if got, want := lineNumberContaining(opened.View().Content, "Global menu"), opened.globalMenuTopRow()+1; got != want {
 		t.Fatalf("global menu row = %d, want %d:\n%s", got, want, opened.View().Content)
+	}
+}
+
+func TestGlobalMenuKeepsFocusAndClosesOnOutsideClick(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 30
+	model.globalMenuOpen = true
+	beforeActive := model.active
+
+	next, cmd := model.Update(specialKey(tea.KeyTab))
+	if cmd != nil {
+		t.Fatalf("tab with global menu open returned command")
+	}
+	model = next.(Model)
+	if model.active != beforeActive || !model.globalMenuOpen {
+		t.Fatalf("global menu did not keep focus: active=%d open=%v", model.active, model.globalMenuOpen)
+	}
+
+	next, cmd = model.Update(leftClick(model.width-2, 1))
+	if cmd != nil {
+		t.Fatalf("outside click returned command")
+	}
+	model = next.(Model)
+	if model.globalMenuOpen {
+		t.Fatalf("outside click did not close global menu:\n%s", model.View().Content)
 	}
 }
 
@@ -1704,6 +2110,36 @@ func TestRunnerTabRendersAndEditsCommandPreview(t *testing.T) {
 	}
 	if got := strings.Join(updatedRunner.Command, " "); got != editedLine {
 		t.Fatalf("updated command = %q, want %q", got, editedLine)
+	}
+}
+
+func TestWizardRunnerSpecBumpsUsedPortOverride(t *testing.T) {
+	t.Parallel()
+
+	existing := testRunner("LM-M-1", "llamacpp", "main", "running")
+	existing.Port = 9483
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{existing}),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t, "gemma4-litert"),
+	})
+	model.width = 140
+	model.height = 34
+	model.setActiveTab("wizard")
+	model.wizardRuntime = "litert"
+	model.wizardRole = "main"
+	model.wizardBackend = "cpu"
+	model.wizardOptionOverrides["port"] = "9483"
+
+	spec, _, err := model.wizardRunnerSpec()
+	if err != nil {
+		t.Fatalf("wizard spec: %v", err)
+	}
+	if spec.Port == 9483 {
+		t.Fatalf("wizard reused occupied port 9483: %#v", spec)
+	}
+	if !strings.Contains(strings.Join(spec.Command, " "), "--port "+strconv.Itoa(spec.Port)) {
+		t.Fatalf("command does not use adjusted port %d: %v", spec.Port, spec.Command)
 	}
 }
 
@@ -1959,7 +2395,8 @@ func TestLaunchWizardOptionModalSaveAndClearUpdateCommandPreview(t *testing.T) {
 		"-ctk",
 		"--cache-type-k",
 		"Default",
-		"f32, f16, bf16, q8_0, q4_0",
+		"Samples:",
+		"[q4_0]",
 		"[ Save ]",
 		"[ Reset ]",
 		"[ X ]",
@@ -1995,6 +2432,52 @@ func TestLaunchWizardOptionModalSaveAndClearUpdateCommandPreview(t *testing.T) {
 	model = next.(Model)
 	if strings.Contains(wizardCommandPreviewForTest(t, model), "-ctk q4_0") {
 		t.Fatalf("preview still includes cleared override:\n%s", model.View().Content)
+	}
+}
+
+func TestLaunchWizardOptionPopupSamplesPersistAndOutsideClickCloses(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 180
+	model.height = 40
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+
+	x, y := renderedTextPosition(t, model.View().Content, "[ctk]")
+	next, _ := model.Update(leftClick(x, y))
+	model = next.(Model)
+	x, y = renderedTextPosition(t, model.View().Content, "[q4_0]")
+	next, cmd := model.Update(leftClick(x, y))
+	if cmd != nil {
+		t.Fatalf("sample click returned unexpected command")
+	}
+	model = next.(Model)
+	if model.optionModal != nil {
+		t.Fatalf("sample click should close popup after saving")
+	}
+	if got := model.wizardOptionOverrides["cache-type-k"]; got != "q4_0" {
+		t.Fatalf("sample override = %q, want q4_0", got)
+	}
+	if !strings.Contains(wizardCommandPreviewForTest(t, model), "-ctk q4_0") {
+		t.Fatalf("sample choice did not persist into preview:\n%s", model.View().Content)
+	}
+
+	x, y = renderedTextPosition(t, model.View().Content, "[ctk]")
+	next, _ = model.Update(leftClick(x, y))
+	model = next.(Model)
+	next, cmd = model.Update(leftClick(model.width-2, model.height-3))
+	if cmd != nil {
+		t.Fatalf("outside click returned unexpected command")
+	}
+	if next.(Model).optionModal != nil {
+		t.Fatalf("outside click did not close popup:\n%s", next.(Model).View().Content)
 	}
 }
 
@@ -2309,6 +2792,24 @@ func lineNumberContaining(view string, text string) int {
 	return -1
 }
 
+func lineNumberContainingAfter(view string, text string, minRow int) int {
+	for index, line := range strings.Split(view, "\n") {
+		if index >= minRow && strings.Contains(line, text) {
+			return index
+		}
+	}
+	return -1
+}
+
+func lineContaining(view string, text string) string {
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, text) {
+			return line
+		}
+	}
+	return ""
+}
+
 func lineContainsAll(view string, parts ...string) bool {
 	for _, line := range strings.Split(view, "\n") {
 		matches := true
@@ -2382,6 +2883,13 @@ func buttonHitsContainAction(hits []buttonHit, action string) bool {
 	return false
 }
 
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func runnerTerminalSection(t *testing.T, view string) string {
 	t.Helper()
 
@@ -2429,6 +2937,10 @@ func backendWorkingValue(
 
 func specialKey(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code}
+}
+
+func specialKeyWithMod(code rune, mod tea.KeyMod) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: mod}
 }
 
 func textKey(value string) tea.KeyPressMsg {

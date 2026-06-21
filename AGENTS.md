@@ -19,9 +19,12 @@ them in Git.
 - `README.md` - human setup, structure, model policy, and verification commands.
 - `G0LiteLLaMa/README.md` - runtime contract and release commands.
 - `G0LiteLLaMa/go.mod` - Go module definition.
+- `docs/loop-factory.md` - spec queue operation and Loop Factory commands.
 
 ## Project Map
 
+- `bin/loop-factory` - repo-local spec queue CLI.
+- `factory/specs/` - Loop Factory inbox, active, and archive specs.
 - `G0LiteLLaMa/cmd/` - Go entry point.
 - `G0LiteLLaMa/internal/` - runtime, proxy, server, supervisor, and TUI code.
 - `G0LiteLLaMa/e2e/` - TUI and runtime/backend E2E tests.
@@ -52,6 +55,9 @@ bun run e2e:tui
 
 # Release artifacts
 cd G0LiteLLaMa && scripts/build-release.sh dist
+
+# Loop Factory CLI
+python3 -m unittest tests.test_loop_factory
 ```
 
 For docs-only changes, at minimum run `git diff --check`.
@@ -87,6 +93,10 @@ bun run e2e:tui
 For any visible TUI edit, capture and show a fresh screenshot of the rendered
 terminal before finishing, and commit the intentional change at the end after
 verification passes.
+
+Use `skills/tui-model-screenshot/SKILL.md` when a visible TUI change needs a
+deterministic screenshot from `Model.View().Content`. That screenshot evidence
+does not replace rendered `@microsoft/tui-test` behavior verification.
 
 Direct `Model.Update` tests are necessary but not sufficient for TUI behavior.
 Rendered terminal behavior must be verified through `@microsoft/tui-test`
@@ -141,6 +151,12 @@ E2E is not required.
 - Keep changes scoped to the user request.
 - If an active plan exists for the requested work, read it first, follow its
   scope, and do not add unrelated improvements without asking.
+- For Loop Factory work, inspect queue state with
+  `python3 bin/loop-factory scan`, generate prompts with
+  `python3 bin/loop-factory dispatch --agent codex --limit 1`, and stage a spec
+  with `python3 bin/loop-factory dispatch --agent codex --limit 1 --stage` when
+  implementation starts. Implement only the active spec acceptance criteria and
+  leave active specs in `factory/specs/active/` for review.
 - For large numbered implementation plans, use sequential subagents only when
   delegating, review each result in the parent thread, and make one commit per
   completed goal when the user asks for committed goal slices.

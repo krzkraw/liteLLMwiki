@@ -14,6 +14,17 @@ routes, runtime startup, or model installation. The broader "whole TUI must be
 clickable" direction remains valid, but this implementation slice makes the
 Chat tab fully mouse-operable first.
 
+## Grill Gate
+
+- `Enter` sends the chat prompt.
+- `Shift+Enter` inserts a newline in the chat input.
+- Printable punctuation such as `?`, `!`, `@`, `[`, `]`, and `\` inserts text
+  instead of triggering hidden commands.
+- Slash commands are allowed only through a popup opened by leading `/` in an
+  empty input.
+- Keep the current target role choices `main`, `embedding`, and `reranking`;
+  chat-capable target rules can be refined later.
+
 ## Current Problems
 
 - Route, model, target, thinking, settings, transcript, and input are rendered

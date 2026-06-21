@@ -88,6 +88,41 @@ From the repo root, script syntax checks:
 bash -n configure.sh install.sh launch-g0litellama.sh clean.sh
 ```
 
+## Loop Factory
+
+Spec-driven agent work is queued under `factory/specs/` and operated with the
+repo-local CLI:
+
+```bash
+python3 bin/loop-factory scan
+python3 bin/loop-factory dispatch --agent codex --limit 1
+python3 bin/loop-factory dispatch --agent codex --limit 1 --stage
+```
+
+### Start A Spec
+
+- Use Loop Factory. Scan the queue and show me the next inbox spec. Do not stage yet.
+- Use Loop Factory. Dispatch the next Codex prompt, but do not stage.
+- Use Loop Factory. Stage the next inbox spec and implement it. Follow AGENTS.md, use TDD, and only implement the active spec acceptance criteria.
+
+### While Working
+
+- Continue the active Loop Factory spec. Scan first, read the active spec, then proceed from the next unfinished acceptance criterion.
+- Use Loop Factory. Verify the active spec using its frontmatter commands and report exact results.
+
+### Review
+
+- Use Loop Factory independent-review-gate on the active spec. Review the implementation against acceptance criteria, with findings first.
+- Use Loop Factory backprop-spec-sync. Compare the implementation diff against the active spec and update docs/specs only if behavior intentionally changed.
+
+### Finish
+
+- Use Loop Factory. If the active spec passes verification and review, archive it and report files changed, verification, risks, and next queue state.
+For This Chat TUI Spec
+- Use Loop Factory. Stage and implement clickable-streaming-chat-tui. Follow AGENTS.md. Use skills/tui-model-screenshot/SKILL.md for visual evidence, and run the verification commands from the active spec.
+
+See `docs/loop-factory.md` for the full workflow.
+
 ## Rendered TUI E2E
 
 The repository is Go-first, but rendered terminal E2E tests use Bun and

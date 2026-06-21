@@ -43,26 +43,40 @@ test("launch wizard creates a fake runner", async ({ terminal }) => {
   await expect(terminal.getByText("Routes / Controls", { strict: false })).toBeVisible();
 });
 
-test("chat tab renders target system input transcript and settings", async ({ terminal }) => {
+test("chat tab renders clickable streaming layout", async ({ terminal }) => {
   await openWizardByKeyboard(terminal);
   terminal.keyPress(Key.Enter);
   await expect(terminal.getByText("4 ● LR-M-1", { strict: false })).toBeVisible();
 
   terminal.keyPress("5");
-  await expect(terminal.getByText("Chat console / main target", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("/v1/chat/completions", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Prompt settings", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("Input", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("Transcript", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("Thinking", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Thinking: off", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Target: main", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Temperature: default", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Ready. Input your prompt", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Send", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("[up]", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("[down]", { strict: false })).toBeVisible();
+  if (findText(terminal, "Chat console") || findText(terminal, "Transcript")) {
+    throw new Error("chat should not render old console/transcript panels");
+  }
 
-  terminal.keyPress("[");
-  await expect(terminal.getByText("Chat console / embedding target", { strict: false })).toBeVisible();
-  terminal.keyPress("!");
-  await expect(terminal.getByText("Thinking", { strict: false })).toBeVisible();
-  terminal.keyPress("@");
-  await expect(terminal.getByText("System prompt input", { strict: false })).toBeVisible();
+  clickText(terminal, "Thinking:");
+  await expect(terminal.getByText("on", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("off", { strict: false })).toBeVisible();
+
+  clickText(terminal, "Max Tokens:");
+  await expect(terminal.getByText("custom...", { strict: false })).toBeVisible();
+  clickText(terminal, "custom...");
+  terminal.write("777");
+  await expect(terminal.getByText("777", { strict: false })).toBeVisible();
   terminal.keyPress(Key.Enter);
-  await expect(terminal.getByText("Input", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Max Tokens: 777", { strict: false })).toBeVisible();
+
+  terminal.write("Hi?! @ []");
+  terminal.keyPress(Key.Enter);
+  await expect(terminal.getByText("Hi?! @ []", { strict: false })).toBeVisible();
 });
 
 test("dashboard keyboard can open and select runner route slot", async ({ terminal }) => {
@@ -97,7 +111,7 @@ test("wizard option modal updates command preview", async ({ terminal }) => {
   terminal.write("q4_0");
   terminal.keyPress(Key.Enter);
 
-  await expect(terminal.getByText("-ctk q4_0", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("q4_0           KV cache K", { strict: false })).toBeVisible();
 });
 
 test("wizard command preview edit adds option rows", async ({ terminal }) => {

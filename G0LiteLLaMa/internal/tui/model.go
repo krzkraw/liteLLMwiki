@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -90,6 +91,17 @@ type chatCompletionMsg struct {
 	err      error
 }
 
+type chatStreamStartMsg struct {
+	chunks <-chan chatStreamChunkMsg
+}
+
+type chatStreamChunkMsg struct {
+	content string
+	err     error
+	done    bool
+	chunks  <-chan chatStreamChunkMsg
+}
+
 type runnerUpdateMsg struct {
 	field  string
 	value  string
@@ -125,6 +137,8 @@ type runtimeEdit struct {
 type optionModal struct {
 	option wizardCLIOption
 	input  textinput.Model
+	row    int
+	column int
 }
 
 type wizardCommandEdit struct {
@@ -185,14 +199,32 @@ type Model struct {
 	runtimeEdit          *runtimeEdit
 	runtimeDraft         server.RuntimeControlConfig
 	chatDraft            string
+	chatPendingDraft     string
 	chatMessages         []chatMessage
 	chatBusy             bool
+	chatStatus           string
+	chatTokensPerSecond  float64
+	chatStreamStarted    time.Time
+	chatAssistantIndex   int
+	chatCancel           context.CancelFunc
+	chatSettingsDropdown string
+	chatPopupRow         int
+	chatPopupColumn      int
+	chatCustomField      string
+	chatCustomValue      string
+	chatCommandPopup     bool
+	chatInputFocused     bool
 	chatTargetRole       string
+	chatRunnerID         string
 	chatTargetDropdown   bool
 	chatSystemPrompt     string
 	chatSystemEditing    bool
 	chatThinking         bool
 	chatSettingsOpen     bool
+	chatTemperature      string
+	chatTopP             string
+	chatMaxTokens        string
+	chatStream           bool
 	chatTranscriptScroll int
 	managedScreen        bool
 	scrollOffset         int
@@ -386,6 +418,12 @@ func NewModel(options ModelOptions) Model {
 		ctx:                   ctx,
 		chatEndpoint:          chatEndpoint,
 		chatTargetRole:        "main",
+		chatStatus:            "idle",
+		chatAssistantIndex:    -1,
+		chatTemperature:       "default",
+		chatTopP:              "default",
+		chatMaxTokens:         "default",
+		chatStream:            true,
 		active:                0,
 		managedScreen:         options.ManagedScreen,
 		wizardRuntime:         "litert",
@@ -456,6 +494,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateWizardCommandEditMouse(msg)
 		}
 		return m.updateMouse(msg)
+	case tea.MouseWheelMsg:
+		return m.updateMouseWheel(msg)
 	case tickMsg:
 		m.refresh()
 		m.clampScrollOffset()
@@ -478,15 +518,26 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = m.modelDownloadNotice(msg)
 	case chatCompletionMsg:
 		m.chatBusy = false
+		m.chatStatus = "idle"
 		if msg.err != nil {
+			m.chatStatus = "error"
+			if m.chatAssistantIndex < 0 {
+				m.chatDraft = fallback(m.chatPendingDraft, msg.prompt)
+			}
+			m.chatPendingDraft = ""
 			m.notice = fmt.Sprintf("chat prompt failed: %v", msg.err)
 			break
 		}
+		m.chatPendingDraft = ""
 		m.chatMessages = append(m.chatMessages, chatMessage{
 			role:    "assistant",
 			content: msg.response,
 		})
 		m.notice = "sent chat prompt through /v1/chat/completions"
+	case chatStreamStartMsg:
+		return m, waitForChatStreamChunk(msg.chunks)
+	case chatStreamChunkMsg:
+		return m.applyChatStreamChunk(msg)
 	case runnerUpdateMsg:
 		m.refresh()
 		m.setActiveTab("runner:" + msg.runner.ID)
@@ -502,6 +553,20 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = fmt.Sprintf("%s route -> %s", msg.role, msg.runner.ID)
 	}
 
+	return m, nil
+}
+
+func (m Model) updateMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.activeTabID() == "chat" {
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.chatTranscriptScroll++
+		case tea.MouseWheelDown:
+			m.chatTranscriptScroll--
+		}
+		m.clampChatTranscriptScroll()
+		return m, nil
+	}
 	return m, nil
 }
 
@@ -532,6 +597,8 @@ func (m Model) updateMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return m.updateWizardMouse(msg.X, msg.Y)
 	case "setup":
 		return m.updateSetupMouse(msg.X, msg.Y), nil
+	case "chat":
+		return m.updateChatMouse(msg.X, msg.Y)
 	default:
 		if runner, ok := m.activeRunner(); ok {
 			return m.updateRunnerBodyMouse(runner, msg.X, msg.Y)
@@ -614,11 +681,6 @@ func (m Model) buttonHitRegistry() []buttonHit {
 			hits = append(hits, hit)
 		}
 	}
-	addTokenHit := func(text string, action string, payload string) {
-		if hit, ok := renderedTokenHit(view, text, action, payload); ok {
-			hits = append(hits, hit)
-		}
-	}
 	addTextHitOnRow := func(row int, text string, action string, payload string) {
 		if hit, ok := renderedTextHitOnRow(view, row, text, action, payload); ok {
 			hits = append(hits, hit)
@@ -636,6 +698,39 @@ func (m Model) buttonHitRegistry() []buttonHit {
 	addTextHitOnVisibleLine := func(lineNeedle string, text string, action string, payload string) {
 		row := lineNumberContainingText(view, lineNeedle)
 		addTextHitOnRow(row, text, action, payload)
+	}
+	addPopupRowHit := func(text string, action string, payload string) {
+		lines := strings.Split(view, "\n")
+		for row := maxInt(0, m.chatPopupRow); row < len(lines); row++ {
+			plain := ansi.Strip(lines[row])
+			if !strings.Contains(plain, text) {
+				continue
+			}
+			hits = append(hits, buttonHit{
+				action:  action,
+				row:     row,
+				start:   0,
+				end:     maxInt(ansi.StringWidth(plain), m.width),
+				payload: payload,
+			})
+			return
+		}
+	}
+	addWholeRowHit := func(row int, start int, action string, payload string) {
+		if row < 0 {
+			return
+		}
+		lines := strings.Split(view, "\n")
+		if row >= len(lines) {
+			return
+		}
+		hits = append(hits, buttonHit{
+			action:  action,
+			row:     row,
+			start:   start,
+			end:     maxInt(ansi.StringWidth(ansi.Strip(lines[row])), m.width),
+			payload: payload,
+		})
 	}
 
 	if footerRow := lastLineNumberContainingText(view, "Menu"); footerRow >= 0 {
@@ -666,6 +761,9 @@ func (m Model) buttonHitRegistry() []buttonHit {
 	}
 
 	if m.optionModal != nil {
+		for _, sample := range wizardOptionSamples(m.optionModal.option) {
+			addTextHit("["+sample+"]", "modal-sample", sample)
+		}
 		addTextHit("[ Save ]", "modal-save", "")
 		addTextHit("[ Reset ]", "modal-clear", "")
 		addTextHit("[ X ]", "modal-close", "")
@@ -706,7 +804,9 @@ func (m Model) buttonHitRegistry() []buttonHit {
 			addTextHit(entry.Filename, "wizard-model", strconv.Itoa(index))
 		}
 		for _, option := range m.visibleWizardCLIOptions() {
-			addTokenHit(wizardOptionButtonText(option), "wizard-option", option.ID)
+			if hit, ok := renderedTextHit(view, wizardOptionButtonText(option), "wizard-option", option.ID); ok {
+				addWholeRowHit(hit.row, hit.start, "wizard-option", option.ID)
+			}
 		}
 		addTextHit("[ Prev ]", "wizard-options-prev", "")
 		addTextHit("[ Next ]", "wizard-options-next", "")
@@ -720,17 +820,17 @@ func (m Model) buttonHitRegistry() []buttonHit {
 		}
 	}
 	if m.activeTabID() == "chat" {
-		for _, role := range []string{"main", "embedding", "reranking"} {
-			addTokenHitOnVisibleLine("Target", selectedToken(role, role == m.chatTarget()), "chat-target", role)
+		for _, field := range []string{"Thinking", "Target", "System", "Temperature", "Top P", "Max Tokens", "Stream"} {
+			addTextHit(field+":", "chat-setting", strings.ToLower(strings.ReplaceAll(field, " ", "-")))
 		}
-		addTextHit("System prompt", "chat-system", "")
-		addTextHit("Thinking", "chat-thinking", "")
-		addTextHit("Settings", "chat-settings", "")
-		if m.chatTargetDropdown {
-			for index, role := range []string{"main", "embedding", "reranking"} {
-				row := lineNumberContainingText(view, fmt.Sprintf("%d %s", index+1, role))
-				addTextHitOnRow(row, role, "chat-target", role)
-			}
+		addTextHit("Send", "chat-send", "")
+		addTextHit("Ready. Input your prompt", "chat-input", "")
+		addTextHit("Wait...", "chat-input", "")
+		for _, command := range chatCommandNames() {
+			addTextHit(command, "chat-command", command)
+		}
+		for _, option := range m.chatDropdownOptions() {
+			addPopupRowHit(option.label, "chat-dropdown-option", option.value)
 		}
 	}
 
@@ -739,7 +839,7 @@ func (m Model) buttonHitRegistry() []buttonHit {
 
 func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 	switch hit.action {
-	case "menu", "next", "previous", "quit", "runner-start", "runner-stop", "runner-restart", "runner-edit-command", "runner-close":
+	case "menu", "next", "previous", "quit", "runner-start", "runner-stop", "runner-restart", "runner-edit-command", "runner-close", "chat-clear", "chat-new":
 		return m.handleBottomBarOrRunnerHit(hit)
 	case "global-next":
 		m.active = (m.active + 1) % len(m.tabs())
@@ -790,7 +890,7 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case "wizard-option":
 		if option, ok := m.wizardOptionByID(hit.payload); ok {
-			m.openOptionModal(option)
+			m.openOptionModalAt(option, hit.row+1, hit.start)
 			return m, nil, true
 		}
 	case "wizard-options-prev":
@@ -838,8 +938,26 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 		m.chatSettingsOpen = !m.chatSettingsOpen
 		m.chatTargetDropdown = false
 		return m, nil, true
+	case "chat-setting":
+		m.openChatSetting(hit.payload, hit.row, hit.start)
+		return m, nil, true
+	case "chat-dropdown-option":
+		m.applyChatDropdownOption(hit.payload)
+		return m, nil, true
+	case "chat-command":
+		next, cmd := m.runChatCommand(hit.payload)
+		return next, cmd, true
+	case "chat-input":
+		m.chatInputFocused = true
+		return m, nil, true
+	case "chat-send":
+		next, cmd := m.submitChatPrompt()
+		return next, cmd, true
 	case "modal-save":
 		m.saveOptionModal()
+		return m, nil, true
+	case "modal-sample":
+		m.saveOptionModalValue(hit.payload)
 		return m, nil, true
 	case "modal-clear":
 		if m.optionModal != nil {
@@ -891,6 +1009,12 @@ func (m Model) handleBottomBarOrRunnerHit(hit buttonHit) (Model, tea.Cmd, bool) 
 		if runner, ok := m.runnerByID(fallback(hit.payload, m.activeRunnerID())); ok {
 			return m, m.runnerActionCmd("close", runner.ID), true
 		}
+	case "chat-clear":
+		next, cmd := m.runChatCommand("/clear")
+		return next, cmd, true
+	case "chat-new":
+		next, cmd := m.runChatCommand("/new")
+		return next, cmd, true
 	}
 	return m, nil, false
 }
@@ -901,7 +1025,9 @@ func (m Model) handleGlobalMenuClick(x int, y int) (Model, tea.Cmd, bool) {
 	}
 	menuTop := m.globalMenuTopRow()
 	if y < menuTop || y >= m.height-1 {
-		return m, nil, false
+		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
+		return m, nil, true
 	}
 	menuWidth := lipgloss.Width(firstRenderedLine(m.globalMenuMainView()))
 	paletteX := menuWidth + panelGridColumnGap
@@ -914,7 +1040,14 @@ func (m Model) handleGlobalMenuClick(x int, y int) (Model, tea.Cmd, bool) {
 			m.globalPaletteMenuOpen = false
 			return m, nil, true
 		}
-		return m, nil, false
+		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
+		return m, nil, true
+	}
+	if x >= menuWidth {
+		m.globalMenuOpen = false
+		m.globalPaletteMenuOpen = false
+		return m, nil, true
 	}
 
 	switch y - menuTop {
@@ -950,10 +1083,10 @@ func (m *Model) handleTabClick(x int, y int) bool {
 		return false
 	}
 	position := 0
-	for index := range m.tabs() {
+	tabs := m.tabs()
+	for index := range tabs {
 		if x >= position && x < position+tabBoxWidth {
-			m.active = index
-			m.resetScroll()
+			m.setActiveTab(tabs[index].id)
 			return true
 		}
 		position += tabBoxWidth + 1
@@ -1172,6 +1305,16 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.globalMenuOpen {
+		switch key.Code {
+		case tea.KeyEsc, tea.KeyF1:
+			m.globalMenuOpen = false
+			m.globalPaletteMenuOpen = false
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
 	switch key.Code {
 	case tea.KeyEsc:
 		return m, tea.Quit
@@ -1182,6 +1325,7 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyRight:
 		m.active = (m.active + 1) % len(m.tabs())
 		m.resetScroll()
+		m.pinChatRunnerIfUnset()
 		return m, nil
 	case tea.KeyTab:
 		if key.Mod.Contains(tea.ModShift) {
@@ -1190,10 +1334,12 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.active = (m.active + 1) % len(m.tabs())
 		}
 		m.resetScroll()
+		m.pinChatRunnerIfUnset()
 		return m, nil
 	case tea.KeyLeft:
 		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
 		m.resetScroll()
+		m.pinChatRunnerIfUnset()
 		return m, nil
 	case tea.KeyBackspace, tea.KeyEnter:
 		if m.activeTabID() == "wizard" && key.Code == tea.KeyEnter {
@@ -1550,6 +1696,7 @@ func (m Model) updateOptionModalMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd
 		next, cmd, _ := m.handleButtonHit(hit)
 		return next, cmd
 	}
+	m.optionModal = nil
 	return m, nil
 }
 
@@ -1581,13 +1728,41 @@ func (m Model) updateWizardCommandEditMouse(msg tea.MouseClickMsg) (tea.Model, t
 	return m, nil
 }
 
+func (m Model) updateChatMouse(x int, y int) (tea.Model, tea.Cmd) {
+	if hit, ok := m.buttonHitAt(x, y); ok {
+		next, cmd, _ := m.handleButtonHit(hit)
+		return next, cmd
+	}
+	m.chatSettingsDropdown = ""
+	m.chatTargetDropdown = false
+	m.chatCommandPopup = false
+	m.chatCustomField = ""
+	m.chatCustomValue = ""
+	return m, nil
+}
+
 func (m *Model) saveOptionModal() {
 	if m.optionModal == nil {
 		return
 	}
-	value := strings.TrimSpace(m.optionModal.input.Value())
+	m.saveOptionModalValue(m.optionModal.input.Value())
+}
+
+func (m *Model) saveOptionModalValue(value string) {
+	if m.optionModal == nil {
+		return
+	}
+	value = strings.TrimSpace(value)
 	if m.wizardOptionOverrides == nil {
 		m.wizardOptionOverrides = map[string]string{}
+	}
+	if m.optionModal.option.Kind == "bool" && value == "on" {
+		value = ""
+	}
+	if m.optionModal.option.Kind == "bool" && value == "off" {
+		delete(m.wizardOptionOverrides, m.optionModal.option.ID)
+		m.optionModal = nil
+		return
 	}
 	m.wizardOptionOverrides[m.optionModal.option.ID] = value
 	m.optionModal = nil
@@ -1605,14 +1780,49 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
-	if m.chatSystemEditing {
-		if msg.Key().Text == "@" {
-			m.chatSystemEditing = false
+	if m.chatCustomField != "" {
+		switch msg.Key().Code {
+		case tea.KeyEsc:
+			m.chatCustomField = ""
+			m.chatCustomValue = ""
+			m.chatSettingsDropdown = ""
+			return m, nil
+		case tea.KeyEnter:
+			if m.applyChatCustomValue() {
+				m.chatCustomField = ""
+				m.chatCustomValue = ""
+				m.chatSettingsDropdown = ""
+			}
+			return m, nil
+		case tea.KeyBackspace:
+			if len(m.chatCustomValue) > 0 {
+				m.chatCustomValue = m.chatCustomValue[:len(m.chatCustomValue)-1]
+			}
 			return m, nil
 		}
+		if msg.String() == "ctrl+h" {
+			if len(m.chatCustomValue) > 0 {
+				m.chatCustomValue = m.chatCustomValue[:len(m.chatCustomValue)-1]
+			}
+			return m, nil
+		}
+		if msg.Key().Text != "" && isChatNumericInput(msg.Key().Text) {
+			m.chatCustomValue += msg.Key().Text
+		}
+		return m, nil
+	}
+	if m.chatSystemEditing {
 		switch msg.Key().Code {
-		case tea.KeyEnter:
+		case tea.KeyEsc:
 			m.chatSystemEditing = false
+			return m, nil
+		case tea.KeyEnter:
+			if msg.Key().Mod&tea.ModShift != 0 {
+				m.chatSystemPrompt += "\n"
+			} else {
+				m.chatSystemEditing = false
+				m.chatSettingsDropdown = ""
+			}
 			return m, nil
 		case tea.KeyBackspace:
 			if len(m.chatSystemPrompt) > 0 {
@@ -1633,9 +1843,11 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Key().Code {
 	case tea.KeyEsc:
-		if m.chatTargetDropdown || m.chatSettingsOpen {
+		if m.chatCommandPopup || m.chatTargetDropdown || m.chatSettingsOpen || m.chatSettingsDropdown != "" {
+			m.chatCommandPopup = false
 			m.chatTargetDropdown = false
 			m.chatSettingsOpen = false
+			m.chatSettingsDropdown = ""
 			return m, nil
 		}
 		return m, tea.Quit
@@ -1659,58 +1871,29 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if len(m.chatDraft) > 0 {
 			m.chatDraft = m.chatDraft[:len(m.chatDraft)-1]
 		}
+		m.chatCommandPopup = strings.HasPrefix(m.chatDraft, "/")
 		return m, nil
 	case tea.KeyEnter:
-		prompt := strings.TrimSpace(m.chatDraft)
-		if prompt == "" || m.chatBusy {
+		if msg.Key().Mod&tea.ModShift != 0 {
+			m.chatDraft += "\n"
 			return m, nil
 		}
-		runner, ok := m.selectedChatRunner()
-		if !ok {
-			m.notice = "chat prompt failed: no main runner configured"
+		if m.chatCommandPopup {
+			if command := m.selectedChatCommand(); command != "" {
+				return m.runChatCommand(command)
+			}
 			return m, nil
 		}
-		m.chatDraft = ""
-		m.chatBusy = true
-		m.chatMessages = append(m.chatMessages, chatMessage{
-			role:    "user",
-			content: prompt,
-		})
-		return m, m.chatCompletionCmd(prompt, runner)
+		return m.submitChatPrompt()
 	default:
 		if msg.Key().Text == "" {
 			return m, nil
 		}
-		if m.chatTargetDropdown {
-			if m.selectChatTargetByKey(msg.Key().Text) {
-				return m, nil
-			}
-		}
-		switch msg.Key().Text {
-		case "[":
-			m.cycleChatTarget(1)
-			return m, nil
-		case "]":
-			m.cycleChatTarget(-1)
-			return m, nil
-		case "!":
-			m.chatThinking = !m.chatThinking
-			return m, nil
-		case "?":
-			m.chatSettingsOpen = !m.chatSettingsOpen
-			m.chatTargetDropdown = false
-			return m, nil
-		case "@":
-			m.chatSystemEditing = !m.chatSystemEditing
-			m.chatSettingsOpen = false
-			m.chatTargetDropdown = false
-			return m, nil
-		case "\\":
-			m.chatTargetDropdown = !m.chatTargetDropdown
-			m.chatSettingsOpen = false
+		if m.chatSettingsDropdown != "" {
 			return m, nil
 		}
 		m.chatDraft += msg.Key().Text
+		m.chatCommandPopup = strings.HasPrefix(m.chatDraft, "/")
 		return m, nil
 	}
 }
@@ -1788,15 +1971,11 @@ func (m Model) fullView() string {
 	}
 
 	builder.WriteString(m.activeContentView())
-	if m.optionModal != nil {
-		builder.WriteString("\n")
-		builder.WriteString(renderPanelSpec(m.optionModalSpec(), m.width))
-	}
 	if m.wizardCommandEdit != nil {
 		builder.WriteString("\n")
 		builder.WriteString(renderPanelSpec(m.wizardCommandEditSpec(), m.width))
 	}
-	return pinFooterToBottom(builder.String(), m.footerView(), m.height)
+	return m.applyWizardOptionOverlay(pinFooterToBottom(builder.String(), m.footerView(), m.height))
 }
 
 func (m Model) managedScreenView() string {
@@ -1818,7 +1997,7 @@ func (m Model) managedScreenView() string {
 	}
 	visibleBody = fitLinesToHeight(visibleBody, bodyHeight)
 
-	return fitLinesToHeight(joinPanels(top, visibleBody, footer), m.height)
+	return m.applyWizardOptionOverlay(fitLinesToHeight(joinPanels(top, visibleBody, footer), m.height))
 }
 
 func (m Model) managedStartupView() string {
@@ -2035,7 +2214,7 @@ func (m *Model) selectRuneTab(value string) bool {
 	if m.active != index {
 		m.resetScroll()
 	}
-	m.active = index
+	m.setActiveTab(m.tabs()[index].id)
 	return true
 }
 
@@ -2066,14 +2245,18 @@ func (m Model) palette() tuiPalette {
 
 func (m Model) headerView() string {
 	background := panelBackgroundForAccent(m.palette().header)
+	statusStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("250")).
+		Background(lipgloss.Color(background))
+	separator := statusStyle.Render("  ")
 	parts := []string{
 		titleStyle.Background(lipgloss.Color(background)).Render("◆ G0LiteLLaMa"),
-		"LiteRT: " + runtimeUseBadge(m.runtimeAliveCount("litert")),
-		"llama.cpp: " + runtimeUseBadge(m.runtimeAliveCount("llamacpp")),
-		fmt.Sprintf("Runners: %d", len(m.snapshot.Runners)),
+		statusStyle.Render("LiteRT: ") + runtimeUseBadge(m.runtimeAliveCount("litert"), background),
+		statusStyle.Render("llama.cpp: ") + runtimeUseBadge(m.runtimeAliveCount("llamacpp"), background),
+		statusStyle.Render(fmt.Sprintf("Runners: %d", len(m.snapshot.Runners))),
 	}
 	if m.width > 0 || m.height > 0 {
-		parts = append(parts, fmt.Sprintf("Viewport: %dx%d", m.width, m.height))
+		parts = append(parts, statusStyle.Render(fmt.Sprintf("Viewport: %dx%d", m.width, m.height)))
 	}
 
 	style := lipgloss.NewStyle().
@@ -2084,7 +2267,7 @@ func (m Model) headerView() string {
 	if m.width > 2 {
 		style = style.Width(m.width)
 	}
-	return style.Render(strings.Join(parts, "  "))
+	return style.Render(strings.Join(parts, separator))
 }
 
 func (m Model) runnerByID(id string) (server.RunnerSnapshot, bool) {
@@ -2107,11 +2290,15 @@ func (m Model) runtimeAliveCount(runtimeName string) int {
 	return count
 }
 
-func runtimeUseBadge(alive int) string {
+func runtimeUseBadge(alive int, background string) string {
+	style := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(runtimeUseBadgeColor(alive))).
+		Background(lipgloss.Color(background))
 	if alive > 0 {
-		return coloredStatus("active", runtimeUseBadgeColor(alive))
+		return style.Render("active")
 	}
-	return coloredStatus("idle", runtimeUseBadgeColor(alive))
+	return style.Render("idle")
 }
 
 func runtimeUseBadgeColor(alive int) string {
@@ -2122,7 +2309,30 @@ func runtimeUseBadgeColor(alive int) string {
 }
 
 func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
-	return m.selectedRunnerForRole(m.chatTarget())
+	if strings.TrimSpace(m.chatRunnerID) != "" {
+		if runner, ok := m.runnerByID(m.chatRunnerID); ok && runner.Role == m.chatTarget() {
+			return runner, true
+		}
+	}
+	return m.defaultChatRunnerForRole(m.chatTarget())
+}
+
+func (m Model) defaultChatRunnerForRole(role string) (server.RunnerSnapshot, bool) {
+	var fallbackRunner server.RunnerSnapshot
+	hasFallback := false
+	for _, runner := range m.snapshot.Runners {
+		if runner.Role != role {
+			continue
+		}
+		if strings.EqualFold(runner.State, "running") {
+			return runner, true
+		}
+		if !hasFallback {
+			fallbackRunner = runner
+			hasFallback = true
+		}
+	}
+	return fallbackRunner, hasFallback
 }
 
 func (m Model) selectedRunnerForRole(role string) (server.RunnerSnapshot, bool) {
@@ -2162,8 +2372,18 @@ func (m *Model) setActiveTab(id string) {
 				m.resetScroll()
 			}
 			m.active = index
+			m.pinChatRunnerIfUnset()
 			return
 		}
+	}
+}
+
+func (m *Model) pinChatRunnerIfUnset() {
+	if m.activeTabID() != "chat" || strings.TrimSpace(m.chatRunnerID) != "" {
+		return
+	}
+	if runner, ok := m.defaultChatRunnerForRole(m.chatTarget()); ok {
+		m.chatRunnerID = runner.ID
 	}
 }
 
@@ -2353,7 +2573,7 @@ func (m Model) bottomActionBarView() string {
 			style = style.Bold(true).
 				Foreground(lipgloss.Color(palette.actionFG)).
 				Background(lipgloss.Color(palette.actionBG))
-		case "runner-stop", "runner-restart", "runner-edit-command", "runner-close":
+		case "runner-stop", "runner-restart", "runner-edit-command", "runner-close", "chat-clear", "chat-new":
 			style = style.Bold(true).Foreground(lipgloss.Color(palette.variantHeader))
 		case "hint":
 			style = style.Faint(true)
@@ -2395,6 +2615,12 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | k Cache K | c Command | Enter Start"})
 	case "setup":
 		items = append(items, bottomActionSegment{id: "hint", label: "Setup: Up/Down select | Enter toggle"})
+	case "chat":
+		items = append(
+			items,
+			bottomActionSegment{id: "chat-clear", label: "Clear"},
+			bottomActionSegment{id: "chat-new", label: "New"},
+		)
 	default:
 		if runner, ok := m.activeRunner(); ok {
 			items = append(
@@ -3601,10 +3827,54 @@ func (m Model) optionModalSpec() panelSpec {
 	}
 }
 
+func (m Model) optionModalView() string {
+	if m.optionModal == nil {
+		return ""
+	}
+	option := m.optionModal.option
+	width := clampInt(m.width-m.optionModal.column-2, 46, 74)
+	lines := []string{
+		option.Long,
+		truncateToWidth(option.Description, panelBodyWidth(width)),
+		formatKV("Default", fallback(option.DefaultText, "none")),
+	}
+	if option.Short != "" {
+		lines = append([]string{formatKV("Shortcut", option.Short)}, lines...)
+	}
+	if samples := wizardOptionSamples(option); len(samples) > 0 {
+		buttons := make([]string, 0, len(samples))
+		for _, sample := range samples {
+			buttons = append(buttons, "["+sample+"]")
+		}
+		lines = append(lines, wrapWords("Samples:", buttons, panelBodyWidth(width))...)
+	}
+	lines = append(lines,
+		"",
+		"Input",
+		m.optionModal.input.View(),
+		"",
+		"[ Save ]  [ Reset ]  [ X ]",
+	)
+	return renderMenuPanelWidth("CLI Option "+wizardOptionDisplayName(option), lines, m.palette(), width)
+}
+
+func (m Model) applyWizardOptionOverlay(view string) string {
+	if m.optionModal == nil {
+		return view
+	}
+	block := m.optionModalView()
+	rows := strings.Split(view, "\n")
+	maxRow := len(rows) - viewLineCount(m.footerView()) - viewLineCount(block)
+	row := clampInt(m.optionModal.row, 0, maxInt(0, maxRow))
+	column := clampInt(m.optionModal.column, 0, maxInt(0, m.width-lipgloss.Width(firstRenderedLine(block))-1))
+	return overlayBlock(view, block, row, column)
+}
+
 func (m Model) wizardOptionFromMouse(x int, y int) (wizardCLIOption, bool) {
 	view := m.viewContent()
 	for _, option := range m.visibleWizardCLIOptions() {
-		if renderedPointHitsToken(view, x, y, wizardOptionButtonText(option)) {
+		row := lineNumberContainingText(view, wizardOptionButtonText(option))
+		if row == y {
 			return option, true
 		}
 	}
@@ -3612,13 +3882,14 @@ func (m Model) wizardOptionFromMouse(x int, y int) (wizardCLIOption, bool) {
 }
 
 func (m *Model) openOptionModal(option wizardCLIOption) {
+	m.openOptionModalAt(option, m.contentTopRow()+1, 0)
+}
+
+func (m *Model) openOptionModalAt(option wizardCLIOption, row int, column int) {
 	input := textinput.New()
 	input.SetValue(m.wizardOptionOverrides[option.ID])
 	input.Focus()
-	m.optionModal = &optionModal{option: option, input: input}
-	if m.managedScreen {
-		m.scrollOffset = m.maxScrollOffset()
-	}
+	m.optionModal = &optionModal{option: option, input: input, row: row, column: column}
 }
 
 func (m *Model) openWizardCommandEdit() {
@@ -3864,6 +4135,14 @@ func appendWizardOptionOverrides(
 	return args
 }
 
+func copyStringMap(values map[string]string) map[string]string {
+	copied := make(map[string]string, len(values))
+	for key, value := range values {
+		copied[key] = value
+	}
+	return copied
+}
+
 func removeFlag(args []string, shortFlag string, longFlag string, hasValue bool) []string {
 	out := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
@@ -3992,6 +4271,21 @@ func wizardOptionByID(id string) (wizardCLIOption, bool) {
 		}
 	}
 	return wizardCLIOption{}, false
+}
+
+func wizardOptionSamples(option wizardCLIOption) []string {
+	if len(option.Enums) > 0 {
+		return option.Enums
+	}
+	switch option.Kind {
+	case "bool":
+		return []string{"on", "off"}
+	case "int":
+		if strings.TrimSpace(option.DefaultText) != "" && option.DefaultText != "model default" && option.DefaultText != "role default" {
+			return []string{option.DefaultText}
+		}
+	}
+	return nil
 }
 
 func applicableWizardOptions(runtimeName string, backend string, role string) []wizardCLIOption {
@@ -4224,41 +4518,48 @@ func (m Model) wizardDryRunLines() []string {
 }
 
 func (m Model) chatView() string {
-	composer := renderPanelSpec(panelSpec{m.chatComposerTitle(), m.chatComposerLines(), "214"}, m.width)
-	top := m.chatTopRowView()
-	transcriptRows := m.chatTranscriptWindowSize(top, composer)
-	transcript := renderPanelSpec(panelSpec{"Transcript", m.chatTranscriptLines(transcriptRows), "45"}, m.width)
-	panels := []string{top, transcript, composer}
-	if m.chatTargetDropdown {
-		panels = append(panels, renderPanelSpec(panelSpec{"Target role", m.chatTargetLines(), "205"}, m.width))
+	status := m.chatStatusLine()
+	settings := renderPanelSpec(panelSpec{"Prompt settings", m.chatSettingsLines(), "205"}, m.width)
+	input := m.chatInputBoxView()
+	top := joinChatPanels(status, settings)
+	messageRows := m.chatTranscriptWindowSize(top, input)
+	messages := m.chatMessagesBoxView(messageRows)
+	panels := []string{status, settings, messages, input}
+	if m.chatSettingsDropdown != "" || m.chatCommandPopup || m.chatSystemEditing {
+		base := joinChatPanels(panels...)
+		row := maxInt(0, m.chatPopupRow-m.contentTopRow())
+		return overlayBlock(base, m.chatPopupView(), row, maxInt(0, m.chatPopupColumn))
 	}
-	return joinPanels(panels...)
+	return joinChatPanels(panels...)
 }
 
-func (m Model) chatTopRowView() string {
-	if m.width < 120 {
-		return joinPanels(
-			renderPanelSpec(panelSpec{"Chat console / " + m.chatTarget() + " target", m.chatRunnerLines(), "82"}, m.width),
-			renderPanelSpec(panelSpec{"Prompt settings", m.chatSettingsLines(), "205"}, m.width),
-		)
+func (m Model) chatStatusLine() string {
+	route := runnerRoleRoute(m.chatTarget())
+	modelID := "not configured"
+	if runner, ok := m.selectedChatRunner(); ok {
+		modelID = fallback(runner.ModelID, runner.ID)
 	}
-	columnWidth := (m.width - panelGridColumnGap) / 2
-	left := renderPanelSpec(panelSpec{"Chat console / " + m.chatTarget() + " target", m.chatRunnerLines(), "82"}, columnWidth)
-	right := renderPanelSpec(panelSpec{"Prompt settings", m.chatSettingsLines(), "205"}, columnWidth)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", panelGridColumnGap), right)
+	return fmt.Sprintf("%s | %s | %s | %s", route, modelID, m.chatVisibleStatus(), m.chatThroughputText())
 }
 
 func (m Model) chatTranscriptWindowSize(top string, composer string) int {
 	if m.height <= 0 {
 		return 8
 	}
-	fixed := viewLineCount(m.headerView()) + 1 + viewLineCount(m.tabBar()) + 2 + viewLineCount(m.footerView())
-	if strings.TrimSpace(m.notice) != "" {
-		fixed += viewLineCount(noticeStyle.Render(m.notice)) + 2
+	available := m.chatBodyTargetHeight()
+	rows := available - viewLineCount(top) - viewLineCount(composer) - 2
+	return maxInt(1, rows)
+}
+
+func (m Model) chatBodyTargetHeight() int {
+	if m.managedScreen {
+		return managedBodyHeight(m.height, m.managedTopView(), m.footerView())
 	}
-	available := m.height - fixed
-	rows := available - viewLineCount(top) - viewLineCount(composer) - 4 - 3
-	return clampInt(rows, 1, 12)
+	prefix := viewLineCount(m.headerView()) + viewLineCount(m.tabBar()) + 1
+	if strings.TrimSpace(m.notice) != "" {
+		prefix += viewLineCount(noticeStyle.Render(m.notice)) + 1
+	}
+	return maxInt(0, m.height-prefix-viewLineCount(m.footerView()))
 }
 
 func (m Model) chatRunnerLines() []string {
@@ -4303,9 +4604,6 @@ func (m Model) chatTargetLines() []string {
 }
 
 func (m Model) chatComposerTitle() string {
-	if m.chatSystemEditing {
-		return "System prompt input"
-	}
 	return "Input"
 }
 
@@ -4331,18 +4629,24 @@ func (m Model) chatComposerLines() []string {
 	}
 }
 
-func (m Model) chatTranscriptLines(window int) []string {
+func (m Model) chatMessageLines(window int) []string {
 	if len(m.chatMessages) == 0 {
-		return []string{"No messages yet."}
+		return nil
 	}
 
 	lines := make([]string, 0, len(m.chatMessages))
 	for _, message := range m.chatMessages {
-		prefix := "Assistant"
-		if message.role == "user" {
-			prefix = "You"
+		for _, line := range strings.Split(message.content, "\n") {
+			rendered := lipgloss.NewStyle().Foreground(lipgloss.Color("219")).Render(line)
+			if message.role == "user" {
+				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("53")).Padding(0, 1).Render(line)
+				rendered = strings.Repeat(" ", maxInt(0, panelBodyWidth(m.width)-lipgloss.Width(rendered))) + rendered
+			}
+			if message.role == "error" {
+				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("160")).Padding(0, 1).Render(line)
+			}
+			lines = append(lines, rendered)
 		}
-		lines = append(lines, prefix+": "+message.content)
 	}
 	if window < 1 {
 		window = 1
@@ -4351,8 +4655,7 @@ func (m Model) chatTranscriptLines(window int) []string {
 	scroll := minInt(maxInt(m.chatTranscriptScroll, 0), maxScroll)
 	start := maxInt(0, len(lines)-window-scroll)
 	end := minInt(len(lines), start+window)
-	visible := append([]string{fmt.Sprintf("Scroll %d/%d", scroll, maxScroll)}, lines[start:end]...)
-	return visible
+	return lines[start:end]
 }
 
 func (m Model) chatParityLines() []string {
@@ -4375,16 +4678,311 @@ func (m Model) chatParityLines() []string {
 func (m Model) chatSettingsLines() []string {
 	systemPrompt := strings.TrimSpace(m.chatSystemPrompt)
 	if systemPrompt == "" {
-		systemPrompt = "(empty)"
+		systemPrompt = "empty"
 	}
+	target := m.chatTarget()
 	return []string{
-		"System prompt " + systemPrompt,
-		"Temperature  default",
-		"Top P        default",
-		"Max tokens   default",
-		"Stream       on through proxy",
-		"Close with ? or Esc.",
+		strings.Join([]string{
+			"Thinking: " + boolOnOff(m.chatThinking),
+			"Target: " + target,
+			"System: " + systemPrompt,
+			"Temperature: " + m.chatTemperature,
+			"Top P: " + m.chatTopP,
+			"Max Tokens: " + m.chatMaxTokens,
+			"Stream: " + boolOnOff(m.chatStream),
+		}, "  "),
 	}
+}
+
+func (m Model) chatMessagesBoxView(rows int) string {
+	lines := []string{"[up]"}
+	messageLines := m.chatMessageLines(maxInt(1, rows-2))
+	if len(messageLines) == 0 {
+		messageLines = []string{mutedStyle.Render("No messages yet.")}
+	}
+	for len(messageLines) < maxInt(1, rows-2) {
+		messageLines = append(messageLines, "")
+	}
+	lines = append(lines, messageLines...)
+	lines = append(lines, "[down]")
+	return renderBox(lines, "45", m.width)
+}
+
+func (m Model) chatInputBoxView() string {
+	placeholder := "Ready. Input your prompt"
+	if m.chatBusy {
+		placeholder = "Wait..."
+	}
+	value := m.chatDraft
+	if strings.TrimSpace(value) == "" {
+		value = mutedStyle.Render(placeholder)
+	}
+	lines := strings.Split(value, "\n")
+	lines = append(lines, m.chatSendLabel())
+	return renderBox(lines, "214", m.width)
+}
+
+func (m Model) chatSendLabel() string {
+	if m.chatBusy {
+		return mutedStyle.Render("Send")
+	}
+	return "Send"
+}
+
+func (m Model) chatPopupTitle() string {
+	if m.chatCommandPopup {
+		return "Commands"
+	}
+	if m.chatSystemEditing {
+		return "System"
+	}
+	return "Menu"
+}
+
+func (m Model) chatPopupLines() []string {
+	if m.chatCustomField != "" {
+		value := m.chatCustomValue
+		if value == "" {
+			value = mutedStyle.Render("type value")
+		}
+		return []string{value, "Enter applies. Esc cancels."}
+	}
+	if m.chatCommandPopup {
+		prefix := strings.TrimPrefix(m.chatDraft, "/")
+		var lines []string
+		for _, command := range chatCommandNames() {
+			if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {
+				lines = append(lines, command)
+			}
+		}
+		if len(lines) == 0 {
+			return []string{"No commands."}
+		}
+		return lines
+	}
+	if m.chatSystemEditing {
+		if strings.TrimSpace(m.chatSystemPrompt) == "" {
+			return []string{mutedStyle.Render("empty"), "Enter saves. Shift+Enter newline."}
+		}
+		lines := strings.Split(m.chatSystemPrompt, "\n")
+		return append(lines, "Enter saves. Shift+Enter newline.")
+	}
+	options := m.chatDropdownOptions()
+	lines := make([]string, 0, len(options))
+	for _, option := range options {
+		lines = append(lines, option.label)
+	}
+	return lines
+}
+
+func (m Model) chatPopupView() string {
+	return renderMenuPanel(m.chatPopupTitle(), m.chatPopupLines(), m.palette())
+}
+
+type chatDropdownOption struct {
+	label string
+	value string
+}
+
+func (m Model) chatDropdownOptions() []chatDropdownOption {
+	switch m.chatSettingsDropdown {
+	case "thinking":
+		return []chatDropdownOption{{"on", "thinking:on"}, {"off", "thinking:off"}}
+	case "target":
+		return []chatDropdownOption{{"main", "target:main"}, {"embedding", "target:embedding"}, {"reranking", "target:reranking"}}
+	case "runner":
+		runners := m.runnersForRole(m.chatTarget())
+		options := make([]chatDropdownOption, 0, len(runners))
+		for _, runner := range runners {
+			options = append(options, chatDropdownOption{runner.ID, "runner:" + runner.ID})
+		}
+		return options
+	case "temp":
+		return []chatDropdownOption{{"default", "temp:default"}, {"0.2", "temp:0.2"}, {"0.7", "temp:0.7"}, {"1.0", "temp:1.0"}, {"custom...", "temp:custom"}}
+	case "top-p":
+		return []chatDropdownOption{{"default", "top-p:default"}, {"0.8", "top-p:0.8"}, {"0.9", "top-p:0.9"}, {"1.0", "top-p:1.0"}, {"custom...", "top-p:custom"}}
+	case "max":
+		return []chatDropdownOption{{"default", "max:default"}, {"256", "max:256"}, {"1024", "max:1024"}, {"4096", "max:4096"}, {"custom...", "max:custom"}}
+	case "stream":
+		return []chatDropdownOption{{"on", "stream:on"}, {"off", "stream:off"}}
+	default:
+		return nil
+	}
+}
+
+func (m *Model) openChatSetting(field string, row int, column int) {
+	switch field {
+	case "temperature":
+		field = "temp"
+	case "max-tokens":
+		field = "max"
+	}
+	m.chatCommandPopup = false
+	m.chatTargetDropdown = false
+	m.chatSettingsOpen = false
+	m.chatCustomField = ""
+	m.chatCustomValue = ""
+	m.chatPopupRow = row + 1
+	m.chatPopupColumn = column
+	if field == "system" {
+		m.chatSystemEditing = true
+		m.chatSettingsDropdown = ""
+		return
+	}
+	m.chatSystemEditing = false
+	m.chatSettingsDropdown = field
+}
+
+func (m *Model) applyChatDropdownOption(payload string) {
+	field, value, ok := strings.Cut(payload, ":")
+	if !ok {
+		return
+	}
+	switch field {
+	case "thinking":
+		m.chatThinking = value == "on"
+	case "target":
+		if isWizardRole(value) {
+			m.chatTargetRole = value
+			m.chatRunnerID = ""
+			if runner, ok := m.defaultChatRunnerForRole(value); ok {
+				m.chatRunnerID = runner.ID
+			}
+		}
+	case "runner":
+		if runner, ok := m.runnerByID(value); ok && runner.Role == m.chatTarget() {
+			m.chatRunnerID = value
+		}
+	case "temp":
+		if value == "custom" {
+			m.chatCustomField = "temp"
+			m.chatCustomValue = ""
+			return
+		}
+		m.chatTemperature = value
+	case "top-p":
+		if value == "custom" {
+			m.chatCustomField = "top-p"
+			m.chatCustomValue = ""
+			return
+		}
+		m.chatTopP = value
+	case "max":
+		if value == "custom" {
+			m.chatCustomField = "max"
+			m.chatCustomValue = ""
+			return
+		}
+		m.chatMaxTokens = value
+	case "stream":
+		m.chatStream = value == "on"
+	}
+	m.chatSettingsDropdown = ""
+}
+
+func (m *Model) applyChatCustomValue() bool {
+	value := strings.TrimSpace(m.chatCustomValue)
+	if value == "" {
+		return false
+	}
+	switch m.chatCustomField {
+	case "temp":
+		m.chatTemperature = value
+	case "top-p":
+		m.chatTopP = value
+	case "max":
+		m.chatMaxTokens = value
+	default:
+		return false
+	}
+	return true
+}
+
+func isChatNumericInput(value string) bool {
+	for _, char := range value {
+		if (char < '0' || char > '9') && char != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func (m Model) chatVisibleStatus() string {
+	if strings.TrimSpace(m.chatStatus) == "" {
+		return "idle"
+	}
+	return m.chatStatus
+}
+
+func (m Model) chatThroughputText() string {
+	if m.chatTokensPerSecond <= 0 || m.chatVisibleStatus() == "idle" {
+		return "0 tok/s"
+	}
+	return fmt.Sprintf("%.0f tok/s", m.chatTokensPerSecond)
+}
+
+func chatCommandNames() []string {
+	return []string{"/clear", "/stop", "/new", "/settings"}
+}
+
+func (m Model) selectedChatCommand() string {
+	prefix := strings.TrimPrefix(m.chatDraft, "/")
+	for _, command := range chatCommandNames() {
+		if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {
+			return command
+		}
+	}
+	return ""
+}
+
+func (m Model) runChatCommand(command string) (Model, tea.Cmd) {
+	switch command {
+	case "/clear":
+		m.chatMessages = nil
+	case "/stop":
+		if m.chatCancel != nil {
+			m.chatCancel()
+			m.chatCancel = nil
+		}
+		m.chatBusy = false
+		m.chatStatus = "idle"
+	case "/new":
+		m.chatDraft = ""
+		m.chatMessages = nil
+	case "/settings":
+		m.chatSettingsDropdown = "thinking"
+	}
+	m.chatCommandPopup = false
+	return m, nil
+}
+
+func (m Model) submitChatPrompt() (Model, tea.Cmd) {
+	prompt := strings.TrimSpace(m.chatDraft)
+	if prompt == "" || m.chatBusy {
+		return m, nil
+	}
+	runner, ok := m.selectedChatRunner()
+	if !ok {
+		m.chatStatus = "error"
+		m.notice = "chat prompt failed: no main runner configured"
+		return m, nil
+	}
+	m.chatRunnerID = runner.ID
+	m.chatDraft = ""
+	m.chatPendingDraft = prompt
+	m.chatCommandPopup = false
+	m.chatBusy = true
+	m.chatStatus = "processing"
+	m.chatTokensPerSecond = 0
+	m.chatStreamStarted = time.Now()
+	m.chatAssistantIndex = -1
+	m.chatMessages = append(m.chatMessages, chatMessage{
+		role:    "user",
+		content: prompt,
+	})
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.chatCancel = cancel
+	return m, m.chatCompletionCmd(ctx, prompt, runner)
 }
 
 func (m *Model) clampChatTranscriptScroll() {
@@ -4772,13 +5370,18 @@ func (m Model) wizardCreateCmd() tea.Cmd {
 	}
 }
 
-func (m Model) chatCompletionCmd(prompt string, runner server.RunnerSnapshot) tea.Cmd {
+func (m Model) chatCompletionCmd(ctx context.Context, prompt string, runner server.RunnerSnapshot) tea.Cmd {
 	endpoint := m.chatEndpoint
 	modelID := fallback(runner.ModelID, runner.ID)
 	systemPrompt := strings.TrimSpace(m.chatSystemPrompt)
-	ctx := m.ctx
+	stream := m.chatStream
 
 	return func() tea.Msg {
+		if stream {
+			chunks := make(chan chatStreamChunkMsg, 16)
+			go streamChatCompletion(ctx, endpoint, modelID, systemPrompt, prompt, chunks)
+			return chatStreamStartMsg{chunks: chunks}
+		}
 		response, err := postChatCompletion(ctx, endpoint, modelID, systemPrompt, prompt)
 		return chatCompletionMsg{
 			prompt:   prompt,
@@ -4786,6 +5389,67 @@ func (m Model) chatCompletionCmd(prompt string, runner server.RunnerSnapshot) te
 			err:      err,
 		}
 	}
+}
+
+func waitForChatStreamChunk(chunks <-chan chatStreamChunkMsg) tea.Cmd {
+	return func() tea.Msg {
+		chunk, ok := <-chunks
+		if !ok {
+			return chatStreamChunkMsg{done: true}
+		}
+		chunk.chunks = chunks
+		return chunk
+	}
+}
+
+func (m Model) applyChatStreamChunk(msg chatStreamChunkMsg) (Model, tea.Cmd) {
+	if msg.err != nil {
+		m.chatBusy = false
+		m.chatStatus = "error"
+		m.chatCancel = nil
+		if m.chatAssistantIndex >= 0 && m.chatAssistantIndex < len(m.chatMessages) {
+			m.chatMessages[m.chatAssistantIndex].content += "\n[error: " + msg.err.Error() + "]"
+		} else {
+			m.chatDraft = m.chatPendingDraft
+			m.chatMessages = append(m.chatMessages, chatMessage{role: "error", content: msg.err.Error()})
+		}
+		m.chatPendingDraft = ""
+		m.notice = fmt.Sprintf("chat prompt failed: %v", msg.err)
+		return m, nil
+	}
+	if msg.done {
+		m.chatBusy = false
+		m.chatStatus = "idle"
+		m.chatTokensPerSecond = 0
+		m.chatAssistantIndex = -1
+		m.chatCancel = nil
+		m.chatPendingDraft = ""
+		m.notice = "sent chat prompt through /v1/chat/completions"
+		return m, nil
+	}
+	if msg.content == "" {
+		if msg.chunks == nil {
+			return m, nil
+		}
+		return m, waitForChatStreamChunk(msg.chunks)
+	}
+	m.chatStatus = "responding"
+	if m.chatAssistantIndex < 0 || m.chatAssistantIndex >= len(m.chatMessages) {
+		m.chatMessages = append(m.chatMessages, chatMessage{role: "assistant"})
+		m.chatAssistantIndex = len(m.chatMessages) - 1
+	}
+	m.chatMessages[m.chatAssistantIndex].content += msg.content
+	elapsed := time.Since(m.chatStreamStarted).Seconds()
+	if elapsed > 0 {
+		m.chatTokensPerSecond = float64(len(strings.Fields(m.chatMessages[m.chatAssistantIndex].content))) / elapsed
+	}
+	if m.chatTranscriptScroll == 0 {
+		m.clampChatTranscriptScroll()
+	}
+	if msg.chunks == nil {
+		return m, nil
+	}
+	return m, waitForChatStreamChunk(msg.chunks)
 }
 
 func (m Model) modelDownloadCmd() tea.Cmd {
@@ -5097,6 +5761,94 @@ type chatCompletionResponse struct {
 	} `json:"choices"`
 }
 
+type chatStreamResponse struct {
+	Choices []struct {
+		Delta chatAPIItem `json:"delta"`
+	} `json:"choices"`
+}
+
+func streamChatCompletion(
+	ctx context.Context,
+	endpoint string,
+	modelID string,
+	systemPrompt string,
+	prompt string,
+	chunks chan<- chatStreamChunkMsg,
+) {
+	defer close(chunks)
+	messages := []chatAPIItem{}
+	if strings.TrimSpace(systemPrompt) != "" {
+		messages = append(messages, chatAPIItem{
+			Role:    "system",
+			Content: strings.TrimSpace(systemPrompt),
+		})
+	}
+	messages = append(messages, chatAPIItem{
+		Role:    "user",
+		Content: prompt,
+	})
+	payload := chatCompletionRequest{
+		Model:    modelID,
+		Messages: messages,
+		Stream:   true,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		chunks <- chatStreamChunkMsg{err: fmt.Errorf("encode chat request: %w", err)}
+		return
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		chunks <- chatStreamChunkMsg{err: fmt.Errorf("create chat request: %w", err)}
+		return
+	}
+	request.Header.Set("content-type", "application/json")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		chunks <- chatStreamChunkMsg{err: fmt.Errorf("send chat request: %w", err)}
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		responseBody, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			chunks <- chatStreamChunkMsg{err: fmt.Errorf("read chat response: %w", readErr)}
+			return
+		}
+		chunks <- chatStreamChunkMsg{err: fmt.Errorf("chat response %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))}
+		return
+	}
+
+	scanner := bufio.NewScanner(response.Body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			chunks <- chatStreamChunkMsg{done: true}
+			return
+		}
+		var decoded chatStreamResponse
+		if err := json.Unmarshal([]byte(data), &decoded); err != nil {
+			chunks <- chatStreamChunkMsg{err: fmt.Errorf("decode chat stream: %w", err)}
+			return
+		}
+		for _, choice := range decoded.Choices {
+			if choice.Delta.Content != "" {
+				chunks <- chatStreamChunkMsg{content: choice.Delta.Content}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		chunks <- chatStreamChunkMsg{err: fmt.Errorf("read chat stream: %w", err)}
+		return
+	}
+	chunks <- chatStreamChunkMsg{done: true}
+}
+
 func postChatCompletion(
 	ctx context.Context,
 	endpoint string,
@@ -5375,6 +6127,7 @@ func (m Model) wizardRunnerSpec() (server.RunnerSpec, catalog.Entry, error) {
 		port:    m.nextWizardPort(entry.Role),
 	})
 	m.applyWizardOptionSpecOverrides(&spec)
+	m.deconflictWizardPort(&spec)
 	spec.Command = m.wizardCommandArgv(spec)
 	return spec, entry, nil
 }
@@ -5392,6 +6145,27 @@ func (m Model) applyWizardOptionSpecOverrides(spec *server.RunnerSpec) {
 		spec.Verbose = true
 	}
 	spec.Upstream = fmt.Sprintf("http://%s:%d", fallback(spec.Host, "127.0.0.1"), spec.Port)
+}
+
+func (m Model) deconflictWizardPort(spec *server.RunnerSpec) {
+	spec.Port = m.nextAvailableWizardPort(spec.Port)
+	spec.Upstream = fmt.Sprintf("http://%s:%d", fallback(spec.Host, "127.0.0.1"), spec.Port)
+}
+
+func (m Model) nextAvailableWizardPort(port int) int {
+	if port <= 0 {
+		port = defaultPortForRole(m.wizardRole)
+	}
+	used := map[int]bool{}
+	for _, runner := range m.snapshot.Runners {
+		if runner.Port > 0 {
+			used[runner.Port] = true
+		}
+	}
+	for used[port] {
+		port++
+	}
+	return port
 }
 
 func (m Model) wizardCommandArgv(spec server.RunnerSpec) []string {
@@ -5440,7 +6214,12 @@ func (m Model) wizardCommandArgv(spec server.RunnerSpec) []string {
 	default:
 		return nil
 	}
-	args = appendWizardOptionOverrides(args, spec.Runtime, spec.Backend, spec.Role, m.wizardOptionOverrides)
+	overrides := m.wizardOptionOverrides
+	if _, ok := overrides["port"]; ok {
+		overrides = copyStringMap(overrides)
+		overrides["port"] = strconv.Itoa(spec.Port)
+	}
+	args = appendWizardOptionOverrides(args, spec.Runtime, spec.Backend, spec.Role, overrides)
 	return m.appendWizardCommandExtras(args)
 }
 
@@ -5919,18 +6698,82 @@ func renderPanel(title string, lines []string, color string) string {
 	return renderPanelWidth(title, lines, color, 0)
 }
 
+func renderBox(lines []string, color string, width int) string {
+	body := strings.Join(lines, "\n")
+	if strings.TrimSpace(body) == "" {
+		body = " "
+	}
+	background := panelBackgroundForAccent(color)
+	style := lipgloss.NewStyle().
+		Border(panelBorder).
+		BorderForeground(lipgloss.Color(color)).
+		Background(lipgloss.Color(background)).
+		Padding(0, 1)
+	if width > style.GetHorizontalFrameSize() {
+		style = style.Width(panelInnerWidth(width))
+	}
+	return style.Render(body)
+}
+
+func overlayBlock(base string, block string, row int, column int) string {
+	lines := strings.Split(base, "\n")
+	blockLines := strings.Split(block, "\n")
+	if len(blockLines) == 0 {
+		return base
+	}
+	shadow := lipgloss.NewStyle().Background(lipgloss.Color("236")).Render(strings.Repeat(" ", lipgloss.Width(firstRenderedLine(block))))
+	for index := range blockLines {
+		shadowRow := row + index + 1
+		if shadowRow >= 0 && shadowRow < len(lines) {
+			lines[shadowRow] = overlayLine(lines[shadowRow], shadow, column+2)
+		}
+	}
+	for index, blockLine := range blockLines {
+		targetRow := row + index
+		if targetRow >= 0 && targetRow < len(lines) {
+			lines[targetRow] = overlayLine(lines[targetRow], blockLine, column)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func overlayLine(base string, block string, column int) string {
+	if column < 0 {
+		column = 0
+	}
+	baseWidth := ansi.StringWidth(base)
+	prefix := ansi.Cut(base, 0, minInt(column, baseWidth))
+	for ansi.StringWidth(prefix) < column {
+		prefix += " "
+	}
+	blockWidth := lipgloss.Width(block)
+	suffix := ""
+	suffixStart := column + blockWidth
+	if suffixStart < baseWidth {
+		suffix = ansi.Cut(base, suffixStart, baseWidth)
+	}
+	return prefix + block + suffix
+}
+
 func renderMenuPanel(title string, lines []string, palette tuiPalette) string {
+	return renderMenuPanelWidth(title, lines, palette, 0)
+}
+
+func renderMenuPanelWidth(title string, lines []string, palette tuiPalette, width int) string {
 	body := strings.Join(lines, "\n")
 	if strings.TrimSpace(body) == "" {
 		body = "No data."
 	}
-	return lipgloss.NewStyle().
+	style := lipgloss.NewStyle().
 		Border(panelBorder).
 		BorderForeground(lipgloss.Color(palette.menu)).
 		Background(lipgloss.Color(palette.footerBG)).
 		Foreground(lipgloss.Color(palette.footerFG)).
-		Padding(0, 1).
-		Render(subtitleStyle.Render(title) + "\n" + body)
+		Padding(0, 1)
+	if width > style.GetHorizontalFrameSize() {
+		style = style.Width(panelInnerWidth(width))
+	}
+	return style.Render(subtitleStyle.Render(title) + "\n" + body)
 }
 
 func renderPanelWidth(title string, lines []string, color string, width int) string {
@@ -6013,6 +6856,27 @@ func singleLineText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
+func wrapWords(prefix string, words []string, width int) []string {
+	if len(words) == 0 {
+		return nil
+	}
+	if width <= 0 {
+		return []string{prefix + " " + strings.Join(words, " ")}
+	}
+	lines := []string{}
+	current := prefix
+	for _, word := range words {
+		next := current + " " + word
+		if lipgloss.Width(next) > width && current != prefix {
+			lines = append(lines, current)
+			current = strings.Repeat(" ", lipgloss.Width(prefix)) + " " + word
+			continue
+		}
+		current = next
+	}
+	return append(lines, current)
+}
+
 func joinPanels(panels ...string) string {
 	visible := make([]string, 0, len(panels))
 	for _, panel := range panels {
@@ -6022,6 +6886,17 @@ func joinPanels(panels ...string) string {
 		visible = append(visible, panel)
 	}
 	return strings.Join(visible, "\n\n")
+}
+
+func joinChatPanels(panels ...string) string {
+	visible := make([]string, 0, len(panels))
+	for _, panel := range panels {
+		if strings.TrimSpace(panel) == "" {
+			continue
+		}
+		visible = append(visible, panel)
+	}
+	return strings.Join(visible, "\n")
 }
 
 func managedBodyHeight(totalHeight int, top string, footer string) int {
@@ -6074,9 +6949,6 @@ func (m Model) commandRailSizingView() string {
 
 func (m Model) scrollableBodyView() string {
 	body := m.activeContentView()
-	if m.optionModal != nil {
-		body = joinPanels(body, renderPanelSpec(m.optionModalSpec(), m.width))
-	}
 	if m.wizardCommandEdit != nil {
 		body = joinPanels(body, renderPanelSpec(m.wizardCommandEditSpec(), m.width))
 	}

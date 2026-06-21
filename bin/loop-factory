@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Tiny repo-local Loop Factory CLI."""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+SPEC_ROOT = Path("factory/specs")
+QUEUES = ("inbox", "active", "archive")
+
+
+LOOPS = {
+    "spec-grill-gate": (
+        "Ask one decision question at a time, recommend an answer, then record "
+        "the final decisions in the spec under '# Grill Gate'."
+    ),
+    "active-spec-verify": (
+        "Verify the active spec implementation using the commands listed in "
+        "the spec frontmatter. Report exact command results."
+    ),
+    "independent-review-gate": (
+        "Review the active spec implementation against acceptance criteria, "
+        "then report findings before archive."
+    ),
+    "backprop-spec-sync": (
+        "Compare implementation diffs to the active spec and update docs/specs "
+        "only for behavior that intentionally changed."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class Spec:
+    path: Path
+    queue: str
+    meta: dict[str, object]
+    body: str
+
+    @property
+    def spec_id(self) -> str:
+        return str(self.meta.get("id") or self.path.stem)
+
+    @property
+    def title(self) -> str:
+        return str(self.meta.get("title") or self.spec_id)
+
+    @property
+    def verification(self) -> list[str]:
+        value = self.meta.get("verification")
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return []
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="loop-factory")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("scan", help="list queued specs")
+
+    dispatch_parser = subparsers.add_parser("dispatch", help="render work prompt")
+    dispatch_parser.add_argument("--agent", default="codex", choices=("codex", "claude"))
+    dispatch_parser.add_argument("--limit", type=int, default=1)
+    dispatch_parser.add_argument("--stage", action="store_true")
+
+    loops_parser = subparsers.add_parser("loops", help="inspect built-in loops")
+    loops_subparsers = loops_parser.add_subparsers(dest="loops_command", required=True)
+    loops_subparsers.add_parser("list", help="list built-in loops")
+    show_parser = loops_subparsers.add_parser("show", help="show one loop")
+    show_parser.add_argument("loop_id")
+    prompt_parser = loops_subparsers.add_parser("prompt", help="render loop prompt")
+    prompt_parser.add_argument("loop_id")
+    prompt_parser.add_argument("--agent", default="codex", choices=("codex", "claude"))
+
+    args = parser.parse_args(argv)
+    if args.command == "scan":
+        return scan()
+    if args.command == "dispatch":
+        return dispatch(agent=args.agent, limit=args.limit, stage=args.stage)
+    if args.command == "loops":
+        return loops(args)
+    raise AssertionError(args.command)
+
+
+def scan() -> int:
+    specs_by_queue = {queue: list_specs(queue) for queue in QUEUES}
+    for queue in QUEUES:
+        print(f"{queue}: {len(specs_by_queue[queue])}")
+        for spec in specs_by_queue[queue]:
+            print(f"  - {spec.spec_id}: {spec.title} ({display_path(spec.path)})")
+    return 0
+
+
+def dispatch(agent: str, limit: int, stage: bool) -> int:
+    if limit < 1:
+        print("--limit must be at least 1", file=sys.stderr)
+        return 2
+
+    specs = list_specs("inbox")[:limit]
+    if not specs:
+        print("No inbox specs.")
+        return 0
+
+    for index, spec in enumerate(specs):
+        if index:
+            print("\n---\n")
+        prompt_spec = stage_spec(spec) if stage else spec
+        if stage:
+            print(f"staged: {display_path(prompt_spec.path)}\n")
+        print(render_dispatch_prompt(prompt_spec, agent))
+    return 0
+
+
+def loops(args: argparse.Namespace) -> int:
+    command = args.loops_command
+    if command == "list":
+        for loop_id in sorted(LOOPS):
+            print(loop_id)
+        return 0
+
+    loop_id = args.loop_id
+    description = LOOPS.get(loop_id)
+    if description is None:
+        print(f"unknown loop: {loop_id}", file=sys.stderr)
+        return 2
+
+    if command == "show":
+        print(f"{loop_id}\n{description}")
+        return 0
+
+    if command == "prompt":
+        print(render_loop_prompt(loop_id, description, args.agent))
+        return 0
+
+    raise AssertionError(command)
+
+
+def list_specs(queue: str) -> list[Spec]:
+    directory = SPEC_ROOT / queue
+    if not directory.exists():
+        return []
+    specs = [read_spec(path, queue) for path in sorted(directory.glob("*.md"))]
+    return specs
+
+
+def read_spec(path: Path, queue: str) -> Spec:
+    text = path.read_text(encoding="utf-8")
+    meta, body = parse_frontmatter(text)
+    return Spec(path=path, queue=queue, meta=meta, body=body)
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
+    if not text.startswith("---\n"):
+        return {}, text
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return {}, text
+    raw = text[4:end].splitlines()
+    body = text[end + 5 :].lstrip("\n")
+    meta: dict[str, object] = {}
+    current_list_key: str | None = None
+    for line in raw:
+        if not line.strip():
+            continue
+        if line.startswith("  - ") and current_list_key:
+            value = line[4:].strip()
+            existing = meta.setdefault(current_list_key, [])
+            if isinstance(existing, list):
+                existing.append(value)
+            continue
+        if ":" not in line:
+            current_list_key = None
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if value == "":
+            meta[key] = []
+            current_list_key = key
+        else:
+            meta[key] = value
+            current_list_key = None
+    return meta, body
+
+
+def stage_spec(spec: Spec) -> Spec:
+    active_dir = SPEC_ROOT / "active"
+    active_dir.mkdir(parents=True, exist_ok=True)
+    destination = active_dir / spec.path.name
+    text = spec.path.read_text(encoding="utf-8")
+    text = text.replace("status: inbox", "status: active", 1)
+    destination.write_text(text, encoding="utf-8")
+    spec.path.unlink()
+    return read_spec(destination, "active")
+
+
+def render_dispatch_prompt(spec: Spec, agent: str) -> str:
+    verification = "\n".join(f"- `{command}`" for command in spec.verification)
+    if not verification:
+        verification = "- `git diff --check`"
+    return f"""Agent: {agent}
+Spec: {spec.spec_id}
+Title: {spec.title}
+Path: {display_path(spec.path)}
+
+Implement only the acceptance criteria in this spec. Do not add unrelated
+improvements. Preserve user changes. Use the nearest AGENTS.md. For visible TUI
+changes, use skills/tui-model-screenshot/SKILL.md for screenshot evidence and
+keep bun rendered E2E as behavior verification.
+
+Verification:
+{verification}
+
+Spec body:
+{spec.body.rstrip()}
+"""
+
+
+def render_loop_prompt(loop_id: str, description: str, agent: str) -> str:
+    return f"""Agent: {agent}
+Loop: {loop_id}
+
+{description}
+
+Use `python3 bin/loop-factory scan` to inspect queue state before acting.
+Report files changed, verification commands and results, remaining risks, and
+whether review/archive is ready.
+"""
+
+
+def display_path(path: Path) -> str:
+    return path.as_posix()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -40,10 +40,6 @@ const (
 	wizardStartX          = 6
 	setupBackendFirstLine = 3
 
-	runnerBottomStartX   = 63
-	runnerBottomStopX    = 73
-	runnerBottomRestartX = 82
-	runnerBottomCloseX   = 90
 )
 
 type tab struct {
@@ -883,15 +879,13 @@ func (m *Model) handleTabClick(x int, y int) bool {
 		return false
 	}
 	position := 0
-	for index, item := range m.tabs() {
-		label := fmt.Sprintf("%d %s", index+1, item.label)
-		width := lipgloss.Width(label) + 2
-		if x >= position && x < position+width {
+	for index := range m.tabs() {
+		if x >= position && x < position+tabBoxWidth {
 			m.active = index
 			m.resetScroll()
 			return true
 		}
-		position += width + 1
+		position += tabBoxWidth + 1
 	}
 	return false
 }
@@ -923,8 +917,9 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch y {
-	case m.wizardChoiceRow(0):
+	choiceOffset := y - panelContentRow(m.contentTopRow(), 0)
+	switch {
+	case choiceOffset >= 0 && choiceOffset <= 2:
 		if x >= wizardRuntimeLlamaX {
 			m.wizardRuntime = "llamacpp"
 			m.wizardBackend = m.firstAvailableLlamaType()
@@ -934,9 +929,9 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 		}
 		m.wizardModelSelection = 0
 		m.normalizeWizardSelection()
-	case m.wizardChoiceRow(2):
+	case choiceOffset >= 3 && choiceOffset <= 5:
 		m.setWizardVariantFromMouse(x)
-	case m.wizardChoiceRow(4):
+	case choiceOffset >= 6 && choiceOffset <= 8:
 		switch {
 		case x >= wizardRoleRerankingX:
 			m.setWizardRole("reranking")
@@ -945,7 +940,7 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 		case x >= wizardRoleMainX:
 			m.setWizardRole("main")
 		}
-	case m.wizardChoiceRow(6):
+	case choiceOffset == 9:
 		if x >= wizardStartX && x < wizardStartX+12 {
 			return m, m.wizardCreateCmd()
 		}
@@ -1941,19 +1936,16 @@ func (m Model) tabBar() string {
 	parts := make([]string, 0, len(tabs))
 	for index, item := range tabs {
 		label := fmt.Sprintf("%d %s", index+1, item.label)
-		text := centeredText(label, tabBoxWidth)
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("250")).
+			Background(lipgloss.Color(m.palette().tabBG))
 		if index == m.active {
-			parts = append(parts, lipgloss.NewStyle().
+			style = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("16")).
-				Background(lipgloss.Color(m.palette().tabActiveBG)).
-				Render(text))
-			continue
+				Background(lipgloss.Color(m.palette().tabActiveBG))
 		}
-		parts = append(parts, lipgloss.NewStyle().
-			Foreground(lipgloss.Color("250")).
-			Background(lipgloss.Color(m.palette().tabBG)).
-			Render(text))
+		parts = append(parts, style.Render(centeredText(label, tabBoxWidth)))
 	}
 	line := strings.Join(parts, " ")
 	if m.width > 0 {
@@ -2113,11 +2105,14 @@ func (m Model) bottomActionBarView() string {
 	parts := make([]string, 0, len(segments))
 	for _, segment := range segments {
 		style := lipgloss.NewStyle().
+			Padding(0, 1).
 			Foreground(lipgloss.Color(palette.footerFG)).
-			Background(lipgloss.Color(palette.footerBG))
+			Background(lipgloss.Color(palette.tabBG))
 		switch segment.id {
 		case "menu":
-			style = style.Bold(true).Foreground(lipgloss.Color(palette.runtimeHeader))
+			style = style.Bold(true).
+				Foreground(lipgloss.Color("16")).
+				Background(lipgloss.Color(palette.tabActiveBG))
 		case "runner-start":
 			style = style.Bold(true).
 				Foreground(lipgloss.Color(palette.actionFG)).
@@ -2181,7 +2176,7 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 	position := 1
 	for index := range items {
 		items[index].start = position
-		items[index].end = position + lipgloss.Width(items[index].label)
+		items[index].end = position + lipgloss.Width(items[index].label) + 2
 		position = items[index].end + 3
 	}
 	return items
@@ -3131,9 +3126,7 @@ func (m Model) wizardChoiceLines() []string {
 			m.palette().runtimeButton,
 			m.palette().runtimeSelected,
 		),
-		"",
 		m.wizardVariantToggleLine(),
-		"",
 		m.wizardOptionBar(
 			"model role",
 			[]wizardOption{
@@ -3146,7 +3139,6 @@ func (m Model) wizardChoiceLines() []string {
 			m.palette().roleButton,
 			m.palette().roleSelected,
 		),
-		"",
 		m.wizardStartLine(),
 	}
 }
@@ -3729,15 +3721,15 @@ func (m Model) wizardOptionBar(
 	button string,
 	selected string,
 ) string {
-	headerText := lipgloss.NewStyle().
+	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(header)).
-		Background(lipgloss.Color(background)).
-		Render(centeredText(label, wizardOptionLabelWidth))
+		Background(lipgloss.Color(background))
 
-	parts := []string{headerText}
+	topParts := []string{headerStyle.Render(strings.Repeat(" ", wizardOptionLabelWidth))}
+	middleParts := []string{headerStyle.Render(centeredText(label, wizardOptionLabelWidth))}
+	bottomParts := []string{headerStyle.Render(strings.Repeat(" ", wizardOptionLabelWidth))}
 	for _, option := range options {
-		text := centeredText(selectedToken(option.label, option.selected), wizardOptionBoxWidth)
 		style := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(button)).
 			Background(lipgloss.Color(background))
@@ -3747,15 +3739,19 @@ func (m Model) wizardOptionBar(
 				Foreground(lipgloss.Color("16")).
 				Background(lipgloss.Color(selected))
 		}
-		parts = append(parts, style.Render(text))
+		topParts = append(topParts, style.Render(strings.Repeat(" ", wizardOptionBoxWidth)))
+		middleParts = append(middleParts, style.Render(centeredText(selectedToken(option.label, option.selected), wizardOptionBoxWidth)))
+		bottomParts = append(bottomParts, style.Render(strings.Repeat(" ", wizardOptionBoxWidth)))
 	}
 
-	return m.fullWidthWizardLine(
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color(button)).
-			Background(lipgloss.Color(background)),
-		strings.Join(parts, " "),
-	)
+	rowStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(button)).
+		Background(lipgloss.Color(background))
+	return strings.Join([]string{
+		m.fullWidthWizardLine(rowStyle, strings.Join(topParts, " ")),
+		m.fullWidthWizardLine(rowStyle, strings.Join(middleParts, " ")),
+		m.fullWidthWizardLine(rowStyle, strings.Join(bottomParts, " ")),
+	}, "\n")
 }
 
 func (m Model) wizardStartLine() string {

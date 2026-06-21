@@ -189,8 +189,8 @@ func TestMouseCanSwitchTabsFromRenderedTabRow(t *testing.T) {
 	model.width = 120
 	model.height = 24
 
-	tabRow := lineNumberContaining(model.View().Content, "Launch Wizard")
-	next, cmd := model.Update(leftClick(18, tabRow))
+	x, tabRow := renderedCellPosition(t, model.View().Content, "Launch Wizard")
+	next, cmd := model.Update(leftClick(x, tabRow))
 	if cmd != nil {
 		t.Fatalf("tab mouse click returned unexpected command")
 	}
@@ -388,7 +388,12 @@ func TestLaunchWizardScrolledManagedScreenOptionClickUsesVisibleCells(t *testing
 	model.width = 80
 	model.height = 24
 	model.toggleWizardRuntime()
-	model.scrollOffset = 8
+	for offset := 0; offset < 40; offset++ {
+		model.scrollOffset = offset
+		if strings.Contains(model.View().Content, "[ctk]") {
+			break
+		}
+	}
 
 	x, y := renderedCellPosition(t, model.View().Content, "[ctk]")
 	if hit, ok := model.buttonHitAt(x, y); !ok || hit.action != "wizard-option" || hit.payload != "cache-type-k" {
@@ -632,10 +637,26 @@ func TestLaunchWizardRendersThemedOptionBarsAndModelHighlight(t *testing.T) {
 
 	choiceLines := model.wizardChoiceLines()
 	expectedWidth := model.wizardContentWidth()
-	for _, index := range []int{0, 2, 4, 6} {
-		if got := lipgloss.Width(choiceLines[index]); got != expectedWidth {
-			t.Fatalf("wizard option row %d width = %d, want %d: %q", index, got, expectedWidth, choiceLines[index])
+	for _, index := range []int{0, 1, 2} {
+		rows := strings.Split(choiceLines[index], "\n")
+		if len(rows) != 3 {
+			t.Fatalf("wizard option row %d should be a 3-line vertically centered box:\n%q", index, choiceLines[index])
 		}
+		for rowIndex, row := range rows {
+			if got := lipgloss.Width(row); got != expectedWidth {
+				t.Fatalf("wizard option row %d.%d width = %d, want %d: %q", index, rowIndex, got, expectedWidth, row)
+			}
+		}
+		if strings.TrimSpace(ansi.Strip(rows[0])) != "" || strings.TrimSpace(ansi.Strip(rows[2])) != "" {
+			t.Fatalf("wizard option row %d top/bottom should be vertical padding:\n%q", index, choiceLines[index])
+		}
+	}
+	runtimeRows := strings.Split(choiceLines[0], "\n")
+	if !strings.Contains(runtimeRows[0], "48;5;45m") || !strings.Contains(runtimeRows[2], "48;5;45m") {
+		t.Fatalf("selected runtime box should keep its own background on vertical padding rows:\n%q", choiceLines[0])
+	}
+	if got := lipgloss.Width(choiceLines[3]); got != expectedWidth {
+		t.Fatalf("wizard start row width = %d, want %d: %q", got, expectedWidth, choiceLines[3])
 	}
 
 	modelLines := model.wizardLocalModelLines()
@@ -950,6 +971,9 @@ func TestLaunchWizardChromeUsesCenteredPaletteBoxes(t *testing.T) {
 	model.setActiveTab("wizard")
 
 	tabs := ansi.Strip(model.tabBar())
+	if strings.Contains(tabs, "\n") {
+		t.Fatalf("tab bar should stay compact and single-line:\n%s", tabs)
+	}
 	for _, centered := range []string{
 		"   1 Dashboard    ",
 		" 2 Launch Wizard  ",
@@ -1226,14 +1250,24 @@ func TestRunnerBottomBarMouseActionsUseSharedController(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		x    int
+		id   string
 		want string
 	}{
-		{name: "start", x: runnerBottomStartX, want: "start:LR-M-1"},
-		{name: "stop", x: runnerBottomStopX, want: "stop:LR-M-1"},
-		{name: "restart", x: runnerBottomRestartX, want: "restart:LR-M-1"},
+		{name: "start", id: "runner-start", want: "start:LR-M-1"},
+		{name: "stop", id: "runner-stop", want: "stop:LR-M-1"},
+		{name: "restart", id: "runner-restart", want: "restart:LR-M-1"},
 	} {
-		next, cmd := model.Update(leftClick(tc.x, model.height-1))
+		x := -1
+		for _, segment := range model.bottomActionSegments() {
+			if segment.id == tc.id {
+				x = (segment.start + segment.end) / 2
+				break
+			}
+		}
+		if x < 0 {
+			t.Fatalf("%s segment missing: %#v", tc.name, model.bottomActionSegments())
+		}
+		next, cmd := model.Update(leftClick(x, model.height-1))
 		if cmd == nil {
 			t.Fatalf("%s click returned no command", tc.name)
 		}

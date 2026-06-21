@@ -239,13 +239,15 @@ var (
 )
 
 type tuiPalette struct {
-	id       string
-	label    string
-	backdrop string
-	header   string
-	footerBG string
-	footerFG string
-	menu     string
+	id          string
+	label       string
+	backdrop    string
+	tabBG       string
+	tabActiveBG string
+	header      string
+	footerBG    string
+	footerFG    string
+	menu        string
 
 	runtimeBG       string
 	runtimeHeader   string
@@ -264,6 +266,7 @@ type tuiPalette struct {
 
 	modelBG       string
 	modelSelected string
+	cliRowBG      string
 	actionBG      string
 	actionFG      string
 }
@@ -274,6 +277,8 @@ func tuiPalettes() []tuiPalette {
 			id:              "neon",
 			label:           "Neon",
 			backdrop:        "234",
+			tabBG:           "236",
+			tabActiveBG:     "39",
 			header:          "45",
 			footerBG:        "17",
 			footerFG:        "250",
@@ -286,12 +291,13 @@ func tuiPalettes() []tuiPalette {
 			variantHeader:   "219",
 			variantButton:   "213",
 			variantSelected: "201",
-			roleBG:          "58",
+			roleBG:          "94",
 			roleHeader:      "229",
 			roleButton:      "222",
 			roleSelected:    "214",
 			modelBG:         "22",
 			modelSelected:   "82",
+			cliRowBG:        "22",
 			actionBG:        "28",
 			actionFG:        "16",
 		},
@@ -299,11 +305,13 @@ func tuiPalettes() []tuiPalette {
 			id:              "amber",
 			label:           "Amber",
 			backdrop:        "236",
+			tabBG:           "94",
+			tabActiveBG:     "214",
 			header:          "214",
 			footerBG:        "94",
 			footerFG:        "230",
 			menu:            "214",
-			runtimeBG:       "58",
+			runtimeBG:       "94",
 			runtimeHeader:   "229",
 			runtimeButton:   "222",
 			runtimeSelected: "214",
@@ -317,6 +325,7 @@ func tuiPalettes() []tuiPalette {
 			roleSelected:    "174",
 			modelBG:         "22",
 			modelSelected:   "148",
+			cliRowBG:        "22",
 			actionBG:        "34",
 			actionFG:        "16",
 		},
@@ -324,6 +333,8 @@ func tuiPalettes() []tuiPalette {
 			id:              "ocean",
 			label:           "Ocean",
 			backdrop:        "17",
+			tabBG:           "24",
+			tabActiveBG:     "81",
 			header:          "81",
 			footerBG:        "24",
 			footerFG:        "231",
@@ -342,6 +353,7 @@ func tuiPalettes() []tuiPalette {
 			roleSelected:    "69",
 			modelBG:         "22",
 			modelSelected:   "84",
+			cliRowBG:        "23",
 			actionBG:        "35",
 			actionFG:        "16",
 		},
@@ -1929,11 +1941,19 @@ func (m Model) tabBar() string {
 	parts := make([]string, 0, len(tabs))
 	for index, item := range tabs {
 		label := fmt.Sprintf("%d %s", index+1, item.label)
+		text := centeredText(label, tabBoxWidth)
 		if index == m.active {
-			parts = append(parts, activeTabStyle.Render(label))
+			parts = append(parts, lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("16")).
+				Background(lipgloss.Color(m.palette().tabActiveBG)).
+				Render(text))
 			continue
 		}
-		parts = append(parts, tabStyle.Render(label))
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(lipgloss.Color("250")).
+			Background(lipgloss.Color(m.palette().tabBG)).
+			Render(text))
 	}
 	line := strings.Join(parts, " ")
 	if m.width > 0 {
@@ -3185,7 +3205,7 @@ func (m Model) wizardCLIOptionLines() []string {
 }
 
 func (m Model) wizardCLIOptionLine(option wizardCLIOption) string {
-	background := m.palette().modelBG
+	background := m.palette().cliRowBG
 
 	command := wizardOptionButtonTextFromLabel(wizardOptionDisplayName(option))
 	value := wizardCLIOptionValueText(m, option)
@@ -3197,25 +3217,22 @@ func (m Model) wizardCLIOptionLine(option wizardCLIOption) string {
 	width := m.wizardContentWidth()
 	if width <= 0 {
 		return wizardCLIOptionANSI(m.palette().modelSelected, background, true) +
-			command +
+			padRight(command, wizardCLICommandWidth) +
 			wizardCLIOptionANSI(m.palette().variantHeader, background, false) +
-			" " + value +
+			padRight(value, wizardCLIValueWidth) +
 			wizardCLIOptionANSI("252", background, false) +
-			" " + description +
+			description +
 			"\x1b[m"
 	}
 
-	prefixWidth := lipgloss.Width(command) + 1 + lipgloss.Width(value) + 1
-	description = truncateToWidth(description, maxInt(0, width-prefixWidth))
-	plain := command + " " + value + " " + description
-	padding := strings.Repeat(" ", maxInt(0, width-lipgloss.Width(plain)))
+	descriptionWidth := maxInt(0, width-wizardCLICommandWidth-wizardCLIValueWidth)
+	description = padRight(truncateToWidth(description, descriptionWidth), descriptionWidth)
 	return wizardCLIOptionANSI(m.palette().modelSelected, background, true) +
-		command +
+		padRight(command, wizardCLICommandWidth) +
 		wizardCLIOptionANSI(m.palette().variantHeader, background, false) +
-		" " + value +
+		padRight(value, wizardCLIValueWidth) +
 		wizardCLIOptionANSI("252", background, false) +
-		" " + description +
-		padding +
+		description +
 		"\x1b[m"
 }
 
@@ -3716,16 +3733,14 @@ func (m Model) wizardOptionBar(
 		Bold(true).
 		Foreground(lipgloss.Color(header)).
 		Background(lipgloss.Color(background)).
-		Padding(0, 1).
-		Render(label)
+		Render(centeredText(label, wizardOptionLabelWidth))
 
 	parts := []string{headerText}
 	for _, option := range options {
-		text := selectedToken(option.label, option.selected)
+		text := centeredText(selectedToken(option.label, option.selected), wizardOptionBoxWidth)
 		style := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(button)).
-			Background(lipgloss.Color(background)).
-			Padding(0, 1)
+			Background(lipgloss.Color(background))
 		if option.selected {
 			style = style.
 				Bold(true).
@@ -5422,6 +5437,11 @@ const (
 	panelGridColumnGap      = 2
 	runnerTerminalLogLimit  = 10
 	wizardCLIOptionPageSize = 8
+	tabBoxWidth             = 18
+	wizardOptionLabelWidth  = 13
+	wizardOptionBoxWidth    = 12
+	wizardCLICommandWidth   = 10
+	wizardCLIValueWidth     = 15
 )
 
 type panelSpec struct {
@@ -5547,6 +5567,24 @@ func truncateToWidth(value string, width int) string {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes)
+}
+
+func centeredText(value string, width int) string {
+	textWidth := lipgloss.Width(value)
+	if width <= textWidth {
+		return value
+	}
+	left := (width - textWidth) / 2
+	right := width - textWidth - left
+	return strings.Repeat(" ", left) + value + strings.Repeat(" ", right)
+}
+
+func padRight(value string, width int) string {
+	textWidth := lipgloss.Width(value)
+	if width <= textWidth {
+		return truncateToWidth(value, width)
+	}
+	return value + strings.Repeat(" ", width-textWidth)
 }
 
 func singleLineText(value string) string {

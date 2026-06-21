@@ -268,7 +268,11 @@ func TestLaunchWizardMouseUsesRenderedRows(t *testing.T) {
 	model.height = 36
 
 	runtimeRow := lineNumberContaining(model.View().Content, "runtime")
-	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
+	hit, ok := renderedTokenHitOnRow(model.View().Content, runtimeRow, "llama.cpp", "", "")
+	if !ok {
+		t.Fatalf("could not locate llama.cpp on runtime row:\n%s", model.View().Content)
+	}
+	next, _ := model.Update(leftClick(hit.start, hit.row))
 	model = next.(Model)
 	if strings.Contains(model.View().Content, "runtime ----") {
 		t.Fatalf("wizard runtime row should not render decorative dashes:\n%s", model.View().Content)
@@ -278,7 +282,11 @@ func TestLaunchWizardMouseUsesRenderedRows(t *testing.T) {
 	}
 
 	roleRow := lineNumberContaining(model.View().Content, "model role")
-	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
+	hit, ok = renderedTokenHitOnRow(model.View().Content, roleRow, "reranking", "", "")
+	if !ok {
+		t.Fatalf("could not locate reranking on role row:\n%s", model.View().Content)
+	}
+	next, _ = model.Update(leftClick(hit.start, hit.row))
 	model = next.(Model)
 	if strings.Contains(model.View().Content, "model role ----") {
 		t.Fatalf("wizard model role row should not render decorative dashes:\n%s", model.View().Content)
@@ -929,6 +937,58 @@ func TestLaunchWizardOptionBarsDoNotUseDecorativeDashesOrTextFainting(t *testing
 	}
 }
 
+func TestLaunchWizardChromeUsesCenteredPaletteBoxes(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 32
+	model.setActiveTab("wizard")
+
+	tabs := ansi.Strip(model.tabBar())
+	for _, centered := range []string{
+		"   1 Dashboard    ",
+		" 2 Launch Wizard  ",
+		"     3 Setup      ",
+	} {
+		if !strings.Contains(tabs, centered) {
+			t.Fatalf("tab bar missing centered box %q:\n%s", centered, tabs)
+		}
+	}
+
+	choice := strings.Join(model.wizardChoiceLines(), "\n")
+	visibleChoice := ansi.Strip(choice)
+	for _, centered := range []string{
+		"   runtime   ",
+		"  [litert]  ",
+		" model role  ",
+		"   [main]   ",
+	} {
+		if !strings.Contains(visibleChoice, centered) {
+			t.Fatalf("wizard controls missing centered box %q:\n%s", centered, visibleChoice)
+		}
+	}
+
+	palette := model.palette()
+	panelBG := panelBackgroundForAccent("214")
+	for name, color := range map[string]string{
+		"tab":            palette.tabBG,
+		"active tab":     palette.tabActiveBG,
+		"runtime group":  palette.runtimeBG,
+		"variant group":  palette.variantBG,
+		"role group":     palette.roleBG,
+		"CLI option row": palette.cliRowBG,
+	} {
+		if color == palette.backdrop || color == panelBG {
+			t.Fatalf("%s background %q must differ from backdrop %q and wizard panel %q", name, color, palette.backdrop, panelBG)
+		}
+	}
+}
+
 func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
 	t.Parallel()
 
@@ -964,10 +1024,17 @@ func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
 	if !strings.Contains(first, "[c]") || !strings.Contains(first, "Context size") {
 		t.Fatalf("CLI option row should be button-like with description: %q", first)
 	}
+	if !strings.HasPrefix(first, "[c]       model default  Context size") {
+		t.Fatalf("CLI option row should use fixed command/value columns: %q", first)
+	}
+	second := ansi.Strip(lines[1])
+	if !strings.HasPrefix(second, "[ctk]     f16            KV cache K") {
+		t.Fatalf("CLI option row should align columns across rows: %q", second)
+	}
 	if !strings.Contains(lines[0], "38;5;82;48;5;22m[c]") {
 		t.Fatalf("CLI option command should be bright on model-style row:\n%q", lines[0])
 	}
-	if !strings.Contains(lines[0], "38;5;252;48;5;22m Context size") {
+	if !strings.Contains(lines[0], "38;5;252;48;5;22mContext size") {
 		t.Fatalf("CLI option description should be dimmer than command:\n%q", lines[0])
 	}
 
@@ -1470,14 +1537,22 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	model.setActiveTab("wizard")
 
 	runtimeRow := lineNumberContaining(model.View().Content, "runtime")
-	next, _ := model.Update(leftClick(wizardRuntimeLlamaX, runtimeRow))
+	hit, ok := renderedTokenHitOnRow(model.View().Content, runtimeRow, "llama.cpp", "", "")
+	if !ok {
+		t.Fatalf("could not locate llama.cpp on runtime row:\n%s", model.View().Content)
+	}
+	next, _ := model.Update(leftClick(hit.start, hit.row))
 	model = next.(Model)
 	if !strings.Contains(compactSpaces(model.View().Content), "runtime litert [llama.cpp]") {
 		t.Fatalf("wizard did not select llama.cpp by mouse:\n%s", model.View().Content)
 	}
 
 	roleRow := lineNumberContaining(model.View().Content, "model role")
-	next, _ = model.Update(leftClick(wizardRoleRerankingX, roleRow))
+	hit, ok = renderedTokenHitOnRow(model.View().Content, roleRow, "reranking", "", "")
+	if !ok {
+		t.Fatalf("could not locate reranking on role row:\n%s", model.View().Content)
+	}
+	next, _ = model.Update(leftClick(hit.start, hit.row))
 	model = next.(Model)
 	view := model.View().Content
 	compactView := compactSpaces(view)

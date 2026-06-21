@@ -1,7 +1,8 @@
 # AGENTS.md
 
 This file is the operating contract for autonomous agents working in
-`liteLLMwiki`.
+`liteLLMwiki`. Follow the nearest nested `AGENTS.md` when working inside a
+subdirectory that has one.
 
 ## Project Description
 
@@ -101,7 +102,8 @@ E2E is not required.
 
 ## Required First Steps
 
-1. Inspect the current git status with `git status --short`.
+1. Confirm repository state with `git rev-parse --is-inside-work-tree`, then
+   inspect the current git status with `git status --short`.
 2. Read the relevant README and `G0LiteLLaMa/README.md` before edits.
 3. Preserve user changes. Do not reset, clean, stash, or discard work unless the
    user explicitly asks.
@@ -130,10 +132,24 @@ E2E is not required.
 
 - Prefer existing project patterns over new abstractions.
 - Keep changes scoped to the user request.
+- If an active plan exists for the requested work, read it first, follow its
+  scope, and do not add unrelated improvements without asking.
 - For large numbered implementation plans, use sequential subagents only when
   delegating, review each result in the parent thread, and make one commit per
   completed goal when the user asks for committed goal slices.
 - Do not create worktrees unless the user explicitly asks.
+- Before editing, identify whether a file is source, generated output,
+  dependency material, model artifact, cache, reference material, or user-owned
+  scratch.
+- Do not modify dependencies, generated files, build outputs, caches, vendored
+  code, or reference snapshots unless the user explicitly asks or the generation
+  step is part of the task.
+- Do not add new dependencies until existing project options have been checked
+  and the new dependency is justified.
+- Do not leave placeholder implementations, fake data, `TODO` code, stubs, or
+  unimplemented branches unless the user explicitly asks.
+- Use real failure paths for filesystem access, network calls, parsing, browser
+  automation, process management, and external tools.
 - Use Bun for the JS/TUI harness in this repo; do not switch to npm, yarn, or
   pnpm unless the user explicitly asks.
 - Update `README.md` and this file when setup, commands, structure, or model
@@ -151,15 +167,39 @@ E2E is not required.
   it with arbitrary tiny token caps.
 - Use exact commands for verification evidence.
 - If verification cannot run, state exactly what was skipped and why.
+- Clean temporary debug artifacts, screenshots, logs, traces, and scratch
+  outputs before committing unless they are deliberate deliverables or required
+  test fixtures.
+
+## Skill And Tool Precedence
+
+Use this priority order when instructions conflict:
+
+1. The user's explicit prompt.
+2. The nearest applicable `AGENTS.md`.
+3. Project source-of-truth docs such as `README.md` and `G0LiteLLaMa/README.md`.
+4. Installed skills, tools, and tool-specific workflows.
+5. Generic model defaults.
+
+Use installed skills and tools only when they materially help the current task
+or are explicitly requested. Do not let broad process skills expand a small task
+into unrelated plans, worktrees, subagents, or commits.
+
+When subagents are used, the main agent owns scope, review, verification, and
+commits. Subagents should not bootstrap the workspace, manage plans, dispatch
+other subagents, or commit unless their prompt explicitly asks.
 
 ## Git Rules
 
 - Commit only intentional source/doc changes.
+- Do not stage or commit unrelated user changes.
 - Do not commit local models or generated artifacts.
 - Use `clean.sh` or `clean.ps1` for generated-file cleanup; they preserve
   `models/`.
 - Do not force-push, rewrite history, run `git clean`, or delete untracked user
   files unless the user explicitly asks.
+- If this workspace is ever not inside a git repository, ask before running
+  `git init`, creating a remote, or pushing anything.
 
 ## Pending Plans
 

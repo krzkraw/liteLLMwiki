@@ -42,31 +42,12 @@ func New(target string) (*Proxy, error) {
 	return proxy, nil
 }
 
-func (p *Proxy) SetTarget(target string) error {
-	targetURL, err := url.Parse(target)
-	if err != nil {
-		return err
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.target = targetURL
-	p.lastErr = ""
-	return nil
-}
-
 func (p *Proxy) SetTargetResolver(resolver TargetResolver) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.resolver = resolver
 	p.lastErr = ""
-}
-
-func (p *Proxy) Target() string {
-	target := p.targetSnapshot()
-	return target.String()
 }
 
 func (p *Proxy) TargetForPath(path string) string {
@@ -83,14 +64,6 @@ func (p *Proxy) LastError() string {
 	defer p.mu.RUnlock()
 
 	return p.lastErr
-}
-
-func (p *Proxy) targetSnapshot() *url.URL {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	target := *p.target
-	return &target
 }
 
 func (p *Proxy) targetForRequest(r *http.Request) *url.URL {

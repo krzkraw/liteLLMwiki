@@ -57,14 +57,6 @@ func WithBaseURL(baseURL string) Option {
 	}
 }
 
-func WithHTTPClient(client *http.Client) Option {
-	return func(c *Catalog) {
-		if client != nil {
-			c.client = client
-		}
-	}
-}
-
 func NewDefault(modelRoot string, options ...Option) *Catalog {
 	if modelRoot == "" {
 		modelRoot = FindModelRoot()

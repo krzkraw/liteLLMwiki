@@ -11,10 +11,6 @@ type BackendEvidence struct {
 	Detail  string
 }
 
-func BackendEvidenceList() []BackendEvidence {
-	return BackendEvidenceForRuntime("")
-}
-
 func BackendEvidenceForRuntime(runtimeState string) []BackendEvidence {
 	litertBackendState := "unknown"
 	litertBackendDetail := "LiteRT backend probing is pending."

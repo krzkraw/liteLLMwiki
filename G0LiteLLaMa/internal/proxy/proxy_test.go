@@ -75,41 +75,6 @@ func TestProxyRecordsUpstreamFailure(t *testing.T) {
 	}
 }
 
-func TestProxyCanRetargetV1Requests(t *testing.T) {
-	t.Parallel()
-
-	var saw []string
-	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		saw = append(saw, "first:"+r.URL.Path)
-		_, _ = w.Write([]byte("first"))
-	}))
-	defer first.Close()
-	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		saw = append(saw, "second:"+r.URL.Path)
-		_, _ = w.Write([]byte("second"))
-	}))
-	defer second.Close()
-
-	proxy, err := New(first.URL)
-	if err != nil {
-		t.Fatalf("new proxy: %v", err)
-	}
-	if err := proxy.SetTarget(second.URL); err != nil {
-		t.Fatalf("set target: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	rec := httptest.NewRecorder()
-	proxy.ServeHTTP(rec, req)
-
-	if rec.Body.String() != "second" {
-		t.Fatalf("response = %q, want second", rec.Body.String())
-	}
-	if len(saw) != 1 || saw[0] != "second:/v1/models" {
-		t.Fatalf("requests = %#v, want only second upstream", saw)
-	}
-}
-
 func TestProxyUsesTargetResolverPerRequest(t *testing.T) {
 	t.Parallel()
 

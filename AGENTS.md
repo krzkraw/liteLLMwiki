@@ -175,9 +175,7 @@ E2E is not required.
 
 ## Entrypoint And Instruction Precedence
 
-- Primary tracked agent entrypoint: `AGENTS.md`.
-- Tracked mirrors: none. Ignored files such as `.tui-test/cache/AGENTS.md` are
-  caches, not instruction sources.
+- Primary entrypoint: `AGENTS.md`; no tracked mirrors.
 - Subtree overrides: none currently. Add a closer `AGENTS.md` only when a
   subtree needs materially different rules.
 - If another agent instruction file is added, make it a symlink, generated

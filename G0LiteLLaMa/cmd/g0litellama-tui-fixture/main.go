@@ -107,10 +107,11 @@ func (fakeRuntimeController) Status() server.RuntimeStatus {
 type fakeRunnerController struct {
 	mu      sync.Mutex
 	runners []server.RunnerSnapshot
+	routes  map[string]string
 }
 
 func newFakeRunnerController() *fakeRunnerController {
-	return &fakeRunnerController{}
+	return &fakeRunnerController{routes: map[string]string{}}
 }
 
 func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
@@ -119,10 +120,8 @@ func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
 
 	runners := append([]server.RunnerSnapshot{}, c.runners...)
 	routes := map[string]string{}
-	for _, runner := range runners {
-		if runner.State == "running" {
-			routes[runner.Role] = runner.ID
-		}
+	for role, id := range c.routes {
+		routes[role] = id
 	}
 	return server.RunnerSnapshotResponse{Runners: runners, Routes: routes}
 }
@@ -136,6 +135,7 @@ func (c *fakeRunnerController) CreateRunner(
 
 	runner := snapshotFromSpec(spec, "created")
 	c.runners = append(c.runners, runner)
+	c.routes[runner.Role] = runner.ID
 	return runner, nil
 }
 
@@ -154,6 +154,25 @@ func (c *fakeRunnerController) UpdateRunner(
 	if patch.CommandLine != nil {
 		c.runners[index].Command = strings.Fields(*patch.CommandLine)
 	}
+	return c.runners[index], nil
+}
+
+func (c *fakeRunnerController) RouteRunner(
+	_ context.Context,
+	role string,
+	id string,
+) (server.RunnerSnapshot, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	index := c.index(id)
+	if index < 0 {
+		return server.RunnerSnapshot{}, server.ErrRunnerNotFound
+	}
+	if c.runners[index].Role != role {
+		return server.RunnerSnapshot{}, fmt.Errorf("runner %q role %q does not match route %q", id, c.runners[index].Role, role)
+	}
+	c.routes[role] = id
 	return c.runners[index], nil
 }
 
@@ -179,6 +198,9 @@ func (c *fakeRunnerController) CloseRunner(_ context.Context, id string) (server
 	}
 	runner := c.runners[index]
 	c.runners = append(c.runners[:index], c.runners[index+1:]...)
+	if c.routes[runner.Role] == runner.ID {
+		delete(c.routes, runner.Role)
+	}
 	return runner, nil
 }
 
@@ -191,6 +213,7 @@ func (c *fakeRunnerController) setState(id string, state string) (server.RunnerS
 		return server.RunnerSnapshot{}, server.ErrRunnerNotFound
 	}
 	c.runners[index].State = state
+	c.routes[c.runners[index].Role] = id
 	return c.runners[index], nil
 }
 

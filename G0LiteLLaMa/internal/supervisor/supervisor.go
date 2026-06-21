@@ -419,6 +419,28 @@ func (s *Supervisor) UpdateRunner(id string, patch RunnerPatch) error {
 	return nil
 }
 
+func (s *Supervisor) RouteRunner(role Role, id string) (RunnerSnapshot, error) {
+	if !isRole(role) {
+		return RunnerSnapshot{}, fmt.Errorf("invalid runner role %q", role)
+	}
+
+	s.mu.Lock()
+	record := s.runners[id]
+	if record == nil {
+		s.mu.Unlock()
+		return RunnerSnapshot{}, fmt.Errorf("runner %q not found", id)
+	}
+	if record.snapshot.Role != role {
+		s.mu.Unlock()
+		return RunnerSnapshot{}, fmt.Errorf("runner %q role %q does not match route %q", id, record.snapshot.Role, role)
+	}
+	s.routes[role] = id
+	runner := record.snapshot
+	s.mu.Unlock()
+	s.publishStatusChange()
+	return runner, nil
+}
+
 func (s *Supervisor) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

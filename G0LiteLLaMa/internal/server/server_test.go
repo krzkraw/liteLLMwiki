@@ -555,6 +555,90 @@ func TestRunnerPatchAcceptsCommandOverrides(t *testing.T) {
 	}
 }
 
+func TestRunnerRouteEndpointSelectsActiveRoleRoute(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{DisableDefaultLiteRT: true})
+	for _, spec := range []supervisor.RunnerSpec{
+		{
+			ID:       "main-one",
+			Runtime:  supervisor.RuntimeLlamaCPP,
+			Role:     supervisor.RoleMain,
+			Backend:  supervisor.BackendCPU,
+			ModelID:  "main-one",
+			Host:     "127.0.0.1",
+			Port:     9491,
+			Launch:   false,
+			Upstream: "http://127.0.0.1:9491",
+		},
+		{
+			ID:       "main-two",
+			Runtime:  supervisor.RuntimeLlamaCPP,
+			Role:     supervisor.RoleMain,
+			Backend:  supervisor.BackendCPU,
+			ModelID:  "main-two",
+			Host:     "127.0.0.1",
+			Port:     9492,
+			Launch:   false,
+			Upstream: "http://127.0.0.1:9492",
+		},
+	} {
+		if _, err := runtimeSupervisor.CreateRunner(spec); err != nil {
+			t.Fatalf("create runner %s: %v", spec.ID, err)
+		}
+	}
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/g0litellama/v1/runners/main-one/route",
+		strings.NewReader(`{"role":"main"}`),
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("route status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got, ok := runtimeSupervisor.UpstreamForPath("/v1/chat/completions"); !ok || got != "http://127.0.0.1:9491" {
+		t.Fatalf("main route = %q/%v, want main-one", got, ok)
+	}
+}
+
+func TestRunnerRouteEndpointRejectsInvalidRole(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{DisableDefaultLiteRT: true})
+	if _, err := runtimeSupervisor.CreateRunner(supervisor.RunnerSpec{
+		ID:       "main-one",
+		Runtime:  supervisor.RuntimeLlamaCPP,
+		Role:     supervisor.RoleMain,
+		Backend:  supervisor.BackendCPU,
+		ModelID:  "main-one",
+		Host:     "127.0.0.1",
+		Port:     9491,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9491",
+	}); err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/g0litellama/v1/runners/main-one/route",
+		strings.NewReader(`{"role":"bogus"}`),
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("route status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
 func TestRunnerCloseEndpointRemovesRunnerAndRoute(t *testing.T) {
 	t.Parallel()
 
@@ -712,6 +796,63 @@ func TestWebSocketAPIRequestControlsRunner(t *testing.T) {
 	patchResponse := readAPIResponse(t, client, "patch-runner")
 	if patchResponse.status != http.StatusOK {
 		t.Fatalf("patch status = %d, want %d", patchResponse.status, http.StatusOK)
+	}
+}
+
+func TestWebSocketAPIRequestSelectsRunnerRoute(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{DisableDefaultLiteRT: true})
+	for _, spec := range []supervisor.RunnerSpec{
+		{
+			ID:       "main-one",
+			Runtime:  supervisor.RuntimeLlamaCPP,
+			Role:     supervisor.RoleMain,
+			Backend:  supervisor.BackendCPU,
+			ModelID:  "main-one",
+			Host:     "127.0.0.1",
+			Port:     9491,
+			Launch:   false,
+			Upstream: "http://127.0.0.1:9491",
+		},
+		{
+			ID:       "main-two",
+			Runtime:  supervisor.RuntimeLlamaCPP,
+			Role:     supervisor.RoleMain,
+			Backend:  supervisor.BackendCPU,
+			ModelID:  "main-two",
+			Host:     "127.0.0.1",
+			Port:     9492,
+			Launch:   false,
+			Upstream: "http://127.0.0.1:9492",
+		},
+	} {
+		if _, err := runtimeSupervisor.CreateRunner(spec); err != nil {
+			t.Fatalf("create runner %s: %v", spec.ID, err)
+		}
+	}
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	client := dialTestWebSocket(t, httpServer.URL, "/g0litellama/v1/ws")
+	defer client.Close()
+
+	client.WriteJSON(t, map[string]any{
+		"type":       "api.request",
+		"id":         "route-runner",
+		"method":     "POST",
+		"path":       "/g0litellama/v1/runners/main-one/route",
+		"headers":    map[string]string{"content-type": "application/json"},
+		"bodyBase64": base64.StdEncoding.EncodeToString([]byte(`{"role":"main"}`)),
+	})
+	routeResponse := readAPIResponse(t, client, "route-runner")
+	if routeResponse.status != http.StatusOK {
+		t.Fatalf("route status = %d, want %d", routeResponse.status, http.StatusOK)
+	}
+	if got, ok := runtimeSupervisor.UpstreamForPath("/v1/chat/completions"); !ok || got != "http://127.0.0.1:9491" {
+		t.Fatalf("main route = %q/%v, want main-one", got, ok)
 	}
 }
 
@@ -1608,6 +1749,18 @@ func (c testRunnerController) UpdateRunner(
 		return RunnerSnapshot{}, err
 	}
 	return c.runner(id)
+}
+
+func (c testRunnerController) RouteRunner(
+	ctx context.Context,
+	role string,
+	id string,
+) (RunnerSnapshot, error) {
+	runner, err := c.supervisor.RouteRunner(supervisor.Role(role), id)
+	if err != nil {
+		return RunnerSnapshot{}, err
+	}
+	return testRunnerSnapshot(runner), nil
 }
 
 func (c testRunnerController) StartRunner(

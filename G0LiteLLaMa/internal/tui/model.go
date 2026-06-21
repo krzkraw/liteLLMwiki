@@ -39,7 +39,6 @@ const (
 	wizardRoleRerankingX  = 37
 	wizardStartX          = 6
 	setupBackendFirstLine = 3
-
 )
 
 type tab struct {
@@ -94,6 +93,12 @@ type chatCompletionMsg struct {
 type runnerUpdateMsg struct {
 	field  string
 	value  string
+	runner server.RunnerSnapshot
+	err    error
+}
+
+type dashboardRouteMsg struct {
+	role   string
 	runner server.RunnerSnapshot
 	err    error
 }
@@ -185,26 +190,27 @@ type Model struct {
 	managedScreen bool
 	scrollOffset  int
 
-	wizardRuntime          string
-	wizardBackend          string
-	wizardRole             string
-	wizardVariantSelection int
-	wizardModelSelection   int
-	wizardOptionPage       int
-	wizardOptionOverrides  map[string]string
-	wizardCommandExtras    []wizardCommandExtra
-	wizardRemovedDefaults  map[string]bool
-	wizardCommandEdit      *wizardCommandEdit
-	optionModal            *optionModal
-	llamaRuntimeRoot       string
-	llamaRuntimeVariants   []llamaRuntimeVariant
-	backendConfigPath      string
-	backendStatus          runtimeconfig.Status
-	setupSelection         int
-	dashboardModelDropdown string
-	globalMenuOpen         bool
-	globalPaletteMenuOpen  bool
-	paletteID              string
+	wizardRuntime           string
+	wizardBackend           string
+	wizardRole              string
+	wizardVariantSelection  int
+	wizardModelSelection    int
+	wizardOptionPage        int
+	wizardOptionOverrides   map[string]string
+	wizardCommandExtras     []wizardCommandExtra
+	wizardRemovedDefaults   map[string]bool
+	wizardCommandEdit       *wizardCommandEdit
+	optionModal             *optionModal
+	llamaRuntimeRoot        string
+	llamaRuntimeVariants    []llamaRuntimeVariant
+	backendConfigPath       string
+	backendStatus           runtimeconfig.Status
+	setupSelection          int
+	dashboardModelDropdown  string
+	dashboardRunnerDropdown string
+	globalMenuOpen          bool
+	globalPaletteMenuOpen   bool
+	paletteID               string
 }
 
 var panelBorder = lipgloss.RoundedBorder()
@@ -477,6 +483,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.setActiveTab("runner:" + msg.runner.ID)
 		m.notice = m.runnerUpdateNotice(msg)
+	case dashboardRouteMsg:
+		m.refresh()
+		m.setActiveTab("dashboard")
+		m.dashboardRunnerDropdown = ""
+		if msg.err != nil {
+			m.notice = fmt.Sprintf("%s route update failed: %v", msg.role, msg.err)
+			break
+		}
+		m.notice = fmt.Sprintf("%s route -> %s", msg.role, msg.runner.ID)
 	}
 
 	return m, nil
@@ -690,6 +705,12 @@ func (m Model) buttonHitRegistry() []buttonHit {
 		addTextHit("Command Preview", "wizard-command-edit", "")
 		addTextHitOnVisibleLine("[ START ]", "[ START ]", "wizard-start", "")
 	}
+	if m.activeTabID() == "dashboard" && m.dashboardRunnerDropdown != "" {
+		for index, runner := range m.runnersForRole(m.dashboardRunnerDropdown) {
+			row := lineNumberContainingText(view, fmt.Sprintf("%d %s", index+1, runner.ID))
+			addTextHitOnRow(row, runner.ID, "dashboard-route-runner", m.dashboardRunnerDropdown+":"+runner.ID)
+		}
+	}
 
 	return hits
 }
@@ -767,6 +788,16 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case "wizard-start":
 		return m, m.wizardCreateCmd(), true
+	case "dashboard-route-runner":
+		role, id, ok := strings.Cut(hit.payload, ":")
+		if !ok {
+			return m, nil, true
+		}
+		m.dashboardRunnerDropdown = ""
+		if runner, ok := m.runnerByID(id); ok {
+			return m, m.dashboardRouteCmd(role, runner), true
+		}
+		return m, nil, true
 	case "modal-save":
 		m.saveOptionModal()
 		return m, nil, true
@@ -891,7 +922,15 @@ func (m *Model) handleTabClick(x int, y int) bool {
 }
 
 func (m Model) updateDashboardMouse(x int, y int) Model {
-	if y != m.dashboardModelRow() {
+	for _, role := range []string{"main", "embedding", "reranking"} {
+		if y == lineNumberContainingText(m.viewContent(), m.dashboardRunnerSlotPrefix(role)) &&
+			len(m.runnersForRole(role)) > 1 {
+			m.dashboardRunnerDropdown = role
+			m.dashboardModelDropdown = ""
+			return m
+		}
+	}
+	if y != lineNumberContainingText(m.viewContent(), "Models ----") {
 		return m
 	}
 	switch {
@@ -905,6 +944,36 @@ func (m Model) updateDashboardMouse(x int, y int) Model {
 		m.dashboardModelDropdown = ""
 	}
 	return m
+}
+
+func (m Model) updateDashboardKey(value string) (Model, tea.Cmd, bool) {
+	if m.dashboardRunnerDropdown != "" {
+		index, err := strconv.Atoi(value)
+		if err != nil {
+			return m, nil, false
+		}
+		runners := m.runnersForRole(m.dashboardRunnerDropdown)
+		if index < 1 || index > len(runners) {
+			return m, nil, true
+		}
+		runner := runners[index-1]
+		role := m.dashboardRunnerDropdown
+		m.dashboardRunnerDropdown = ""
+		return m, m.dashboardRouteCmd(role, runner), true
+	}
+
+	roleByKey := map[string]string{
+		"m": "main",
+		"e": "embedding",
+		"r": "reranking",
+	}
+	role, ok := roleByKey[strings.ToLower(value)]
+	if !ok || len(m.runnersForRole(role)) <= 1 {
+		return m, nil, false
+	}
+	m.dashboardRunnerDropdown = role
+	m.dashboardModelDropdown = ""
+	return m, nil, true
 }
 
 func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
@@ -1104,6 +1173,11 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if value == "" {
 		return m, nil
+	}
+	if m.activeTabID() == "dashboard" {
+		if next, cmd, ok := m.updateDashboardKey(value); ok {
+			return next, cmd
+		}
 	}
 	if m.selectRuneTab(value) {
 		return m, nil
@@ -1902,6 +1976,11 @@ func runtimeUseBadgeColor(alive int) string {
 }
 
 func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
+	if id := m.snapshot.Routes["main"]; id != "" {
+		if runner, ok := m.runnerByID(id); ok && runner.Role == "main" {
+			return runner, true
+		}
+	}
 	var fallbackRunner server.RunnerSnapshot
 	hasFallback := false
 	for _, runner := range m.snapshot.Runners {
@@ -2154,7 +2233,7 @@ func (m Model) bottomActionSegments() []bottomActionSegment {
 	}
 	switch m.activeTabID() {
 	case "dashboard":
-		items = append(items, bottomActionSegment{id: "hint", label: "Dashboard: click model roles"})
+		items = append(items, bottomActionSegment{id: "hint", label: "Dashboard: m/e/r routes | click model roles"})
 	case "wizard":
 		items = append(items, bottomActionSegment{id: "hint", label: "Wizard: click toggles | k Cache K | c Command | Enter Start"})
 	case "setup":
@@ -2277,6 +2356,16 @@ func (m Model) commandRailLinesWithScrollLine(scrollLine string) []string {
 
 func (m Model) dashboardView() string {
 	status := panelSpec{"Status", m.dashboardStatusLines(), "45"}
+	if m.dashboardRunnerDropdown != "" {
+		return m.panelGrid(
+			status,
+			panelSpec{
+				roleDisplayName(m.dashboardRunnerDropdown) + " runners",
+				m.runnerDropdownItemLines(m.dashboardRunnerDropdown),
+				"205",
+			},
+		)
+	}
 	if m.dashboardModelDropdown == "" {
 		return renderPanelSpec(status, m.width)
 	}
@@ -2295,12 +2384,14 @@ func (m Model) dashboardStatusLines() []string {
 		"Runners by runtime",
 		fmt.Sprintf("LiteRT      %d alive", m.runtimeAliveCount("litert")),
 		fmt.Sprintf("llama.cpp   %d alive", m.runtimeAliveCount("llamacpp")),
-		"",
 		"Runners by role",
 		fmt.Sprintf("Main        %d alive", m.roleAliveCount("main")),
 		fmt.Sprintf("Embedding   %d alive", m.roleAliveCount("embedding")),
 		fmt.Sprintf("Reranking   %d alive", m.roleAliveCount("reranking")),
-		"",
+		"Runner slots",
+		m.dashboardRunnerSlotLine("main"),
+		m.dashboardRunnerSlotLine("embedding"),
+		m.dashboardRunnerSlotLine("reranking"),
 		fmt.Sprintf(
 			"Models ---- Main %d -- Embedding %d -- Reranking %d",
 			m.presentModelCount("main"),
@@ -2308,6 +2399,50 @@ func (m Model) dashboardStatusLines() []string {
 			m.presentModelCount("reranking"),
 		),
 	}
+}
+
+func (m Model) dashboardRunnerSlotLine(role string) string {
+	runnerID := m.snapshot.Routes[role]
+	runner, ok := m.runnerByID(runnerID)
+	value := "none"
+	if ok {
+		value = runner.ID + " " + runner.State
+	}
+	if len(m.runnersForRole(role)) > 1 {
+		value += "  [choose]"
+	}
+	return m.dashboardRunnerSlotPrefix(role) + value
+}
+
+func (m Model) dashboardRunnerSlotPrefix(role string) string {
+	return fmt.Sprintf("%-12s", role)
+}
+
+func (m Model) runnersForRole(role string) []server.RunnerSnapshot {
+	runners := []server.RunnerSnapshot{}
+	for _, runner := range m.snapshot.Runners {
+		if runner.Role == role {
+			runners = append(runners, runner)
+		}
+	}
+	return runners
+}
+
+func (m Model) runnerDropdownItemLines(role string) []string {
+	runners := m.runnersForRole(role)
+	if len(runners) == 0 {
+		return []string{"No " + role + " runners."}
+	}
+	lines := make([]string, 0, len(runners))
+	active := m.snapshot.Routes[role]
+	for index, runner := range runners {
+		marker := " "
+		if runner.ID == active {
+			marker = "●"
+		}
+		lines = append(lines, fmt.Sprintf("%s %d %s  %s  %s", marker, index+1, runner.ID, runner.State, runner.Runtime))
+	}
+	return lines
 }
 
 func (m Model) setupView() string {
@@ -4454,6 +4589,22 @@ func (m Model) runnerUpdateCmd(
 			runner: updated,
 			err:    err,
 		}
+	}
+}
+
+func (m Model) dashboardRouteCmd(role string, runner server.RunnerSnapshot) tea.Cmd {
+	return func() tea.Msg {
+		if m.runnerController == nil {
+			return dashboardRouteMsg{role: role, runner: runner, err: fmt.Errorf("runner controller is not configured")}
+		}
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+
+		updated, err := m.runnerController.RouteRunner(ctx, role, runner.ID)
+		if updated.ID == "" {
+			updated = runner
+		}
+		return dashboardRouteMsg{role: role, runner: updated, err: err}
 	}
 }
 

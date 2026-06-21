@@ -20,6 +20,8 @@ test("renders dashboard on startup", async ({ terminal }) => {
   await expect(terminal.getByText("3 Setup", { strict: false })).toBeVisible();
   await expect(terminal.getByText("LiteRT", { strict: false })).toBeVisible();
   await expect(terminal.getByText("llama.cpp", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Runner slots", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("main        none", { strict: false })).toBeVisible();
 });
 
 test("keyboard navigation opens launch wizard", async ({ terminal }) => {
@@ -39,6 +41,24 @@ test("launch wizard creates a fake runner", async ({ terminal }) => {
   await expect(terminal.getByText("4 ● LR-M-1", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Runner LR-M-1", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Routes / Controls", { strict: false })).toBeVisible();
+});
+
+test("dashboard keyboard can open and select runner route slot", async ({ terminal }) => {
+  await openWizardByKeyboard(terminal);
+  terminal.keyPress(Key.Enter);
+  await expect(terminal.getByText("4 ● LR-M-1", { strict: false })).toBeVisible();
+
+  terminal.keyPress("2");
+  await expect(terminal.getByText("[ START ]", { strict: false })).toBeVisible();
+  terminal.keyPress(Key.Enter);
+  await expect(terminal.getByText("5 ● LR-M-2", { strict: false })).toBeVisible();
+
+  terminal.keyPress("1");
+  await expect(terminal.getByText("main        LR-M-2 running  [choose]", { strict: false })).toBeVisible();
+  terminal.keyPress("m");
+  await expect(terminal.getByText("Main runners", { strict: false })).toBeVisible();
+  terminal.keyPress("1");
+  await expect(terminal.getByText("main        LR-M-1 running  [choose]", { strict: false })).toBeVisible();
 });
 
 test("wizard option modal updates command preview", async ({ terminal }) => {

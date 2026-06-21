@@ -96,6 +96,10 @@ func TestDashboardRendersOnlyStatusWidget(t *testing.T) {
 		"Main        1 alive",
 		"Embedding   0 alive",
 		"Reranking   0 alive",
+		"Runner slots",
+		"main        LR-M-1 running",
+		"embedding   none",
+		"reranking   none",
 		"Models ---- Main 4 -- Embedding 3 -- Reranking 1",
 	} {
 		if !strings.Contains(view, expected) {
@@ -114,6 +118,135 @@ func TestDashboardRendersOnlyStatusWidget(t *testing.T) {
 		if strings.Contains(view, removed) {
 			t.Fatalf("dashboard should not render deprecated %q:\n%s", removed, view)
 		}
+	}
+}
+
+func TestDashboardRendersRunnerRoleSlots(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{
+			testRunner("LR-M-1", "litert", "main", "running"),
+			testRunner("LM-M-2", "llamacpp", "main", "created"),
+			testRunner("LM-E-1", "llamacpp", "embedding", "running"),
+		}),
+		Logs:    server.NewLogBroadcaster(8),
+		Catalog: testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 32
+
+	view := model.View().Content
+	for _, expected := range []string{
+		"Runner slots",
+		"main        LR-M-1 running  [choose]",
+		"embedding   LM-E-1 running",
+		"reranking   none",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("dashboard runner slots missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestDashboardRunnerRoleDropdownSelectsRoute(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController([]server.RunnerSnapshot{
+		testRunner("LR-M-1", "litert", "main", "running"),
+		testRunner("LM-M-2", "llamacpp", "main", "created"),
+	})
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 32
+
+	slotRow := lineNumberContaining(model.View().Content, "main        LR-M-1")
+	next, cmd := model.Update(leftClick(4, slotRow))
+	if cmd != nil {
+		t.Fatalf("slot click returned unexpected command")
+	}
+	model = next.(Model)
+	if !strings.Contains(model.View().Content, "Main runners") || !strings.Contains(model.View().Content, "LM-M-2") {
+		t.Fatalf("runner dropdown did not open:\n%s", model.View().Content)
+	}
+
+	x, y := renderedCellPositionOnLineContaining(t, model.View().Content, "2 LM-M-2", "LM-M-2")
+	next, cmd = model.Update(leftClick(x, y))
+	if cmd == nil {
+		t.Fatalf("runner route selection returned no command")
+	}
+	message := cmd()
+	afterAction, _ := next.(Model).Update(message)
+	model = afterAction.(Model)
+	if got := strings.Join(controller.calls, ","); got != "route:main:LM-M-2" {
+		t.Fatalf("controller calls = %q", got)
+	}
+	if !strings.Contains(model.View().Content, "main        LM-M-2 created  [choose]") {
+		t.Fatalf("dashboard did not update routed slot:\n%s", model.View().Content)
+	}
+}
+
+func TestDashboardRunnerRoleDropdownKeyboardSelectsRoute(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController([]server.RunnerSnapshot{
+		testRunner("LR-M-1", "litert", "main", "running"),
+		testRunner("LM-M-2", "llamacpp", "main", "created"),
+	})
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 32
+
+	next, cmd := model.Update(textKey("m"))
+	if cmd != nil {
+		t.Fatalf("dashboard route menu key returned unexpected command")
+	}
+	model = next.(Model)
+	if !strings.Contains(model.View().Content, "Main runners") {
+		t.Fatalf("main route menu did not open:\n%s", model.View().Content)
+	}
+
+	next, cmd = model.Update(textKey("2"))
+	if cmd == nil {
+		t.Fatalf("dashboard route numeric key returned no command")
+	}
+	message := cmd()
+	afterAction, _ := next.(Model).Update(message)
+	model = afterAction.(Model)
+	if got := strings.Join(controller.calls, ","); got != "route:main:LM-M-2" {
+		t.Fatalf("controller calls = %q", got)
+	}
+	if !strings.Contains(model.View().Content, "main        LM-M-2 created  [choose]") {
+		t.Fatalf("keyboard route selection did not update slot:\n%s", model.View().Content)
+	}
+}
+
+func TestSelectedChatRunnerUsesActiveMainRoute(t *testing.T) {
+	t.Parallel()
+
+	controller := newFakeRunnerController([]server.RunnerSnapshot{
+		testRunner("LR-M-1", "litert", "main", "running"),
+		testRunner("LM-M-2", "llamacpp", "main", "running"),
+	})
+	model := NewModel(ModelOptions{
+		RunnerController: controller,
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	runner, ok := model.selectedChatRunner()
+	if !ok {
+		t.Fatalf("selected chat runner missing")
+	}
+	if runner.ID != "LM-M-2" {
+		t.Fatalf("selected chat runner = %q, want active route LM-M-2", runner.ID)
 	}
 }
 
@@ -505,7 +638,7 @@ func TestBottomBarListsGlobalMenuAndCurrentTabActions(t *testing.T) {
 	for _, expected := range []string{
 		"Menu",
 		"Tab Next",
-		"Dashboard: click model roles",
+		"Dashboard: m/e/r routes | click model roles",
 	} {
 		if !strings.Contains(bottom, expected) {
 			t.Fatalf("bottom action bar missing %q in %q:\n%s", expected, bottom, view)
@@ -2281,22 +2414,28 @@ func testLlamaRuntimeRoot(t *testing.T, names ...string) string {
 
 type fakeRunnerController struct {
 	runners []server.RunnerSnapshot
+	routes  map[string]string
 	calls   []string
 }
 
 func newFakeRunnerController(runners []server.RunnerSnapshot) *fakeRunnerController {
-	return &fakeRunnerController{
+	controller := &fakeRunnerController{
 		runners: append([]server.RunnerSnapshot{}, runners...),
+		routes:  map[string]string{},
 	}
+	for _, runner := range runners {
+		if runner.State == "running" {
+			controller.routes[runner.Role] = runner.ID
+		}
+	}
+	return controller
 }
 
 func (c *fakeRunnerController) Snapshot() server.RunnerSnapshotResponse {
 	runners := append([]server.RunnerSnapshot{}, c.runners...)
 	routes := map[string]string{}
-	for _, runner := range runners {
-		if runner.State == "running" {
-			routes[runner.Role] = runner.ID
-		}
+	for role, id := range c.routes {
+		routes[role] = id
 	}
 	return server.RunnerSnapshotResponse{
 		Runners: runners,
@@ -2350,12 +2489,32 @@ func (c *fakeRunnerController) UpdateRunner(
 		case patch.Command != nil:
 			c.calls = append(c.calls, "update:"+id+":command:"+strings.Join(patch.Command, " "))
 			c.runners[index].Command = append([]string(nil), patch.Command...)
+		case patch.Role != "":
+			c.calls = append(c.calls, "update:"+id+":role:"+patch.Role)
+			c.runners[index].Role = patch.Role
+			c.routes[patch.Role] = id
 		default:
 			c.calls = append(c.calls, "update:"+id)
 		}
 		return c.runners[index], nil
 	}
 	c.calls = append(c.calls, "update:"+id)
+	return server.RunnerSnapshot{}, nil
+}
+
+func (c *fakeRunnerController) RouteRunner(
+	_ context.Context,
+	role string,
+	id string,
+) (server.RunnerSnapshot, error) {
+	c.calls = append(c.calls, "route:"+role+":"+id)
+	for index := range c.runners {
+		if c.runners[index].ID != id {
+			continue
+		}
+		c.routes[role] = id
+		return c.runners[index], nil
+	}
 	return server.RunnerSnapshot{}, nil
 }
 
@@ -2367,6 +2526,7 @@ func (c *fakeRunnerController) StartRunner(
 	for index := range c.runners {
 		if c.runners[index].ID == id {
 			c.runners[index].State = "running"
+			c.routes[c.runners[index].Role] = id
 			return c.runners[index], nil
 		}
 	}

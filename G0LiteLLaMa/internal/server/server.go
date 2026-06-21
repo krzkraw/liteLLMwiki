@@ -132,6 +132,7 @@ type RunnerController interface {
 	Snapshot() RunnerSnapshotResponse
 	CreateRunner(context.Context, RunnerSpec) (RunnerSnapshot, error)
 	UpdateRunner(context.Context, string, RunnerPatch) (RunnerSnapshot, error)
+	RouteRunner(context.Context, string, string) (RunnerSnapshot, error)
 	StartRunner(context.Context, string) (RunnerSnapshot, error)
 	StopRunner(context.Context, string) (RunnerSnapshot, error)
 	RestartRunner(context.Context, string) (RunnerSnapshot, error)
@@ -471,12 +472,23 @@ func (s *Server) runnerResourceAPIResponse(
 		runner, err = s.runnerController.RestartRunner(ctx, id)
 	case "close":
 		runner, err = s.runnerController.CloseRunner(ctx, id)
+	case "route":
+		var request struct {
+			Role string `json:"role"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			return textAPIResponse(http.StatusBadRequest, "decode runner route request\n")
+		}
+		runner, err = s.runnerController.RouteRunner(ctx, request.Role, id)
 	default:
 		return textAPIResponse(http.StatusNotFound, "not found\n")
 	}
 	if err != nil {
 		if errors.Is(err, ErrRunnerNotFound) {
 			return textAPIResponse(http.StatusNotFound, err.Error()+"\n")
+		}
+		if action == "route" {
+			return textAPIResponse(http.StatusBadRequest, err.Error()+"\n")
 		}
 		return textAPIResponse(http.StatusBadGateway, err.Error()+"\n")
 	}

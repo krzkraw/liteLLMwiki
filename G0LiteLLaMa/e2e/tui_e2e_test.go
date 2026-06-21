@@ -184,6 +184,20 @@ func (c *harnessRunnerController) UpdateRunner(
 	return server.RunnerSnapshot{}, nil
 }
 
+func (c *harnessRunnerController) RouteRunner(
+	_ context.Context,
+	role string,
+	id string,
+) (server.RunnerSnapshot, error) {
+	c.calls = append(c.calls, "route:"+role+":"+id)
+	for _, runner := range c.runners {
+		if runner.ID == id {
+			return runner, nil
+		}
+	}
+	return server.RunnerSnapshot{}, nil
+}
+
 func (c *harnessRunnerController) StartRunner(
 	_ context.Context,
 	id string,

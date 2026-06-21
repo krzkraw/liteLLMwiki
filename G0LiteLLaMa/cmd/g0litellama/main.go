@@ -263,6 +263,18 @@ func (c supervisorRunnerController) UpdateRunner(
 	return c.runner(id)
 }
 
+func (c supervisorRunnerController) RouteRunner(
+	_ context.Context,
+	role string,
+	id string,
+) (server.RunnerSnapshot, error) {
+	runner, err := c.supervisor.RouteRunner(supervisor.Role(role), id)
+	if err != nil {
+		return server.RunnerSnapshot{}, err
+	}
+	return toServerRunnerSnapshot(runner), nil
+}
+
 func (c supervisorRunnerController) StartRunner(
 	ctx context.Context,
 	id string,

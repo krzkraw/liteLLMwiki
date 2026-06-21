@@ -119,6 +119,57 @@ func TestSupervisorRoutesByRunnerRole(t *testing.T) {
 	}
 }
 
+func TestSupervisorRouteRunnerSwitchesActiveRoleRoute(t *testing.T) {
+	t.Parallel()
+
+	supervisor := New(Config{DisableDefaultLiteRT: true})
+	firstID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:       "main-one",
+		Runtime:  RuntimeLlamaCPP,
+		Role:     RoleMain,
+		Backend:  BackendCPU,
+		ModelID:  "main-one",
+		Host:     "127.0.0.1",
+		Port:     9491,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9491",
+	})
+	if err != nil {
+		t.Fatalf("create first main runner: %v", err)
+	}
+	secondID, err := supervisor.CreateRunner(RunnerSpec{
+		ID:       "main-two",
+		Runtime:  RuntimeLlamaCPP,
+		Role:     RoleMain,
+		Backend:  BackendCPU,
+		ModelID:  "main-two",
+		Host:     "127.0.0.1",
+		Port:     9492,
+		Launch:   false,
+		Upstream: "http://127.0.0.1:9492",
+	})
+	if err != nil {
+		t.Fatalf("create second main runner: %v", err)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/chat/completions"); !ok || got != "http://127.0.0.1:9492" {
+		t.Fatalf("initial main route = %q/%v, want second runner", got, ok)
+	}
+
+	runner, err := supervisor.RouteRunner(RoleMain, firstID)
+	if err != nil {
+		t.Fatalf("route first runner: %v", err)
+	}
+	if runner.ID != firstID {
+		t.Fatalf("routed runner = %q, want %q", runner.ID, firstID)
+	}
+	if got, ok := supervisor.UpstreamForPath("/v1/chat/completions"); !ok || got != "http://127.0.0.1:9491" {
+		t.Fatalf("main route = %q/%v, want first runner", got, ok)
+	}
+	if _, err := supervisor.RouteRunner(RoleEmbedding, secondID); err == nil {
+		t.Fatalf("route role mismatch error = nil, want error")
+	}
+}
+
 func TestSupervisorCloseRunnerRemovesOnlyOwnedRoute(t *testing.T) {
 	t.Parallel()
 

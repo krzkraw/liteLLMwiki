@@ -53,6 +53,8 @@ bun run e2e:tui
 cd G0LiteLLaMa && scripts/build-release.sh dist
 ```
 
+For docs-only changes, at minimum run `git diff --check`.
+
 Real backend checks read `G0LiteLLaMa/runtime-config/backends.json` or
 `RUNTIME_BACKEND_CONFIG` and skip missing models/runtimes with clear reasons
 unless `G0LITELLAMA_E2E_REAL=1` is set. Real LiteRT smoke requires
@@ -171,15 +173,22 @@ E2E is not required.
   outputs before committing unless they are deliberate deliverables or required
   test fixtures.
 
-## Skill And Tool Precedence
+## Entrypoint And Instruction Precedence
 
-Use this priority order when instructions conflict:
+- Primary tracked agent entrypoint: `AGENTS.md`.
+- Tracked mirrors: none. Ignored files such as `.tui-test/cache/AGENTS.md` are
+  caches, not instruction sources.
+- Subtree overrides: none currently. Add a closer `AGENTS.md` only when a
+  subtree needs materially different rules.
+- If another agent instruction file is added, make it a symlink, generated
+  mirror, or short pointer to this file, and document the drift check.
+- Use this priority order when instructions conflict:
 
-1. The user's explicit prompt.
-2. The nearest applicable `AGENTS.md`.
-3. Project source-of-truth docs such as `README.md` and `G0LiteLLaMa/README.md`.
-4. Installed skills, tools, and tool-specific workflows.
-5. Generic model defaults.
+  1. The user's explicit prompt.
+  2. The nearest applicable `AGENTS.md`.
+  3. Project docs such as `README.md` and `G0LiteLLaMa/README.md`.
+  4. Installed skills, tools, and tool-specific workflows.
+  5. Generic model defaults.
 
 Use installed skills and tools only when they materially help the current task
 or are explicitly requested. Do not let broad process skills expand a small task

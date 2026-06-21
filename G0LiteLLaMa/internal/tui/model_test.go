@@ -1088,6 +1088,85 @@ func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
 	}
 }
 
+func TestLaunchWizardCLIOptionsPageThreePlusFitAndClickInPlace(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 72
+	model.height = 32
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+	if pages := model.wizardCLIOptionPageCount(); pages < 4 {
+		t.Fatalf("test needs page 4+ options, got %d", pages)
+	}
+
+	for page := 2; page < model.wizardCLIOptionPageCount(); page++ {
+		model.wizardOptionPage = page
+		for index, line := range model.wizardCLIOptionLines() {
+			if got, want := lipgloss.Width(line), model.wizardContentWidth(); got != want {
+				t.Fatalf("page %d row %d width = %d, want %d: %q", page+1, index, got, want, ansi.Strip(line))
+			}
+		}
+	}
+
+	model.wizardOptionPage = 3
+	x, y := renderedTextPosition(t, model.View().Content, "[spec-draft-n-max]")
+	next, cmd := model.Update(leftClick(x, y))
+	if cmd != nil {
+		t.Fatalf("page 4 option click returned unexpected command")
+	}
+	model = next.(Model)
+	if model.activeTabID() != "wizard" || model.currentWizardOptionPage() != 3 {
+		t.Fatalf("option click should stay on wizard page 4, tab=%q page=%d", model.activeTabID(), model.currentWizardOptionPage()+1)
+	}
+	if model.optionModal == nil || model.optionModal.option.ID != "spec-draft-n-max" {
+		t.Fatalf("page 4 option click opened %#v", model.optionModal)
+	}
+}
+
+func TestLaunchWizardOptionPaginationMouseStaysInWizard(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 72
+	model.height = 32
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+	model.wizardOptionPage = 2
+
+	x, y := renderedTextPosition(t, model.View().Content, "[ Next ]")
+	next, cmd := model.Update(leftClick(x, y))
+	if cmd != nil {
+		t.Fatalf("next page click returned unexpected command")
+	}
+	model = next.(Model)
+	if model.activeTabID() != "wizard" || model.currentWizardOptionPage() != 3 {
+		t.Fatalf("next click should stay in wizard pagination, tab=%q page=%d", model.activeTabID(), model.currentWizardOptionPage()+1)
+	}
+
+	x, y = renderedTextPosition(t, model.View().Content, "[ Prev ]")
+	next, cmd = model.Update(leftClick(x, y))
+	if cmd != nil {
+		t.Fatalf("prev page click returned unexpected command")
+	}
+	model = next.(Model)
+	if model.activeTabID() != "wizard" || model.currentWizardOptionPage() != 2 {
+		t.Fatalf("prev click should stay in wizard pagination, tab=%q page=%d", model.activeTabID(), model.currentWizardOptionPage()+1)
+	}
+}
+
 func TestRuntimeStatusBadgesUseGreenForActiveAndRedForIdle(t *testing.T) {
 	t.Parallel()
 

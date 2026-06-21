@@ -3207,9 +3207,10 @@ func (m Model) wizardCLIOptionLine(option wizardCLIOption) string {
 	}
 
 	width := m.wizardContentWidth()
+	commandWidth := m.wizardCLICommandColumnWidth()
 	if width <= 0 {
 		return wizardCLIOptionANSI(m.palette().modelSelected, background, true) +
-			padRight(command, wizardCLICommandWidth) +
+			padRight(command, commandWidth) +
 			wizardCLIOptionANSI(m.palette().variantHeader, background, false) +
 			padRight(value, wizardCLIValueWidth) +
 			wizardCLIOptionANSI("252", background, false) +
@@ -3217,15 +3218,23 @@ func (m Model) wizardCLIOptionLine(option wizardCLIOption) string {
 			"\x1b[m"
 	}
 
-	descriptionWidth := maxInt(0, width-wizardCLICommandWidth-wizardCLIValueWidth)
+	descriptionWidth := maxInt(0, width-commandWidth-wizardCLIValueWidth)
 	description = padRight(truncateToWidth(description, descriptionWidth), descriptionWidth)
 	return wizardCLIOptionANSI(m.palette().modelSelected, background, true) +
-		padRight(command, wizardCLICommandWidth) +
+		padRight(command, commandWidth) +
 		wizardCLIOptionANSI(m.palette().variantHeader, background, false) +
 		padRight(value, wizardCLIValueWidth) +
 		wizardCLIOptionANSI("252", background, false) +
 		description +
 		"\x1b[m"
+}
+
+func (m Model) wizardCLICommandColumnWidth() int {
+	width := wizardCLICommandWidth
+	for _, option := range m.visibleWizardCLIOptions() {
+		width = maxInt(width, lipgloss.Width(wizardOptionButtonText(option))+1)
+	}
+	return width
 }
 
 func wizardCLIOptionValueText(m Model, option wizardCLIOption) string {
@@ -3302,8 +3311,8 @@ func (m Model) optionModalSpec() panelSpec {
 
 func (m Model) wizardOptionFromMouse(x int, y int) (wizardCLIOption, bool) {
 	view := m.viewContent()
-	for _, option := range applicableWizardOptions(m.wizardRuntime, m.wizardBackend, m.wizardRole) {
-		if renderedPointHitsToken(view, x, y, optionLabel(option)) {
+	for _, option := range m.visibleWizardCLIOptions() {
+		if renderedPointHitsToken(view, x, y, wizardOptionButtonText(option)) {
 			return option, true
 		}
 	}
@@ -3784,7 +3793,7 @@ func (m Model) wizardContentWidth() int {
 	if m.usesWidePanelGrid() {
 		width = m.panelGridColumnWidth()
 	}
-	return panelInnerWidth(width)
+	return panelBodyWidth(width)
 }
 
 func (m Model) wizardVariantToggleLine() string {
@@ -5533,6 +5542,10 @@ func panelInnerWidth(width int) int {
 		return 0
 	}
 	return width - 4
+}
+
+func panelBodyWidth(width int) int {
+	return panelInnerWidth(panelInnerWidth(width))
 }
 
 func panelBackgroundForAccent(color string) string {

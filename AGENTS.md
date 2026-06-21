@@ -6,9 +6,9 @@ This file is the operating contract for autonomous agents working in
 ## Project Description
 
 `liteLLMwiki` now ships only the native Go runner, renamed to `G0LiteLLaMa`.
-The React/Rspack web UI and Bun package scripts were removed. The Go process
-serves OpenAI-compatible `/v1/*` routes and native `/g0litellama/v1/*` control
-routes.
+The React/Rspack web UI and old app scripts were removed. The repo keeps a
+small Bun package only for rendered TUI E2E. The Go process serves
+OpenAI-compatible `/v1/*` routes and native `/g0litellama/v1/*` control routes.
 
 Model binaries are external artifacts. Keep them under `models/`; do not track
 them in Git.
@@ -83,6 +83,9 @@ bun run e2e:tui
 Direct `Model.Update` tests are necessary but not sufficient for TUI behavior.
 Rendered terminal behavior must be verified through `@microsoft/tui-test`
 unless the change is provably unrelated to visible or interactive TUI behavior.
+Every visible TUI action added or changed must be mouse-compatible as well as
+keyboard-accessible. Cover mouse hit behavior with focused Go tests and rendered
+`@microsoft/tui-test` coverage when the visible terminal behavior changes.
 
 Do not claim TUI behavior is verified from:
 
@@ -110,6 +113,8 @@ E2E is not required.
 - Never add Git LFS to this repository.
 - Never commit `.litertlm` files, `.litertlm.parts/`, partial downloads, GGUF
   model files, or model caches.
+- Keep Hugging Face auth env-only (`HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN`).
+  Never commit tokens, print tokens, or place them in repo-local config.
 - Keep the model catalog and installer model selector aligned. The default
   installer model selection is `gemma4-litert`, `embeddinggemma-litert`, and
   `qwen3-reranker-q4km`.
@@ -125,8 +130,25 @@ E2E is not required.
 
 - Prefer existing project patterns over new abstractions.
 - Keep changes scoped to the user request.
+- For large numbered implementation plans, use sequential subagents only when
+  delegating, review each result in the parent thread, and make one commit per
+  completed goal when the user asks for committed goal slices.
+- Do not create worktrees unless the user explicitly asks.
+- Use Bun for the JS/TUI harness in this repo; do not switch to npm, yarn, or
+  pnpm unless the user explicitly asks.
 - Update `README.md` and this file when setup, commands, structure, or model
   policy changes.
+- Treat renames and path moves as whole-repo migrations: update docs, scripts,
+  tests, ignore rules, and run a repo-wide `rg` sweep for stale paths.
+- When changing runtime downloads, package versions, or hard-coded checksums,
+  verify current upstream versions from the package manager, registry, release
+  page, or official docs before choosing values.
+- Keep the Charm TUI stack on v2 imports:
+  `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, and
+  `charm.land/lipgloss/v2`. Do not reintroduce v1 imports.
+- For configure/E2E runtime probes, keep llama.cpp reasoning off unless the
+  task is explicitly testing reasoning. Report slow behavior instead of hiding
+  it with arbitrary tiny token caps.
 - Use exact commands for verification evidence.
 - If verification cannot run, state exactly what was skipped and why.
 
@@ -134,6 +156,8 @@ E2E is not required.
 
 - Commit only intentional source/doc changes.
 - Do not commit local models or generated artifacts.
+- Use `clean.sh` or `clean.ps1` for generated-file cleanup; they preserve
+  `models/`.
 - Do not force-push, rewrite history, run `git clean`, or delete untracked user
   files unless the user explicitly asks.
 

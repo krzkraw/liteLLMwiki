@@ -553,6 +553,33 @@ func TestFullViewBottomBarStaysOnTerminalBottom(t *testing.T) {
 	}
 }
 
+func TestViewRendersMutedBackdropAndTintedPanels(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController(nil),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+	})
+	model.width = 120
+	model.height = 24
+
+	view := model.View().Content
+	for _, backgroundCode := range []string{
+		"\x1b[48;5;234m",
+		"\x1b[48;5;24m",
+	} {
+		if !strings.Contains(view, backgroundCode) {
+			t.Fatalf("view missing background code %q:\n%s", backgroundCode, view)
+		}
+	}
+
+	warmPanel := renderPanel("Warm", []string{"card"}, "214")
+	if !strings.Contains(warmPanel, "\x1b[48;5;58m") {
+		t.Fatalf("warm panel missing tinted background:\n%s", warmPanel)
+	}
+}
+
 func TestBottomBarMouseActionsDoNotRequireFKeys(t *testing.T) {
 	t.Parallel()
 
@@ -596,7 +623,7 @@ func TestLaunchWizardRendersThemedOptionBarsAndModelHighlight(t *testing.T) {
 	model.height = 36
 
 	choiceLines := model.wizardChoiceLines()
-	expectedWidth := model.width - 4
+	expectedWidth := model.wizardContentWidth()
 	for _, index := range []int{0, 2, 4, 6} {
 		if got := lipgloss.Width(choiceLines[index]); got != expectedWidth {
 			t.Fatalf("wizard option row %d width = %d, want %d: %q", index, got, expectedWidth, choiceLines[index])
@@ -921,12 +948,27 @@ func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatalf("wizard CLI options empty")
 	}
+	expectedWidth := model.wizardContentWidth()
+	for index, line := range lines {
+		if strings.Contains(line, "\n") {
+			t.Fatalf("CLI option row %d should stay single-line: %q", index, line)
+		}
+		if got := lipgloss.Width(line); got != expectedWidth {
+			t.Fatalf("CLI option row %d width = %d, want %d: %q", index, got, expectedWidth, line)
+		}
+	}
 	first := ansi.Strip(lines[0])
 	if strings.Contains(first, "-") {
 		t.Fatalf("CLI option row should not show flag prefixes: %q", first)
 	}
 	if !strings.Contains(first, "[c]") || !strings.Contains(first, "Context size") {
 		t.Fatalf("CLI option row should be button-like with description: %q", first)
+	}
+	if !strings.Contains(lines[0], "38;5;82;48;5;22m[c]") {
+		t.Fatalf("CLI option command should be bright on model-style row:\n%q", lines[0])
+	}
+	if !strings.Contains(lines[0], "38;5;252;48;5;22m Context size") {
+		t.Fatalf("CLI option description should be dimmer than command:\n%q", lines[0])
 	}
 
 	x, y := renderedTextPosition(t, model.View().Content, "[ctk]")

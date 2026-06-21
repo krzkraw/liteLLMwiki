@@ -241,6 +241,7 @@ var (
 type tuiPalette struct {
 	id       string
 	label    string
+	backdrop string
 	header   string
 	footerBG string
 	footerFG string
@@ -272,6 +273,7 @@ func tuiPalettes() []tuiPalette {
 		{
 			id:              "neon",
 			label:           "Neon",
+			backdrop:        "234",
 			header:          "45",
 			footerBG:        "17",
 			footerFG:        "250",
@@ -296,6 +298,7 @@ func tuiPalettes() []tuiPalette {
 		{
 			id:              "amber",
 			label:           "Amber",
+			backdrop:        "236",
 			header:          "214",
 			footerBG:        "94",
 			footerFG:        "230",
@@ -320,6 +323,7 @@ func tuiPalettes() []tuiPalette {
 		{
 			id:              "ocean",
 			label:           "Ocean",
+			backdrop:        "17",
 			header:          "81",
 			footerBG:        "24",
 			footerFG:        "231",
@@ -1529,13 +1533,25 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) viewContent() string {
+	var content string
 	if m.managedScreen {
 		if m.height <= 0 {
-			return m.managedStartupView()
+			content = m.managedStartupView()
+			return m.screenFrame(content)
 		}
-		return m.managedScreenView()
+		content = m.managedScreenView()
+		return m.screenFrame(content)
 	}
-	return m.fullView()
+	content = m.fullView()
+	return m.screenFrame(content)
+}
+
+func (m Model) screenFrame(content string) string {
+	style := lipgloss.NewStyle().Background(lipgloss.Color(m.palette().backdrop))
+	if m.width > 0 {
+		style = style.Width(m.width)
+	}
+	return style.Render(content)
 }
 
 func (m Model) fullView() string {
@@ -1822,8 +1838,9 @@ func (m Model) palette() tuiPalette {
 }
 
 func (m Model) headerView() string {
+	background := panelBackgroundForAccent(m.palette().header)
 	parts := []string{
-		titleStyle.Render("◆ G0LiteLLaMa"),
+		titleStyle.Background(lipgloss.Color(background)).Render("◆ G0LiteLLaMa"),
 		"LiteRT: " + runtimeUseBadge(m.runtimeAliveCount("litert")),
 		"llama.cpp: " + runtimeUseBadge(m.runtimeAliveCount("llamacpp")),
 		fmt.Sprintf("Runners: %d", len(m.snapshot.Runners)),
@@ -1835,6 +1852,7 @@ func (m Model) headerView() string {
 	style := lipgloss.NewStyle().
 		Border(panelBorder).
 		BorderForeground(lipgloss.Color(m.palette().header)).
+		Background(lipgloss.Color(background)).
 		Padding(0, 1)
 	if m.width > 2 {
 		style = style.Width(m.width)
@@ -3153,22 +3171,7 @@ func (m Model) wizardCLIOptionLines() []string {
 	}
 	lines := make([]string, 0, len(options)+1)
 	for _, option := range options {
-		label := wizardOptionDisplayName(option)
-		valueText := ""
-		if value, ok := m.wizardOptionOverrides[option.ID]; ok {
-			if value == "" {
-				valueText = "on"
-			} else {
-				valueText = value
-			}
-		}
-		line := fmt.Sprintf("%-10s %-12s %s", wizardOptionButtonTextFromLabel(label), valueText, option.Description)
-		lines = append(lines, m.fullWidthWizardLine(
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
-				Background(lipgloss.Color("236")),
-			line,
-		))
+		lines = append(lines, m.wizardCLIOptionLine(option))
 	}
 	if totalPages := m.wizardCLIOptionPageCount(); totalPages > 1 {
 		lines = append(lines, m.fullWidthWizardLine(
@@ -3179,6 +3182,59 @@ func (m Model) wizardCLIOptionLines() []string {
 		))
 	}
 	return lines
+}
+
+func (m Model) wizardCLIOptionLine(option wizardCLIOption) string {
+	background := m.palette().modelBG
+
+	command := wizardOptionButtonTextFromLabel(wizardOptionDisplayName(option))
+	value := wizardCLIOptionValueText(m, option)
+	description := singleLineText(option.Description)
+	if value == "" {
+		value = option.DefaultText
+	}
+
+	width := m.wizardContentWidth()
+	if width <= 0 {
+		return wizardCLIOptionANSI(m.palette().modelSelected, background, true) +
+			command +
+			wizardCLIOptionANSI(m.palette().variantHeader, background, false) +
+			" " + value +
+			wizardCLIOptionANSI("252", background, false) +
+			" " + description +
+			"\x1b[m"
+	}
+
+	prefixWidth := lipgloss.Width(command) + 1 + lipgloss.Width(value) + 1
+	description = truncateToWidth(description, maxInt(0, width-prefixWidth))
+	plain := command + " " + value + " " + description
+	padding := strings.Repeat(" ", maxInt(0, width-lipgloss.Width(plain)))
+	return wizardCLIOptionANSI(m.palette().modelSelected, background, true) +
+		command +
+		wizardCLIOptionANSI(m.palette().variantHeader, background, false) +
+		" " + value +
+		wizardCLIOptionANSI("252", background, false) +
+		" " + description +
+		padding +
+		"\x1b[m"
+}
+
+func wizardCLIOptionValueText(m Model, option wizardCLIOption) string {
+	value, ok := m.wizardOptionOverrides[option.ID]
+	if !ok {
+		return ""
+	}
+	if value == "" {
+		return "on"
+	}
+	return value
+}
+
+func wizardCLIOptionANSI(fg string, bg string, bold bool) string {
+	if bold {
+		return fmt.Sprintf("\x1b[1;38;5;%s;48;5;%sm", fg, bg)
+	}
+	return fmt.Sprintf("\x1b[22;38;5;%s;48;5;%sm", fg, bg)
 }
 
 func (m Model) wizardCommandPreviewLines() []string {
@@ -5444,14 +5500,16 @@ func renderPanelWidth(title string, lines []string, color string, width int) str
 	if strings.TrimSpace(body) == "" {
 		body = "No data."
 	}
+	background := panelBackgroundForAccent(color)
 	style := lipgloss.NewStyle().
 		Border(panelBorder).
 		BorderForeground(lipgloss.Color(color)).
+		Background(lipgloss.Color(background)).
 		Padding(0, 1)
 	if width > style.GetHorizontalFrameSize() {
 		style = style.Width(panelInnerWidth(width))
 	}
-	return style.Render(subtitleStyle.Render(title) + "\n" + body)
+	return style.Render(subtitleStyle.Background(lipgloss.Color(background)).Render(title) + "\n" + body)
 }
 
 func panelInnerWidth(width int) int {
@@ -5459,6 +5517,21 @@ func panelInnerWidth(width int) int {
 		return 0
 	}
 	return width - 4
+}
+
+func panelBackgroundForAccent(color string) string {
+	switch color {
+	case "39", "45", "81", "82":
+		return "24"
+	case "214", "222", "229":
+		return "58"
+	case "196", "205", "213", "219":
+		return "53"
+	case "244":
+		return "236"
+	default:
+		return "23"
+	}
 }
 
 func renderCommandRail(lines []string) string {
@@ -5474,6 +5547,10 @@ func truncateToWidth(value string, width int) string {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes)
+}
+
+func singleLineText(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func joinPanels(panels ...string) string {

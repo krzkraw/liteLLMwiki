@@ -83,6 +83,10 @@ cd G0LiteLLaMa && go test ./...
 bun run e2e:tui
 ```
 
+For any visible TUI edit, capture and show a fresh screenshot of the rendered
+terminal before finishing, and commit the intentional change at the end after
+verification passes.
+
 Direct `Model.Update` tests are necessary but not sufficient for TUI behavior.
 Rendered terminal behavior must be verified through `@microsoft/tui-test`
 unless the change is provably unrelated to visible or interactive TUI behavior.

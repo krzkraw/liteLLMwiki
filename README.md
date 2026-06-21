@@ -12,6 +12,7 @@ native TUI/API process directly.
 - `G0LiteLLaMa/llama-runtimes/` - ignored repo-local llama.cpp installs.
 - `G0LiteLLaMa/runtime-config/` - ignored backend probe results.
 - `models/` - ignored external model files; keep only `README.md`.
+- `skills/` - repo-local agent skills for repeatable project techniques.
 
 ## Run
 

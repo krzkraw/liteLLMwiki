@@ -31,6 +31,7 @@ them in Git.
 - `G0LiteLLaMa/litert-runtimes/` - ignored local LiteRT-LM installs.
 - `G0LiteLLaMa/llama-runtimes/` - ignored local llama.cpp installs.
 - `models/` - ignored local model directory; keep only `README.md`.
+- `skills/` - repo-local agent skills for repeatable project techniques.
 
 ## Verification Commands
 

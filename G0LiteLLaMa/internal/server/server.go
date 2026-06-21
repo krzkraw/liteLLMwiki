@@ -365,6 +365,18 @@ type rawAPIResponse struct {
 	body        []byte
 }
 
+type openAIModelsResponse struct {
+	Object string              `json:"object"`
+	Data   []openAIModelRecord `json:"data"`
+}
+
+type openAIModelRecord struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
 func (s *Server) runnerAPIResponse(
 	ctx context.Context,
 	method string,
@@ -550,6 +562,43 @@ func textAPIResponse(status int, body string) rawAPIResponse {
 	}
 }
 
+func (s *Server) openAIModelsAPIResponse(method string) rawAPIResponse {
+	if method != http.MethodGet {
+		return textAPIResponse(http.StatusMethodNotAllowed, "method not allowed\n")
+	}
+	if s.runnerController == nil {
+		return textAPIResponse(http.StatusBadGateway, "upstream proxy is not configured\n")
+	}
+
+	snapshot := s.runnerController.Snapshot()
+	runnersByID := map[string]RunnerSnapshot{}
+	for _, runner := range snapshot.Runners {
+		runnersByID[runner.ID] = runner
+	}
+	seen := map[string]bool{}
+	models := []openAIModelRecord{}
+	for _, role := range []string{"main", "embedding", "reranking"} {
+		runner := runnersByID[snapshot.Routes[role]]
+		modelID := strings.TrimSpace(runner.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(runner.ID)
+		}
+		if modelID == "" || seen[modelID] {
+			continue
+		}
+		seen[modelID] = true
+		models = append(models, openAIModelRecord{
+			ID:      modelID,
+			Object:  "model",
+			OwnedBy: "g0litellama",
+		})
+	}
+	return jsonAPIResponse(http.StatusOK, openAIModelsResponse{
+		Object: "list",
+		Data:   models,
+	})
+}
+
 func writeRawAPIResponse(w http.ResponseWriter, response rawAPIResponse) {
 	w.Header().Set("content-type", response.contentType)
 	w.WriteHeader(response.status)
@@ -619,8 +668,16 @@ func (s *Server) runtimeStatus() (RuntimeStatus, bool) {
 }
 
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/models" && s.runnerController != nil {
+		writeRawAPIResponse(w, s.openAIModelsAPIResponse(r.Method))
+		return
+	}
 	if s.proxy == nil {
 		http.Error(w, "upstream proxy is not configured", http.StatusBadGateway)
+		return
+	}
+	if !s.proxy.HasTargetForPath(r.URL.Path) {
+		http.Error(w, "no routed runner for "+r.URL.Path, http.StatusNotImplemented)
 		return
 	}
 

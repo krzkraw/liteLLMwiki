@@ -375,6 +375,16 @@ func (s *Server) handleWebSocketAPIRequest(
 			return
 		}
 		_ = writer.sendAPIJSONResponse(message.ID, http.StatusOK, response)
+	case requestPath.Path == "/v1/models" && s.runnerController != nil:
+		response := s.openAIModelsAPIResponse(method)
+		if err := writer.sendAPIResponse(
+			message.ID,
+			response.status,
+			map[string]string{"content-type": response.contentType},
+			response.body,
+		); err != nil {
+			_ = writer.sendAPIError(message.ID, err.Error())
+		}
 	case requestPath.Path == "/v1" || strings.HasPrefix(requestPath.Path, "/v1/"):
 		s.proxyWebSocketAPIRequest(ctx, writer, message, method, requestPath, body)
 	default:
@@ -420,6 +430,14 @@ func (s *Server) proxyWebSocketAPIRequest(
 			message.ID,
 			http.StatusBadGateway,
 			"upstream proxy is not configured\n",
+		)
+		return
+	}
+	if !s.proxy.HasTargetForPath(requestPath.Path) {
+		_ = writer.sendAPITextResponse(
+			message.ID,
+			http.StatusNotImplemented,
+			"no routed runner for "+requestPath.Path+"\n",
 		)
 		return
 	}

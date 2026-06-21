@@ -250,6 +250,97 @@ func TestSelectedChatRunnerUsesActiveMainRoute(t *testing.T) {
 	}
 }
 
+func TestChatTabRendersTargetSystemInputTranscriptThinkingAndSettings(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	view := model.View().Content
+	for _, expected := range []string{
+		"Chat console / main target",
+		"Target",
+		"[main]",
+		"embedding",
+		"reranking",
+		"System prompt",
+		"Input",
+		"Transcript",
+		"Thinking",
+		"Settings",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("chat view missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestChatTargetThinkingSettingsAndSystemPromptControls(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	next, cmd := model.Update(textKey("["))
+	if cmd != nil {
+		t.Fatalf("target cycle returned command")
+	}
+	model = next.(Model)
+	if model.chatTargetRole != "embedding" || !strings.Contains(model.View().Content, "[embedding]") {
+		t.Fatalf("target did not cycle to embedding:\n%s", model.View().Content)
+	}
+
+	next, cmd = model.Update(textKey("!"))
+	if cmd != nil {
+		t.Fatalf("thinking toggle returned command")
+	}
+	model = next.(Model)
+	if !model.chatThinking || !lineContainsAll(model.View().Content, "Thinking:", "on") {
+		t.Fatalf("thinking toggle failed:\n%s", model.View().Content)
+	}
+
+	next, cmd = model.Update(textKey("?"))
+	if cmd != nil {
+		t.Fatalf("settings toggle returned command")
+	}
+	model = next.(Model)
+	if !model.chatSettingsOpen || !strings.Contains(model.View().Content, "Prompt settings") {
+		t.Fatalf("settings popup did not open:\n%s", model.View().Content)
+	}
+
+	next, cmd = model.Update(textKey("@"))
+	if cmd != nil {
+		t.Fatalf("system edit open returned command")
+	}
+	model = next.(Model)
+	next, _ = model.Update(textKey("Be brief."))
+	model = next.(Model)
+	next, _ = model.Update(specialKey(tea.KeyEnter))
+	model = next.(Model)
+	if model.chatSystemPrompt != "Be brief." || !strings.Contains(model.View().Content, "Be brief.") {
+		t.Fatalf("system prompt edit failed:\n%s", model.View().Content)
+	}
+}
+
+func TestChatTranscriptScrollIsInternal(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.managedScreen = true
+	model.scrollOffset = 7
+	for index := 0; index < 16; index++ {
+		model.chatMessages = append(model.chatMessages, chatMessage{
+			role:    "assistant",
+			content: "message " + strconv.Itoa(index),
+		})
+	}
+	beforeTerminalScroll := model.scrollOffset
+	next, _ := model.Update(specialKey(tea.KeyPgUp))
+	model = next.(Model)
+	if model.scrollOffset != beforeTerminalScroll {
+		t.Fatalf("terminal scroll changed from %d to %d", beforeTerminalScroll, model.scrollOffset)
+	}
+	if model.chatTranscriptScroll == 0 {
+		t.Fatalf("chat transcript scroll did not move")
+	}
+}
+
 func TestDashboardMouseClickOpensModelRoleDropdown(t *testing.T) {
 	t.Parallel()
 
@@ -2410,6 +2501,24 @@ func testLlamaRuntimeRoot(t *testing.T, names ...string) string {
 		}
 	}
 	return root
+}
+
+func newChatTestModel(t *testing.T) Model {
+	t.Helper()
+
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{
+			testRunner("LR-M-1", "litert", "main", "running"),
+			testRunner("LM-E-1", "llamacpp", "embedding", "running"),
+			testRunner("LM-R-1", "llamacpp", "reranking", "running"),
+		}),
+		Logs:    server.NewLogBroadcaster(8),
+		Catalog: testCatalogWithPresentModels(t),
+	})
+	model.width = 140
+	model.height = 34
+	model.setActiveTab("chat")
+	return model
 }
 
 type fakeRunnerController struct {

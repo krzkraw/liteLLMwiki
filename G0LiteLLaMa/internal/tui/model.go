@@ -173,22 +173,29 @@ type Model struct {
 	ctx               context.Context
 	chatEndpoint      string
 
-	active        int
-	width         int
-	height        int
-	snapshot      server.RunnerSnapshotResponse
-	runtime       server.RuntimeStatus
-	logEntries    []server.LogEntry
-	models        []catalog.Entry
-	notice        string
-	edit          *runnerEdit
-	runtimeEdit   *runtimeEdit
-	runtimeDraft  server.RuntimeControlConfig
-	chatDraft     string
-	chatMessages  []chatMessage
-	chatBusy      bool
-	managedScreen bool
-	scrollOffset  int
+	active               int
+	width                int
+	height               int
+	snapshot             server.RunnerSnapshotResponse
+	runtime              server.RuntimeStatus
+	logEntries           []server.LogEntry
+	models               []catalog.Entry
+	notice               string
+	edit                 *runnerEdit
+	runtimeEdit          *runtimeEdit
+	runtimeDraft         server.RuntimeControlConfig
+	chatDraft            string
+	chatMessages         []chatMessage
+	chatBusy             bool
+	chatTargetRole       string
+	chatTargetDropdown   bool
+	chatSystemPrompt     string
+	chatSystemEditing    bool
+	chatThinking         bool
+	chatSettingsOpen     bool
+	chatTranscriptScroll int
+	managedScreen        bool
+	scrollOffset         int
 
 	wizardRuntime           string
 	wizardBackend           string
@@ -378,6 +385,7 @@ func NewModel(options ModelOptions) Model {
 		catalog:               options.Catalog,
 		ctx:                   ctx,
 		chatEndpoint:          chatEndpoint,
+		chatTargetRole:        "main",
 		active:                0,
 		managedScreen:         options.ManagedScreen,
 		wizardRuntime:         "litert",
@@ -711,6 +719,20 @@ func (m Model) buttonHitRegistry() []buttonHit {
 			addTextHitOnRow(row, runner.ID, "dashboard-route-runner", m.dashboardRunnerDropdown+":"+runner.ID)
 		}
 	}
+	if m.activeTabID() == "chat" {
+		for _, role := range []string{"main", "embedding", "reranking"} {
+			addTokenHitOnVisibleLine("Target", selectedToken(role, role == m.chatTarget()), "chat-target", role)
+		}
+		addTextHit("System prompt", "chat-system", "")
+		addTextHit("Thinking", "chat-thinking", "")
+		addTextHit("Settings", "chat-settings", "")
+		if m.chatTargetDropdown {
+			for index, role := range []string{"main", "embedding", "reranking"} {
+				row := lineNumberContainingText(view, fmt.Sprintf("%d %s", index+1, role))
+				addTextHitOnRow(row, role, "chat-target", role)
+			}
+		}
+	}
 
 	return hits
 }
@@ -797,6 +819,24 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 		if runner, ok := m.runnerByID(id); ok {
 			return m, m.dashboardRouteCmd(role, runner), true
 		}
+		return m, nil, true
+	case "chat-target":
+		if isWizardRole(hit.payload) {
+			m.chatTargetRole = hit.payload
+			m.chatTargetDropdown = false
+		}
+		return m, nil, true
+	case "chat-system":
+		m.chatSystemEditing = true
+		m.chatSettingsOpen = false
+		m.chatTargetDropdown = false
+		return m, nil, true
+	case "chat-thinking":
+		m.chatThinking = !m.chatThinking
+		return m, nil, true
+	case "chat-settings":
+		m.chatSettingsOpen = !m.chatSettingsOpen
+		m.chatTargetDropdown = false
 		return m, nil, true
 	case "modal-save":
 		m.saveOptionModal()
@@ -1114,6 +1154,9 @@ func panelContentRow(panelTop int, line int) int {
 }
 
 func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.activeTabID() == "chat" {
+		return m.updateChatKey(msg)
+	}
 	if m.activeTabID() == "setup" {
 		if next, cmd, ok := m.updateSetupKey(msg); ok {
 			return next, cmd
@@ -1156,15 +1199,9 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.activeTabID() == "wizard" && key.Code == tea.KeyEnter {
 			return m, m.wizardCreateCmd()
 		}
-		if m.activeTabID() == "chat" {
-			return m.updateChatKey(msg)
-		}
 	}
 
 	if msg.String() == "ctrl+h" {
-		if m.activeTabID() == "chat" {
-			return m.updateChatKey(msg)
-		}
 		return m, nil
 	}
 	value := key.Text
@@ -1181,9 +1218,6 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.selectRuneTab(value) {
 		return m, nil
-	}
-	if m.activeTabID() == "chat" {
-		return m.updateChatKey(msg)
 	}
 	if m.activeTabID() == "wizard" {
 		switch strings.ToLower(value) {
@@ -1568,6 +1602,48 @@ func (m *Model) saveWizardCommandEdit() {
 }
 
 func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	if m.chatSystemEditing {
+		switch msg.Key().Code {
+		case tea.KeyEnter:
+			m.chatSystemEditing = false
+			return m, nil
+		case tea.KeyBackspace:
+			if len(m.chatSystemPrompt) > 0 {
+				m.chatSystemPrompt = m.chatSystemPrompt[:len(m.chatSystemPrompt)-1]
+			}
+			return m, nil
+		}
+		if msg.String() == "ctrl+h" {
+			if len(m.chatSystemPrompt) > 0 {
+				m.chatSystemPrompt = m.chatSystemPrompt[:len(m.chatSystemPrompt)-1]
+			}
+			return m, nil
+		}
+		if msg.Key().Text != "" {
+			m.chatSystemPrompt += msg.Key().Text
+		}
+		return m, nil
+	}
+	switch msg.Key().Code {
+	case tea.KeyEsc:
+		if m.chatTargetDropdown || m.chatSettingsOpen {
+			m.chatTargetDropdown = false
+			m.chatSettingsOpen = false
+			return m, nil
+		}
+		return m, tea.Quit
+	case tea.KeyPgUp, tea.KeyUp:
+		m.chatTranscriptScroll++
+		m.clampChatTranscriptScroll()
+		return m, nil
+	case tea.KeyPgDown, tea.KeyDown:
+		m.chatTranscriptScroll--
+		m.clampChatTranscriptScroll()
+		return m, nil
+	}
 	if msg.String() == "ctrl+h" {
 		if len(m.chatDraft) > 0 {
 			m.chatDraft = m.chatDraft[:len(m.chatDraft)-1]
@@ -1601,9 +1677,70 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if msg.Key().Text == "" {
 			return m, nil
 		}
+		if m.chatTargetDropdown {
+			if m.selectChatTargetByKey(msg.Key().Text) {
+				return m, nil
+			}
+		}
+		switch msg.Key().Text {
+		case "[":
+			m.cycleChatTarget(1)
+			return m, nil
+		case "]":
+			m.cycleChatTarget(-1)
+			return m, nil
+		case "!":
+			m.chatThinking = !m.chatThinking
+			return m, nil
+		case "?":
+			m.chatSettingsOpen = !m.chatSettingsOpen
+			m.chatTargetDropdown = false
+			return m, nil
+		case "@":
+			m.chatSystemEditing = true
+			m.chatSettingsOpen = false
+			m.chatTargetDropdown = false
+			return m, nil
+		case "\\":
+			m.chatTargetDropdown = !m.chatTargetDropdown
+			m.chatSettingsOpen = false
+			return m, nil
+		}
 		m.chatDraft += msg.Key().Text
 		return m, nil
 	}
+}
+
+func (m *Model) cycleChatTarget(delta int) {
+	roles := []string{"main", "embedding", "reranking"}
+	current := 0
+	for index, role := range roles {
+		if role == m.chatTarget() {
+			current = index
+			break
+		}
+	}
+	next := (current + delta + len(roles)) % len(roles)
+	m.chatTargetRole = roles[next]
+	m.chatTargetDropdown = false
+}
+
+func (m *Model) selectChatTargetByKey(value string) bool {
+	targets := map[string]string{
+		"1": "main",
+		"m": "main",
+		"2": "embedding",
+		"e": "embedding",
+		"3": "reranking",
+		"r": "reranking",
+	}
+	role, ok := targets[strings.ToLower(value)]
+	if !ok {
+		return false
+	}
+	m.chatTargetRole = role
+	m.chatTargetDropdown = false
+	return true
 }
 
 func (m Model) View() tea.View {
@@ -1715,6 +1852,8 @@ func (m Model) activeContentView() string {
 		return m.wizardView()
 	case "setup":
 		return m.setupView()
+	case "chat":
+		return m.chatView()
 	default:
 		if runner, ok := m.activeRunner(); ok {
 			return m.runnerView(runner)
@@ -1810,6 +1949,9 @@ func (m Model) tabs() []tab {
 			label: runnerStateGlyph(runner.State) + " " + label,
 		})
 	}
+	if len(m.snapshot.Runners) > 0 {
+		result = append(result, tab{id: "chat", label: m.chatTabLabel()})
+	}
 	return result
 }
 
@@ -1841,7 +1983,7 @@ func (m Model) wizardTabLabel() string {
 func (m Model) chatTabLabel() string {
 	runner, ok := m.selectedChatRunner()
 	if !ok {
-		return "○ Chat no main"
+		return "○ Chat no " + m.chatTarget()
 	}
 	return runnerStateGlyph(runner.State) + " Chat " + runner.ID
 }
@@ -1976,15 +2118,19 @@ func runtimeUseBadgeColor(alive int) string {
 }
 
 func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
-	if id := m.snapshot.Routes["main"]; id != "" {
-		if runner, ok := m.runnerByID(id); ok && runner.Role == "main" {
+	return m.selectedRunnerForRole(m.chatTarget())
+}
+
+func (m Model) selectedRunnerForRole(role string) (server.RunnerSnapshot, bool) {
+	if id := m.snapshot.Routes[role]; id != "" {
+		if runner, ok := m.runnerByID(id); ok && runner.Role == role {
 			return runner, true
 		}
 	}
 	var fallbackRunner server.RunnerSnapshot
 	hasFallback := false
 	for _, runner := range m.snapshot.Runners {
-		if runner.Role != "main" {
+		if runner.Role != role {
 			continue
 		}
 		if strings.EqualFold(runner.State, "running") {
@@ -1996,6 +2142,13 @@ func (m Model) selectedChatRunner() (server.RunnerSnapshot, bool) {
 		}
 	}
 	return fallbackRunner, hasFallback
+}
+
+func (m Model) chatTarget() string {
+	if isWizardRole(m.chatTargetRole) {
+		return m.chatTargetRole
+	}
+	return "main"
 }
 
 func (m *Model) setActiveTab(id string) {
@@ -4067,31 +4220,77 @@ func (m Model) wizardDryRunLines() []string {
 }
 
 func (m Model) chatView() string {
-	return m.panelGrid(
-		panelSpec{"Chat console / Main runner", m.chatRunnerLines(), "82"},
-		panelSpec{"Composer", m.chatComposerLines(), "214"},
-		panelSpec{"Transcript", m.chatTranscriptLines(), "45"},
-		panelSpec{"API parity / Route authority", m.chatParityLines(), "39"},
-	)
+	panels := []panelSpec{
+		{"Chat console / " + m.chatTarget() + " target", m.chatRunnerLines(), "82"},
+		{"System prompt", m.chatSystemPromptLines(), "205"},
+		{"Input", m.chatComposerLines(), "214"},
+	}
+	if m.chatSettingsOpen {
+		panels = append(panels, panelSpec{"Prompt settings", m.chatSettingsLines(), "205"})
+	}
+	panels = append(panels, panelSpec{"Transcript", m.chatTranscriptLines(), "45"})
+	if m.chatTargetDropdown {
+		panels = append(panels, panelSpec{"Target role", m.chatTargetLines(), "205"})
+	}
+	if !m.chatSettingsOpen {
+		panels = append(panels, panelSpec{"API parity / Route authority", m.chatParityLines(), "39"})
+	}
+	return m.panelGrid(panels...)
 }
 
 func (m Model) chatRunnerLines() []string {
 	runner, ok := m.selectedChatRunner()
 	if !ok {
 		return []string{
+			"Target " + strings.Join(m.chatTargetTokens(), " "),
 			"Selected runner: none",
-			"Create or start a main runner from Launch Wizard or Models.",
+			"Create or start a " + m.chatTarget() + " runner from Launch Wizard.",
+			formatKV("Thinking", boolOnOff(m.chatThinking)) + "    Settings [?]",
 		}
 	}
 
 	return []string{
+		"Target " + strings.Join(m.chatTargetTokens(), " "),
 		formatKV("Selected runner", runner.ID),
-		formatKV("State", fallback(runner.State, "unknown")),
 		formatKV("Route", runnerRoleRoute(runner.Role)),
-		formatKV("Upstream", fallback(runner.Upstream, "unavailable")),
 		formatKV("Model", fallback(runner.ModelID, "not configured")),
-		formatKV("Backend", fallback(runner.Backend, "default")),
-		formatKV("Capabilities", capabilitiesLine(runner.Capabilities)),
+		formatKV("Thinking", boolOnOff(m.chatThinking)) + "    Settings [?]",
+	}
+}
+
+func (m Model) chatTargetTokens() []string {
+	roles := []string{"main", "embedding", "reranking"}
+	tokens := make([]string, 0, len(roles))
+	for _, role := range roles {
+		tokens = append(tokens, selectedToken(role, role == m.chatTarget()))
+	}
+	return tokens
+}
+
+func (m Model) chatTargetLines() []string {
+	lines := make([]string, 0, 3)
+	for index, role := range []string{"main", "embedding", "reranking"} {
+		marker := " "
+		if role == m.chatTarget() {
+			marker = "●"
+		}
+		lines = append(lines, fmt.Sprintf("%s %d %s", marker, index+1, role))
+	}
+	return lines
+}
+
+func (m Model) chatSystemPromptLines() []string {
+	value := strings.TrimSpace(m.chatSystemPrompt)
+	if value == "" {
+		value = "(empty)"
+	}
+	state := "ready"
+	if m.chatSystemEditing {
+		state = "editing"
+	}
+	return []string{
+		formatKV("System prompt", value),
+		formatKV("State", state),
 	}
 }
 
@@ -4105,10 +4304,9 @@ func (m Model) chatComposerLines() []string {
 		state = "waiting for response"
 	}
 	return []string{
-		formatKV("Prompt", prompt),
+		formatKV("Input", prompt),
 		formatKV("State", state),
-		"Enter sends via POST /v1/chat/completions; Backspace edits.",
-		"Requests use stream=false and the selected main runner model ID.",
+		"Enter sends; [/] target, ! thinking, ? settings, @ system.",
 	}
 }
 
@@ -4125,22 +4323,50 @@ func (m Model) chatTranscriptLines() []string {
 		}
 		lines = append(lines, prefix+": "+message.content)
 	}
-	return lines
+	window := 8
+	maxScroll := maxInt(0, len(lines)-window)
+	scroll := minInt(maxInt(m.chatTranscriptScroll, 0), maxScroll)
+	start := maxInt(0, len(lines)-window-scroll)
+	end := minInt(len(lines), start+window)
+	visible := append([]string{fmt.Sprintf("Scroll %d/%d", scroll, maxScroll)}, lines[start:end]...)
+	return visible
 }
 
 func (m Model) chatParityLines() []string {
 	lines := []string{
 		"TUI Enter -> POST " + m.chatEndpoint,
-		"/v1/chat/completions -> runner supervisor route authority",
+		"/v1/chat/completions -> main route",
+		"/v1/embeddings -> embedding route",
+		"/v1/rerank -> reranking route",
 	}
 	if runner, ok := m.selectedChatRunner(); ok {
 		lines = append(
 			lines,
 			"Selected runner: "+runner.ID,
-			"Route: main -> "+runner.ID,
+			"Route: "+m.chatTarget()+" -> "+runner.ID,
 		)
 	}
 	return lines
+}
+
+func (m Model) chatSettingsLines() []string {
+	return []string{
+		"Temperature  default",
+		"Top P        default",
+		"Max tokens   default",
+		"Stream       on through proxy",
+		"Close with ? or Esc.",
+	}
+}
+
+func (m *Model) clampChatTranscriptScroll() {
+	maxScroll := maxInt(0, len(m.chatMessages)-8)
+	if m.chatTranscriptScroll < 0 {
+		m.chatTranscriptScroll = 0
+	}
+	if m.chatTranscriptScroll > maxScroll {
+		m.chatTranscriptScroll = maxScroll
+	}
 }
 
 func (m Model) modelsView() string {
@@ -4521,10 +4747,11 @@ func (m Model) wizardCreateCmd() tea.Cmd {
 func (m Model) chatCompletionCmd(prompt string, runner server.RunnerSnapshot) tea.Cmd {
 	endpoint := m.chatEndpoint
 	modelID := fallback(runner.ModelID, runner.ID)
+	systemPrompt := strings.TrimSpace(m.chatSystemPrompt)
 	ctx := m.ctx
 
 	return func() tea.Msg {
-		response, err := postChatCompletion(ctx, endpoint, modelID, prompt)
+		response, err := postChatCompletion(ctx, endpoint, modelID, systemPrompt, prompt)
 		return chatCompletionMsg{
 			prompt:   prompt,
 			response: response,
@@ -4846,17 +5073,24 @@ func postChatCompletion(
 	ctx context.Context,
 	endpoint string,
 	modelID string,
+	systemPrompt string,
 	prompt string,
 ) (string, error) {
+	messages := []chatAPIItem{}
+	if strings.TrimSpace(systemPrompt) != "" {
+		messages = append(messages, chatAPIItem{
+			Role:    "system",
+			Content: strings.TrimSpace(systemPrompt),
+		})
+	}
+	messages = append(messages, chatAPIItem{
+		Role:    "user",
+		Content: prompt,
+	})
 	payload := chatCompletionRequest{
-		Model: modelID,
-		Messages: []chatAPIItem{
-			{
-				Role:    "user",
-				Content: prompt,
-			},
-		},
-		Stream: false,
+		Model:    modelID,
+		Messages: messages,
+		Stream:   false,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -5921,6 +6155,13 @@ func minInt(left int, right int) int {
 		return left
 	}
 	return right
+}
+
+func boolOnOff(value bool) string {
+	if value {
+		return "on"
+	}
+	return "off"
 }
 
 func formatKV(label string, value string) string {

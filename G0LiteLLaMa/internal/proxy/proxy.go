@@ -55,6 +55,19 @@ func (p *Proxy) TargetForPath(path string) string {
 	return target.String()
 }
 
+func (p *Proxy) HasTargetForPath(path string) bool {
+	p.mu.RLock()
+	resolver := p.resolver
+	hasFallback := p.target != nil
+	p.mu.RUnlock()
+
+	if resolver == nil {
+		return hasFallback
+	}
+	_, ok := resolver(&http.Request{URL: &url.URL{Path: path}})
+	return ok
+}
+
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.reverse.ServeHTTP(w, r)
 }

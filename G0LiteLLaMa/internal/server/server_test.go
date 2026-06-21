@@ -856,6 +856,176 @@ func TestWebSocketAPIRequestSelectsRunnerRoute(t *testing.T) {
 	}
 }
 
+func TestOpenAIModelsEndpointListsRoutedRunnerModels(t *testing.T) {
+	t.Parallel()
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{DisableDefaultLiteRT: true})
+	for _, spec := range []supervisor.RunnerSpec{
+		{
+			ID:       "main-one",
+			Runtime:  supervisor.RuntimeLlamaCPP,
+			Role:     supervisor.RoleMain,
+			Backend:  supervisor.BackendCPU,
+			ModelID:  "main-model",
+			Host:     "127.0.0.1",
+			Port:     9491,
+			Launch:   false,
+			Upstream: "http://127.0.0.1:9491",
+		},
+		{
+			ID:       "embed-one",
+			Runtime:  supervisor.RuntimeLlamaCPP,
+			Role:     supervisor.RoleEmbedding,
+			Backend:  supervisor.BackendCPU,
+			ModelID:  "embed-model",
+			Host:     "127.0.0.1",
+			Port:     9492,
+			Launch:   false,
+			Upstream: "http://127.0.0.1:9492",
+		},
+		{
+			ID:       "rerank-one",
+			Runtime:  supervisor.RuntimeLlamaCPP,
+			Role:     supervisor.RoleReranking,
+			Backend:  supervisor.BackendCPU,
+			ModelID:  "rerank-model",
+			Host:     "127.0.0.1",
+			Port:     9493,
+			Launch:   false,
+			Upstream: "http://127.0.0.1:9493",
+		},
+	} {
+		if _, err := runtimeSupervisor.CreateRunner(spec); err != nil {
+			t.Fatalf("create runner %s: %v", spec.ID, err)
+		}
+	}
+	handler := New(Options{
+		RunnerController: testRunnerController{supervisor: runtimeSupervisor},
+	}).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode models: %v", err)
+	}
+	if body.Object != "list" {
+		t.Fatalf("object = %q, want list", body.Object)
+	}
+	got := map[string]bool{}
+	for _, item := range body.Data {
+		if item.Object != "model" || item.OwnedBy != "g0litellama" {
+			t.Fatalf("model item = %#v", item)
+		}
+		got[item.ID] = true
+	}
+	for _, want := range []string{"main-model", "embed-model", "rerank-model"} {
+		if !got[want] {
+			t.Fatalf("models = %#v, missing %s", got, want)
+		}
+	}
+}
+
+func TestOpenAIProxyStreamsThroughRoutedMainSlot(t *testing.T) {
+	t.Parallel()
+
+	var sawPath string
+	var sawBody string
+	main := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		sawPath = r.URL.Path
+		sawBody = string(body)
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: one\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(main.Close)
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "wrong upstream", http.StatusBadGateway)
+	}))
+	t.Cleanup(fallback.Close)
+
+	runtimeSupervisor := supervisor.New(supervisor.Config{DisableDefaultLiteRT: true})
+	if _, err := runtimeSupervisor.CreateRunner(supervisor.RunnerSpec{
+		ID:       "main-one",
+		Runtime:  supervisor.RuntimeLlamaCPP,
+		Role:     supervisor.RoleMain,
+		Backend:  supervisor.BackendCPU,
+		ModelID:  "main-model",
+		Host:     "127.0.0.1",
+		Port:     9491,
+		Launch:   false,
+		Upstream: main.URL,
+	}); err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	upstreamProxy, err := proxy.New(fallback.URL)
+	if err != nil {
+		t.Fatalf("new proxy: %v", err)
+	}
+	upstreamProxy.SetTargetResolver(func(r *http.Request) (string, bool) {
+		return runtimeSupervisor.UpstreamForPath(r.URL.Path)
+	})
+	handler := New(Options{Proxy: upstreamProxy}).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"stream":true}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if sawPath != "/v1/chat/completions" {
+		t.Fatalf("path = %q, want /v1/chat/completions", sawPath)
+	}
+	if sawBody != `{"stream":true}` {
+		t.Fatalf("body = %q, want stream request", sawBody)
+	}
+	if rec.Body.String() != "data: one\n\ndata: [DONE]\n\n" {
+		t.Fatalf("stream body = %q", rec.Body.String())
+	}
+}
+
+func TestOpenAIProxyReturns501WithoutRoutedRunner(t *testing.T) {
+	t.Parallel()
+
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "fallback")
+	}))
+	t.Cleanup(fallback.Close)
+	upstreamProxy, err := proxy.New(fallback.URL)
+	if err != nil {
+		t.Fatalf("new proxy: %v", err)
+	}
+	upstreamProxy.SetTargetResolver(func(r *http.Request) (string, bool) {
+		return "", false
+	})
+	handler := New(Options{Proxy: upstreamProxy}).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "no routed runner") {
+		t.Fatalf("body = %q, want clear route error", rec.Body.String())
+	}
+}
+
 func TestCorsHeadersAllowLocalWebUI(t *testing.T) {
 	t.Parallel()
 

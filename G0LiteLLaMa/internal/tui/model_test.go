@@ -257,19 +257,24 @@ func TestChatTabRendersTargetSystemInputTranscriptThinkingAndSettings(t *testing
 	view := model.View().Content
 	for _, expected := range []string{
 		"Chat console / main target",
+		"Prompt settings",
 		"Target",
 		"[main]",
 		"embedding",
 		"reranking",
-		"System prompt",
 		"Input",
 		"Transcript",
 		"Thinking",
-		"Settings",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("chat view missing %q:\n%s", expected, view)
 		}
+	}
+	if !lineContainsAll(view, "Chat console / main target", "Prompt settings") {
+		t.Fatalf("settings should render beside chat target at wide width:\n%s", view)
+	}
+	if lineNumberContaining(view, "Transcript") >= lineNumberContaining(view, "Input") {
+		t.Fatalf("transcript should be above bottom input:\n%s", view)
 	}
 }
 
@@ -295,26 +300,23 @@ func TestChatTargetThinkingSettingsAndSystemPromptControls(t *testing.T) {
 		t.Fatalf("thinking toggle failed:\n%s", model.View().Content)
 	}
 
-	next, cmd = model.Update(textKey("?"))
-	if cmd != nil {
-		t.Fatalf("settings toggle returned command")
-	}
-	model = next.(Model)
-	if !model.chatSettingsOpen || !strings.Contains(model.View().Content, "Prompt settings") {
-		t.Fatalf("settings popup did not open:\n%s", model.View().Content)
-	}
-
 	next, cmd = model.Update(textKey("@"))
 	if cmd != nil {
 		t.Fatalf("system edit open returned command")
 	}
 	model = next.(Model)
+	if !model.chatSystemEditing || !strings.Contains(model.View().Content, "System prompt input") {
+		t.Fatalf("system prompt composer did not open:\n%s", model.View().Content)
+	}
 	next, _ = model.Update(textKey("Be brief."))
 	model = next.(Model)
 	next, _ = model.Update(specialKey(tea.KeyEnter))
 	model = next.(Model)
 	if model.chatSystemPrompt != "Be brief." || !strings.Contains(model.View().Content, "Be brief.") {
 		t.Fatalf("system prompt edit failed:\n%s", model.View().Content)
+	}
+	if model.chatSystemEditing || !strings.Contains(model.View().Content, "Input") {
+		t.Fatalf("system prompt composer did not return to normal input:\n%s", model.View().Content)
 	}
 }
 

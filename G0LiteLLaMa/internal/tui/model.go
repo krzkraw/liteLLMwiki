@@ -1606,6 +1606,10 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if m.chatSystemEditing {
+		if msg.Key().Text == "@" {
+			m.chatSystemEditing = false
+			return m, nil
+		}
 		switch msg.Key().Code {
 		case tea.KeyEnter:
 			m.chatSystemEditing = false
@@ -1697,7 +1701,7 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.chatTargetDropdown = false
 			return m, nil
 		case "@":
-			m.chatSystemEditing = true
+			m.chatSystemEditing = !m.chatSystemEditing
 			m.chatSettingsOpen = false
 			m.chatTargetDropdown = false
 			return m, nil
@@ -4220,22 +4224,41 @@ func (m Model) wizardDryRunLines() []string {
 }
 
 func (m Model) chatView() string {
-	panels := []panelSpec{
-		{"Chat console / " + m.chatTarget() + " target", m.chatRunnerLines(), "82"},
-		{"System prompt", m.chatSystemPromptLines(), "205"},
-		{"Input", m.chatComposerLines(), "214"},
-	}
-	if m.chatSettingsOpen {
-		panels = append(panels, panelSpec{"Prompt settings", m.chatSettingsLines(), "205"})
-	}
-	panels = append(panels, panelSpec{"Transcript", m.chatTranscriptLines(), "45"})
+	composer := renderPanelSpec(panelSpec{m.chatComposerTitle(), m.chatComposerLines(), "214"}, m.width)
+	top := m.chatTopRowView()
+	transcriptRows := m.chatTranscriptWindowSize(top, composer)
+	transcript := renderPanelSpec(panelSpec{"Transcript", m.chatTranscriptLines(transcriptRows), "45"}, m.width)
+	panels := []string{top, transcript, composer}
 	if m.chatTargetDropdown {
-		panels = append(panels, panelSpec{"Target role", m.chatTargetLines(), "205"})
+		panels = append(panels, renderPanelSpec(panelSpec{"Target role", m.chatTargetLines(), "205"}, m.width))
 	}
-	if !m.chatSettingsOpen {
-		panels = append(panels, panelSpec{"API parity / Route authority", m.chatParityLines(), "39"})
+	return joinPanels(panels...)
+}
+
+func (m Model) chatTopRowView() string {
+	if m.width < 120 {
+		return joinPanels(
+			renderPanelSpec(panelSpec{"Chat console / " + m.chatTarget() + " target", m.chatRunnerLines(), "82"}, m.width),
+			renderPanelSpec(panelSpec{"Prompt settings", m.chatSettingsLines(), "205"}, m.width),
+		)
 	}
-	return m.panelGrid(panels...)
+	columnWidth := (m.width - panelGridColumnGap) / 2
+	left := renderPanelSpec(panelSpec{"Chat console / " + m.chatTarget() + " target", m.chatRunnerLines(), "82"}, columnWidth)
+	right := renderPanelSpec(panelSpec{"Prompt settings", m.chatSettingsLines(), "205"}, columnWidth)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", panelGridColumnGap), right)
+}
+
+func (m Model) chatTranscriptWindowSize(top string, composer string) int {
+	if m.height <= 0 {
+		return 8
+	}
+	fixed := viewLineCount(m.headerView()) + 1 + viewLineCount(m.tabBar()) + 2 + viewLineCount(m.footerView())
+	if strings.TrimSpace(m.notice) != "" {
+		fixed += viewLineCount(noticeStyle.Render(m.notice)) + 2
+	}
+	available := m.height - fixed
+	rows := available - viewLineCount(top) - viewLineCount(composer) - 4 - 3
+	return clampInt(rows, 1, 12)
 }
 
 func (m Model) chatRunnerLines() []string {
@@ -4279,38 +4302,36 @@ func (m Model) chatTargetLines() []string {
 	return lines
 }
 
-func (m Model) chatSystemPromptLines() []string {
-	value := strings.TrimSpace(m.chatSystemPrompt)
-	if value == "" {
-		value = "(empty)"
-	}
-	state := "ready"
+func (m Model) chatComposerTitle() string {
 	if m.chatSystemEditing {
-		state = "editing"
+		return "System prompt input"
 	}
-	return []string{
-		formatKV("System prompt", value),
-		formatKV("State", state),
-	}
+	return "Input"
 }
 
 func (m Model) chatComposerLines() []string {
-	prompt := m.chatDraft
-	if prompt == "" {
-		prompt = "(empty)"
+	value := m.chatDraft
+	mode := "normal"
+	if m.chatSystemEditing {
+		value = m.chatSystemPrompt
+		mode = "system prompt"
 	}
 	state := "ready"
 	if m.chatBusy {
 		state = "waiting for response"
 	}
+	if value == "" {
+		value = "(empty)"
+	}
 	return []string{
-		formatKV("Input", prompt),
+		formatKV("Mode", mode),
+		formatKV("Text", value),
 		formatKV("State", state),
-		"Enter sends; [/] target, ! thinking, ? settings, @ system.",
+		"@ toggles system/input; Enter sends or saves system.",
 	}
 }
 
-func (m Model) chatTranscriptLines() []string {
+func (m Model) chatTranscriptLines(window int) []string {
 	if len(m.chatMessages) == 0 {
 		return []string{"No messages yet."}
 	}
@@ -4323,7 +4344,9 @@ func (m Model) chatTranscriptLines() []string {
 		}
 		lines = append(lines, prefix+": "+message.content)
 	}
-	window := 8
+	if window < 1 {
+		window = 1
+	}
 	maxScroll := maxInt(0, len(lines)-window)
 	scroll := minInt(maxInt(m.chatTranscriptScroll, 0), maxScroll)
 	start := maxInt(0, len(lines)-window-scroll)
@@ -4350,7 +4373,12 @@ func (m Model) chatParityLines() []string {
 }
 
 func (m Model) chatSettingsLines() []string {
+	systemPrompt := strings.TrimSpace(m.chatSystemPrompt)
+	if systemPrompt == "" {
+		systemPrompt = "(empty)"
+	}
 	return []string{
+		"System prompt " + systemPrompt,
 		"Temperature  default",
 		"Top P        default",
 		"Max tokens   default",

@@ -50,7 +50,7 @@ test("chat tab renders target system input transcript and settings", async ({ te
 
   terminal.keyPress("5");
   await expect(terminal.getByText("Chat console / main target", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("System prompt", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("Prompt settings", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Input", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Transcript", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Thinking", { strict: false })).toBeVisible();
@@ -59,8 +59,10 @@ test("chat tab renders target system input transcript and settings", async ({ te
   await expect(terminal.getByText("Chat console / embedding target", { strict: false })).toBeVisible();
   terminal.keyPress("!");
   await expect(terminal.getByText("Thinking", { strict: false })).toBeVisible();
-  terminal.keyPress("?");
-  await expect(terminal.getByText("Prompt settings", { strict: false })).toBeVisible();
+  terminal.keyPress("@");
+  await expect(terminal.getByText("System prompt input", { strict: false })).toBeVisible();
+  terminal.keyPress(Key.Enter);
+  await expect(terminal.getByText("Input", { strict: false })).toBeVisible();
 });
 
 test("dashboard keyboard can open and select runner route slot", async ({ terminal }) => {

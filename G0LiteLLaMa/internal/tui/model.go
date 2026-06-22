@@ -4876,6 +4876,7 @@ func (m Model) chatSettingsLines() []string {
 func (m Model) chatMessagesBoxView(rows int) string {
 	box := m.chatScrollBox
 	box.ViewLines = maxInt(1, rows)
+	box.ContentBg = panelBackgroundForAccent("45") // dark blue, matches renderBox bg
 	box.SetLines(m.chatMessageLines())
 	if len(box.Lines) == 0 {
 		empty := []string{mutedStyle.Render("No messages yet.")}

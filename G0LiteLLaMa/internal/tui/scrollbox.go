@@ -15,6 +15,10 @@ type ScrollBox struct {
 	ViewLines int // visible row count (height in terminal lines)
 	Offset    int // scroll offset (0 = top)
 	Pinned    bool
+
+	// ContentBg is an optional lipgloss color applied as the background for
+	// every rendered content line.  Empty string means no background override.
+	ContentBg string
 }
 
 // MaxOffset returns the maximum valid offset for the current content height.
@@ -124,8 +128,12 @@ func (s *ScrollBox) View(width int) string {
 	thumbStart := thumbPos(s.Offset, s.ViewLines, total, thumbHeight)
 
 	var b strings.Builder
+	bgStyle := lipgloss.NewStyle()
+	if s.ContentBg != "" {
+		bgStyle = bgStyle.Background(lipgloss.Color(s.ContentBg))
+	}
 	for i := 0; i < s.ViewLines; i++ {
-		// Content cell — pad to width while preserving existing ANSI styling.
+		// Content cell — pad to width, then layer on optional background.
 		cell := ""
 		if i < len(visible) {
 			cell = visible[i]
@@ -133,6 +141,9 @@ func (s *ScrollBox) View(width int) string {
 		cw := ansi.StringWidth(cell)
 		if cw < width {
 			cell += strings.Repeat(" ", width-cw)
+		}
+		if s.ContentBg != "" {
+			cell = bgStyle.Render(cell)
 		}
 		b.WriteString(cell)
 

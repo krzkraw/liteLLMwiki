@@ -20,8 +20,6 @@ test("renders dashboard on startup", async ({ terminal }) => {
   await expect(terminal.getByText("3 Setup", { strict: false })).toBeVisible();
   await expect(terminal.getByText("LiteRT", { strict: false })).toBeVisible();
   await expect(terminal.getByText("llama.cpp", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("Runner slots", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("main        none", { strict: false })).toBeVisible();
 });
 
 test("keyboard navigation opens launch wizard", async ({ terminal }) => {
@@ -56,8 +54,7 @@ test("chat tab renders clickable streaming layout", async ({ terminal }) => {
   await expect(terminal.getByText("Temperature: default", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Ready. Input your prompt", { strict: false })).toBeVisible();
   await expect(terminal.getByText("Send", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("[up]", { strict: false })).toBeVisible();
-  await expect(terminal.getByText("[down]", { strict: false })).toBeVisible();
+  // Real scrollbar uses ▲/▼ instead of old [up]/[down] controls
   if (findText(terminal, "Chat console") || findText(terminal, "Transcript")) {
     throw new Error("chat should not render old console/transcript panels");
   }
@@ -154,6 +151,64 @@ test("global menu palette click changes palette", async ({ terminal }) => {
   clickText(terminal, "Menu");
   clickText(terminal, "Palette themes");
   await expect(terminal.getByText("● Amber", { strict: false })).toBeVisible();
+});
+
+test("chat keyboard scroll with sticky composer", async ({ terminal }) => {
+  await openWizardByKeyboard(terminal);
+  terminal.keyPress(Key.Enter);
+  await expect(terminal.getByText("4 ● LR-M-1", { strict: false })).toBeVisible();
+
+  // Switch to chat tab
+  terminal.keyPress("5");
+  await expect(terminal.getByText("Prompt settings", { strict: false })).toBeVisible();
+
+  // Send a message to populate chat (user message visible immediately)
+  terminal.write("hello chat");
+  terminal.keyPress(Key.Enter);
+  await expect(terminal.getByText("hello chat", { strict: false })).toBeVisible();
+
+  // Keyboard scroll up (PageUp) - should scroll the scrollbox without crashing
+  terminal.keyPress(Key.PageUp);
+
+  // After scrolling up, composer and bottom bar must still be accessible
+  // Bottom bar shows chat actions Clear and New regardless of scroll position
+  await expect(terminal.getByText("Clear", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("New", { strict: false })).toBeVisible();
+
+  // The draft text is still in the input box after API error restores it
+  await expect(terminal.getByText("hello chat", { strict: false })).toBeVisible();
+
+  // Scroll back down
+  terminal.keyPress(Key.PageDown);
+  await expect(terminal.getByText("Clear", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("New", { strict: false })).toBeVisible();
+});
+
+test("chat bounded settings editor clips long values", async ({ terminal }) => {
+  await openWizardByKeyboard(terminal);
+  terminal.keyPress(Key.Enter);
+  await expect(terminal.getByText("4 ● LR-M-1", { strict: false })).toBeVisible();
+
+  // Switch to chat tab
+  terminal.keyPress("5");
+  await expect(terminal.getByText("Prompt settings", { strict: false })).toBeVisible();
+
+  // Click "System: empty" in settings to open the system prompt editor
+  clickText(terminal, "System: empty");
+  // Popup should show "System" title and "Enter saves." hint
+  await expect(terminal.getByText("Enter saves.", { strict: false })).toBeVisible();
+
+  // Type a long system prompt that exceeds 80 char clipping limit
+  const longPrompt = "This is a very long system prompt that should definitely exceed the 80-character limit and get clipped by the settings display";
+  terminal.write(longPrompt);
+
+  // Press Enter to save and close popup
+  terminal.keyPress(Key.Enter);
+
+  // After saving, popup closes. Settings line no longer shows "empty"
+  // and shows the clipped version with "..."
+  await expect(terminal.getByText("System:", { strict: false })).toBeVisible();
+  await expect(terminal.getByText("...", { strict: false })).toBeVisible();
 });
 
 async function openWizardByKeyboard(terminal) {

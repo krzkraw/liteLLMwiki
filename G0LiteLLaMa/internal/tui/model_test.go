@@ -586,8 +586,18 @@ func TestChatLayoutFillsAvailableBodyToFooter(t *testing.T) {
 	if footerRow <= 0 || footerRow >= len(lines) {
 		t.Fatalf("footer row missing:\n%s", view)
 	}
-	if previous := strings.TrimSpace(lines[footerRow-1]); previous == "" || !strings.Contains(previous, "╰") {
-		t.Fatalf("chat input should sit directly above footer, got previous row %q:\n%s", lines[footerRow-1], view)
+	// Footer should be on the last non-empty line (bottom of terminal)
+	lastNonEmpty := len(lines) - 1
+	for lastNonEmpty >= 0 && strings.TrimSpace(lines[lastNonEmpty]) == "" {
+		lastNonEmpty--
+	}
+	if lastNonEmpty != footerRow {
+		t.Fatalf("footer should be on last non-empty row %d, got %d:\n%s", lastNonEmpty, footerRow, view)
+	}
+	// Input box bottom border (╰) should appear somewhere above the footer
+	inputRow := lineNumberContaining(view, "╰")
+	if inputRow <= 0 || inputRow >= footerRow {
+		t.Fatalf("chat input box should be above footer, got input row %d, footer row %d:\n%s", inputRow, footerRow, view)
 	}
 }
 

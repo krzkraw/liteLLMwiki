@@ -19,6 +19,15 @@ type ActionID string
 // ActionType categorises an action for routing to the correct reducer.
 type ActionType string
 
+// ActionTypeNewChatSession creates a new TUI chat session and marks it active.
+const ActionTypeNewChatSession ActionType = "chat:new-session"
+
+// NewChatSessionPayload creates a new chat session.
+type NewChatSessionPayload struct {
+	// Label is an optional human-readable session label.
+	Label string `json:"label,omitempty"`
+}
+
 // ActionSource identifies where the action originated.
 type ActionSource string
 

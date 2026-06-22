@@ -1,7 +1,7 @@
 ---
 id: tui-layout-popover-scrollbox-primitives
 title: TUI layout, popover, and scrollbox primitives
-status: accepted
+status: active
 agent: codex
 verification:
   - cd G0LiteLLaMa && go test ./...

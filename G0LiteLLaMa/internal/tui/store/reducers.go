@@ -42,6 +42,8 @@ func RootReduce(state AppState, action ActionEnvelope) (AppState, []EffectSpec) 
 	switch action.Type {
 	case ActionTypeSelectTab:
 		return reduceSelectTab(state, action)
+	case ActionTypeNewChatSession:
+		return ReduceChat(state, action)
 	case ActionTypeProxyRequestStart:
 		return ReduceProxy(state, action)
 	case ActionTypeProxyResponseChunk:
@@ -100,11 +102,34 @@ func ReduceRuntime(state AppState, _ ActionEnvelope) (AppState, []EffectSpec) {
 // or update chat sessions.
 func ReduceChat(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
 	switch action.Type {
+	case ActionTypeNewChatSession:
+		return reduceChatNewSession(state, action)
 	case ActionTypeProxyRequestStart:
 		return reduceChatFromProxyRequestStart(state, action)
 	default:
 		return state, nil
 	}
+}
+
+func reduceChatNewSession(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
+	sessionID := string(action.ID)
+	if sessionID == "" {
+		// Generate a reasonable session ID from the action ID; RootReduce always
+		// assigns an ID before the reducer runs so this should not happen.
+		return state, nil
+	}
+	if state.Chat.Sessions == nil {
+		state.Chat.Sessions = make(map[string]ChatSession)
+	}
+	session := ChatSession{
+		ID:        sessionID,
+		Source:    SourceTUI,
+		CreatedAt: action.Time,
+		UpdatedAt: action.Time,
+	}
+	state.Chat.Sessions[sessionID] = session
+	state.Chat.ActiveSessionID = sessionID
+	return state, nil
 }
 
 // ReduceProxy handles proxy observation actions. Chat-relevant observations

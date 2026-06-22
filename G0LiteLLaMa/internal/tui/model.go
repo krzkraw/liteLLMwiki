@@ -222,7 +222,7 @@ type Model struct {
 	chatTargetRole       string
 	chatRunnerID         string
 	chatTargetDropdown   bool
-	chatSystemPrompt     string
+	chatSystemField      TextAreaField
 	chatSystemEditing    bool
 	chatThinking         bool
 	chatSettingsOpen     bool
@@ -1953,31 +1953,19 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch msg.Key().Code {
 		case tea.KeyEsc:
 			m.chatSystemEditing = false
+			m.chatSystemField.Blur()
 			return m, nil
 		case tea.KeyEnter:
-			if msg.Key().Mod&tea.ModShift != 0 {
-				m.chatSystemPrompt += "\n"
-			} else {
+			if msg.Key().Mod&tea.ModShift == 0 {
 				m.chatSystemEditing = false
+				m.chatSystemField.Blur()
 				m.chatSettingsDropdown = ""
+				return m, nil
 			}
-			return m, nil
-		case tea.KeyBackspace:
-			if len(m.chatSystemPrompt) > 0 {
-				m.chatSystemPrompt = m.chatSystemPrompt[:len(m.chatSystemPrompt)-1]
-			}
-			return m, nil
 		}
-		if msg.String() == "ctrl+h" {
-			if len(m.chatSystemPrompt) > 0 {
-				m.chatSystemPrompt = m.chatSystemPrompt[:len(m.chatSystemPrompt)-1]
-			}
-			return m, nil
-		}
-		if msg.Key().Text != "" {
-			m.chatSystemPrompt += msg.Key().Text
-		}
-		return m, nil
+		var cmd tea.Cmd
+		m.chatSystemField, cmd = m.chatSystemField.Update(msg)
+		return m, cmd
 	}
 	switch msg.Key().Code {
 	case tea.KeyEsc:
@@ -1990,22 +1978,20 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case tea.KeyPgUp:
-		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+		pageSize := m.chatScrollViewLines()
 		m.chatScrollBox.SetLines(m.chatMessageLines())
-		m.chatScrollBox.ScrollUp(m.chatScrollBox.ViewLines)
+		m.chatScrollBox.ScrollUp(pageSize)
 		return m, nil
 	case tea.KeyUp:
-		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
 		m.chatScrollBox.SetLines(m.chatMessageLines())
 		m.chatScrollBox.ScrollUp(1)
 		return m, nil
 	case tea.KeyPgDown:
-		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+		pageSize := m.chatScrollViewLines()
 		m.chatScrollBox.SetLines(m.chatMessageLines())
-		m.chatScrollBox.ScrollDown(m.chatScrollBox.ViewLines)
+		m.chatScrollBox.ScrollDown(pageSize)
 		return m, nil
 	case tea.KeyDown:
-		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
 		m.chatScrollBox.SetLines(m.chatMessageLines())
 		m.chatScrollBox.ScrollDown(1)
 		return m, nil
@@ -4769,9 +4755,9 @@ func (m Model) chatBodyTargetHeight() int {
 	if m.managedScreen {
 		return managedBodyHeight(m.height, m.managedTopView(), m.footerView())
 	}
-	prefix := viewLineCount(m.headerView()) + viewLineCount(m.tabBar()) + 1
+	prefix := viewLineCount(m.headerView()) + viewLineCount(m.tabBar()) + 3
 	if strings.TrimSpace(m.notice) != "" {
-		prefix += viewLineCount(noticeStyle.Render(m.notice)) + 1
+		prefix += viewLineCount(noticeStyle.Render(m.notice)) + 2
 	}
 	return maxInt(0, m.height-prefix-viewLineCount(m.footerView()))
 }
@@ -4825,7 +4811,7 @@ func (m Model) chatComposerLines() []string {
 	value := m.chatDraft
 	mode := "normal"
 	if m.chatSystemEditing {
-		value = m.chatSystemPrompt
+		value = m.chatSystemField.Value()
 		mode = "system prompt"
 	}
 	state := "ready"
@@ -4904,9 +4890,11 @@ func (m Model) chatParityLines() []string {
 }
 
 func (m Model) chatSettingsLines() []string {
-	systemPrompt := strings.TrimSpace(m.chatSystemPrompt)
+	systemPrompt := strings.TrimSpace(m.chatSystemField.Value())
 	if systemPrompt == "" {
 		systemPrompt = "empty"
+	} else if len(systemPrompt) > 80 {
+		systemPrompt = systemPrompt[:77] + "..."
 	}
 	target := m.chatTarget()
 	return []string{
@@ -5011,10 +4999,11 @@ func (m Model) chatPopupLines() []string {
 		return lines
 	}
 	if m.chatSystemEditing {
-		if strings.TrimSpace(m.chatSystemPrompt) == "" {
+		value := strings.TrimSpace(m.chatSystemField.Value())
+		if value == "" {
 			return []string{mutedStyle.Render("empty"), "Enter saves. Shift+Enter newline."}
 		}
-		lines := strings.Split(m.chatSystemPrompt, "\n")
+		lines := strings.Split(value, "\n")
 		return append(lines, "Enter saves. Shift+Enter newline.")
 	}
 	options := m.chatDropdownOptions()
@@ -5077,6 +5066,11 @@ func (m *Model) openChatSetting(field string, row int, column int) {
 	if field == "system" {
 		m.chatSystemEditing = true
 		m.chatSettingsDropdown = ""
+		popupWidth := maxInt(40, m.width-m.chatPopupColumn-4)
+		existing := m.chatSystemField.Value()
+		m.chatSystemField = NewTextAreaField(popupWidth, 8)
+		m.chatSystemField.SetValue(existing)
+		m.chatSystemField.Focus()
 		return
 	}
 	m.chatSystemEditing = false
@@ -5199,6 +5193,12 @@ func (m Model) runChatCommand(command string) (Model, tea.Cmd) {
 	case "/new":
 		m.chatDraft = ""
 		m.chatMessages = nil
+		if m.store != nil {
+			m.store.Dispatch(m.ctx, store.ActionEnvelope{
+				Type:   store.ActionTypeNewChatSession,
+				Source: store.SourceTUI,
+			})
+		}
 	case "/settings":
 		m.chatSettingsDropdown = "thinking"
 	}
@@ -5626,7 +5626,7 @@ func (m Model) wizardCreateCmd() tea.Cmd {
 func (m Model) chatCompletionCmd(ctx context.Context, prompt string, runner server.RunnerSnapshot) tea.Cmd {
 	endpoint := m.chatEndpoint
 	modelID := fallback(runner.ModelID, runner.ID)
-	systemPrompt := strings.TrimSpace(m.chatSystemPrompt)
+	systemPrompt := strings.TrimSpace(m.chatSystemField.Value())
 	stream := m.chatStream
 
 	return func() tea.Msg {

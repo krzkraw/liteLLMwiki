@@ -1,7 +1,7 @@
 ---
 id: chat-session-scroll-composer-redesign
 title: Chat sessions, real scrollbar, and sticky composer
-status: inbox
+status: active
 agent: codex
 verification:
   - cd G0LiteLLaMa && go test ./...

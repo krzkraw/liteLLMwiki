@@ -4823,13 +4823,17 @@ func (m Model) chatMessageLines() []string {
 	lines := make([]string, 0, len(m.chatMessages))
 	for _, message := range m.chatMessages {
 		for _, line := range strings.Split(message.content, "\n") {
-			rendered := lipgloss.NewStyle().Foreground(lipgloss.Color("219")).Render(line)
-			if message.role == "user" {
+			var rendered string
+			switch message.role {
+			case "user":
 				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("53")).Padding(0, 1).Render(line)
 				rendered = strings.Repeat(" ", maxInt(0, panelBodyWidth(m.width)-lipgloss.Width(rendered))) + rendered
-			}
-			if message.role == "error" {
+			case "assistant":
+				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("219")).Background(lipgloss.Color("24")).Padding(0, 1).Render(line)
+			case "error":
 				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("160")).Padding(0, 1).Render(line)
+			default:
+				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("219")).Render(line)
 			}
 			lines = append(lines, rendered)
 		}
@@ -4876,7 +4880,6 @@ func (m Model) chatSettingsLines() []string {
 func (m Model) chatMessagesBoxView(rows int) string {
 	box := m.chatScrollBox
 	box.ViewLines = maxInt(1, rows)
-	box.ContentBg = panelBackgroundForAccent("45") // dark blue, matches renderBox bg
 	box.SetLines(m.chatMessageLines())
 	if len(box.Lines) == 0 {
 		empty := []string{mutedStyle.Render("No messages yet.")}
@@ -4885,7 +4888,12 @@ func (m Model) chatMessagesBoxView(rows int) string {
 		}
 		return renderBox(empty, "45", m.width)
 	}
-	return box.View(panelBodyWidth(m.width))
+	// Render scrollbox content at the inner box width minus 1 to leave room
+	// for the scrollbar column.  Then wrap in renderBox for the border.
+	innerW := panelBodyWidth(m.width) //  m.width - 8
+	scrollContent := box.View(innerW - 1)
+	lines := strings.Split(scrollContent, "\n")
+	return renderBox(lines, "45", m.width)
 }
 
 func (m Model) chatInputBoxView() string {

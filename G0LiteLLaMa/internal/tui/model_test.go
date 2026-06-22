@@ -459,7 +459,7 @@ func TestChatMessageAndInputBoxesUseMessengerAlignment(t *testing.T) {
 	}
 }
 
-func TestChatMessageColorOnlyHighlightsUser(t *testing.T) {
+func TestChatMessageBackgroundAndAlignment(t *testing.T) {
 	t.Parallel()
 
 	model := newChatTestModel(t)
@@ -470,8 +470,8 @@ func TestChatMessageColorOnlyHighlightsUser(t *testing.T) {
 	lines := model.chatMessageLines()
 	assistantLine := lineContaining(strings.Join(lines, "\n"), "plain assistant")
 	userLine := lineContaining(strings.Join(lines, "\n"), "colored user")
-	if strings.Contains(assistantLine, "[48;5;") {
-		t.Fatalf("assistant message should not have a colored background: %q", assistantLine)
+	if !strings.Contains(assistantLine, "[48;5;") {
+		t.Fatalf("assistant message should have a box background: %q", assistantLine)
 	}
 	if !strings.Contains(userLine, "[48;5;") {
 		t.Fatalf("user message should have a colored background: %q", userLine)

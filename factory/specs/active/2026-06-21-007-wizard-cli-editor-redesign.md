@@ -1,7 +1,7 @@
 ---
 id: wizard-cli-editor-redesign
 title: Wizard CLI option editor redesign
-status: inbox
+status: active
 agent: codex
 verification:
   - cd G0LiteLLaMa && go test ./...

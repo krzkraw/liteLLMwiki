@@ -1740,6 +1740,160 @@ func TestLaunchWizardCLIOptionsPageThreePlusFitAndClickInPlace(t *testing.T) {
 	}
 }
 
+// TestLaunchWizardOptionRightClickContextMenu verifies that right-clicking a
+// wizard CLI option row opens a context menu with Reset Option and Inspect
+// Generated Argv entries.
+func TestLaunchWizardOptionRightClickContextMenu(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 140
+	model.height = 36
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+
+	view := model.View().Content
+	x, y := renderedTextPosition(t, view, "KV cache K")
+
+	// Right-click on the option row.
+	next, cmd := model.Update(rightClick(x, y))
+	if cmd != nil {
+		t.Fatalf("right-click returned unexpected command")
+	}
+	model2 := next.(Model)
+	if model2.wizardCtxMenu == nil {
+		t.Fatalf("right-click should open context menu:\n%s", model2.View().Content)
+	}
+	if model2.wizardCtxMenu.option.ID != "cache-type-k" {
+		t.Fatalf("context menu for wrong option %q", model2.wizardCtxMenu.option.ID)
+	}
+
+	// Context menu should contain Reset Option and Inspect Generated Argv.
+	ctxView := model2.View().Content
+	if !strings.Contains(ctxView, "Reset Option") {
+		t.Fatalf("context menu missing 'Reset Option':\n%s", ctxView)
+	}
+	if !strings.Contains(ctxView, "Inspect Generated Argv") {
+		t.Fatalf("context menu missing 'Inspect Generated Argv':\n%s", ctxView)
+	}
+
+	// Clicking "Reset Option" should close the menu (option has no override
+	// yet so it's a no-op).
+	xReset, yReset := renderedTextPosition(t, ctxView, "Reset Option")
+	next2, _ := model2.Update(leftClick(xReset, yReset))
+	model3 := next2.(Model)
+	if model3.wizardCtxMenu != nil {
+		t.Fatalf("context menu should close after clicking Reset Option:\n%s", model3.View().Content)
+	}
+}
+
+// TestLaunchWizardOptionRightClickContextMenuInspectArgv verifies that
+// "Inspect Generated Argv" from the context menu shows the correct CLI flag
+// in the notice.
+func TestLaunchWizardOptionRightClickContextMenuInspectArgv(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 140
+	model.height = 36
+	model.setActiveTab("wizard")
+	model.toggleWizardRuntime()
+
+	// Set an override on cache-type-k.
+	model.wizardOptionOverrides["cache-type-k"] = "q4_0"
+
+	// Right-click the cache-type-k option.
+	view := model.View().Content
+	x, y := renderedTextPosition(t, view, "q4_0")
+	next, _ := model.Update(rightClick(x, y))
+	model = next.(Model)
+	if model.wizardCtxMenu == nil {
+		t.Fatalf("right-click should open context menu")
+	}
+
+	// Click "Inspect Generated Argv".
+	ctxView := model.View().Content
+	xInsp, yInsp := renderedTextPosition(t, ctxView, "Inspect Generated Argv")
+	next, _ = model.Update(leftClick(xInsp, yInsp))
+	model = next.(Model)
+	if model.wizardCtxMenu != nil {
+		t.Fatalf("context menu should close after clicking Inspect Generated Argv:\n%s", model.View().Content)
+	}
+	if !strings.Contains(model.notice, "-ctk q4_0") {
+		t.Fatalf("notice should show '-ctk q4_0', got %q", model.notice)
+	}
+}
+
+// TestLaunchWizardOptionLongValueClipped verifies that a long CLI option
+// value does not corrupt the popover or nearby layout when the editor uses
+// the bounded TextAreaField.
+func TestLaunchWizardOptionLongValueClipped(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(ModelOptions{
+		RunnerController:  newFakeRunnerController(nil),
+		Logs:              server.NewLogBroadcaster(8),
+		Catalog:           testCatalogWithPresentModels(t),
+		LlamaRuntimeRoot:  testLlamaRuntimeRoot(t, "llama-win-cuda-13.3-x64"),
+		BackendConfigPath: filepath.Join(t.TempDir(), "missing-backends.json"),
+	})
+	model.width = 140
+	model.height = 36
+	model.setActiveTab("wizard")
+	// Stay on litert runtime; host is a litert-only option.
+
+	// Set a long override value on a string option (host).
+	longValue := strings.Repeat("x", 200)
+	model.wizardOptionOverrides["host"] = longValue
+
+	// Click the host option to open the editor.
+	view := model.View().Content
+	x, y := renderedTextPosition(t, view, "[host]")
+	next, cmd := model.Update(leftClick(x, y))
+	if cmd != nil {
+		t.Fatalf("option click returned unexpected command")
+	}
+	model = next.(Model)
+	if model.optionModal == nil {
+		t.Fatalf("option editor should open:\n%s", model.View().Content)
+	}
+
+	// The popover should not overflow the viewport.
+	editorView := model.View().Content
+	popover := model.optionModal.popover
+	if popover.Rect.Rows > model.height {
+		t.Fatalf("popover height %d exceeds viewport height %d:\n%s", popover.Rect.Rows, model.height, editorView)
+	}
+	if popover.Rect.Cols > model.width {
+		t.Fatalf("popover width %d exceeds viewport width %d:\n%s", popover.Rect.Cols, model.width, editorView)
+	}
+	if popover.Rect.Bottom() > model.height {
+		t.Fatalf("popover bottom %d exceeds viewport bottom %d:\n%s", popover.Rect.Bottom(), model.height, editorView)
+	}
+
+	// The TextAreaField should show the long value clipped.
+	if got := model.optionModal.input.Value(); got != longValue {
+		t.Fatalf("option input value = %q, want %q", got, longValue)
+	}
+	rendered := model.optionModal.input.View()
+	lines := strings.Split(rendered, "\n")
+	if len(lines) > model.optionModal.input.MaxVisibleHeight {
+		t.Fatalf("input view clipped to %d lines, exceeds MaxVisibleHeight=%d", len(lines), model.optionModal.input.MaxVisibleHeight)
+	}
+}
+
 func TestLaunchWizardOptionPaginationMouseStaysInWizard(t *testing.T) {
 	t.Parallel()
 
@@ -2966,6 +3120,14 @@ func leftClick(x int, y int) tea.MouseClickMsg {
 		X:      x,
 		Y:      y,
 		Button: tea.MouseLeft,
+	}
+}
+
+func rightClick(x int, y int) tea.MouseClickMsg {
+	return tea.MouseClickMsg{
+		X:      x,
+		Y:      y,
+		Button: tea.MouseRight,
 	}
 }
 

@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -142,12 +141,19 @@ type runtimeEdit struct {
 
 type optionModal struct {
 	option  wizardCLIOption
-	input   textinput.Model
+	input   TextAreaField
 	popover Popover
 }
 
 type wizardCommandEdit struct {
-	input textinput.Model
+	input TextAreaField
+}
+
+// wizardContextMenu is the right-click context menu shown for wizard CLI
+// option rows.
+type wizardContextMenu struct {
+	option  wizardCLIOption
+	popover Popover
 }
 
 type buttonHit struct {
@@ -246,6 +252,8 @@ type Model struct {
 	wizardCommandExtras     []wizardCommandExtra
 	wizardRemovedDefaults   map[string]bool
 	wizardCommandEdit       *wizardCommandEdit
+	wizardCtxMenu           *wizardContextMenu
+	wizardCtxArgv           string
 	optionModal             *optionModal
 	llamaRuntimeRoot        string
 	llamaRuntimeVariants    []llamaRuntimeVariant
@@ -546,6 +554,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.clampScrollOffset()
 	case tea.KeyPressMsg:
+		if m.wizardCtxMenu != nil {
+			if msg.Key().Code == tea.KeyEsc {
+				m.wizardCtxMenu = nil
+				return m, nil
+			}
+			return m, nil
+		}
 		if m.optionModal != nil {
 			return m.updateOptionModalKey(msg)
 		}
@@ -560,6 +575,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateKey(msg)
 	case tea.MouseClickMsg:
+		if m.wizardCtxMenu != nil {
+			return m.updateMouse(msg)
+		}
 		if m.optionModal != nil {
 			return m.updateOptionModalMouse(msg)
 		}
@@ -645,7 +663,25 @@ func (m Model) updateMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button == tea.MouseRight {
+		return m.updateRightClick(msg)
+	}
 	if msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+
+	if m.wizardCtxMenu != nil {
+		// Check button hits (context menu items) first.
+		if hit, ok := m.buttonHitAt(msg.X, msg.Y); ok {
+			if next, cmd, handled := m.handleButtonHit(hit); handled {
+				return next, cmd
+			}
+		}
+		// Outside click closes the menu.
+		p := shapes.Point{Row: msg.Y, Col: msg.X}
+		if !m.wizardCtxMenu.popover.Contains(p) {
+			m.wizardCtxMenu = nil
+		}
 		return m, nil
 	}
 
@@ -679,6 +715,55 @@ func (m Model) updateMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+}
+
+// updateRightClick handles right-click events. On the wizard tab, if the
+// click lands on a CLI option row, a context menu popover is opened.
+func (m Model) updateRightClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if m.activeTabID() != "wizard" || m.optionModal != nil || m.wizardCommandEdit != nil {
+		return m, nil
+	}
+	option, ok := m.wizardOptionFromMouse(msg.X, msg.Y)
+	if !ok {
+		return m, nil
+	}
+
+	width := 28
+	overrides := m.wizardOptionOverrides
+	value, hasOverride := overrides[option.ID]
+	bodyLines := []string{
+		"  Reset Option",
+		"  Inspect Generated Argv",
+	}
+	body := strings.Join(bodyLines, "\n")
+
+	popover := Popover{
+		Title:  wizardOptionDisplayName(option),
+		Body:   body,
+		Width:  width,
+		Height: len(bodyLines),
+	}
+	anchor := shapes.Rect{Row: msg.Y, Col: msg.X, Rows: 1, Cols: 1}
+	viewport := shapes.Rect{Row: 0, Col: 0, Rows: m.height, Cols: m.width}
+	popover.Layout(anchor, viewport)
+
+	m2 := m
+	m2.wizardCtxMenu = &wizardContextMenu{
+		option:  option,
+		popover: popover,
+	}
+	// Derive the argv snippet for inspection.
+	if hasOverride {
+		flag := optionLabel(option)
+		if value == "" {
+			m2.wizardCtxArgv = flag
+		} else {
+			m2.wizardCtxArgv = flag + " " + value
+		}
+	} else {
+		m2.wizardCtxArgv = ""
+	}
+	return m2, nil
 }
 
 func (m Model) handleBottomBarAction(x int, y int) (Model, tea.Cmd, bool) {
@@ -830,6 +915,13 @@ func (m Model) buttonHitRegistry() []buttonHit {
 				addTextHit(palette.label, "global-palette-select", palette.id)
 			}
 		}
+	}
+
+	if m.wizardCtxMenu != nil {
+		addTextHit("Reset Option", "ctx-reset-option", "")
+		addTextHit("Inspect Generated Argv", "ctx-inspect-argv", "")
+		addTextHit("[ X ]", "ctx-close", "")
+		return hits
 	}
 
 	if m.optionModal != nil {
@@ -1025,6 +1117,22 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 	case "chat-send":
 		next, cmd := m.submitChatPrompt()
 		return next, cmd, true
+	case "ctx-reset-option":
+		if m.wizardCtxMenu != nil {
+			delete(m.wizardOptionOverrides, m.wizardCtxMenu.option.ID)
+			m.wizardCtxMenu = nil
+			m.dispatchWizardState()
+		}
+		return m, nil, true
+	case "ctx-inspect-argv":
+		if m.wizardCtxMenu != nil {
+			m.openInspectArgv(m.wizardCtxMenu.option)
+			m.wizardCtxMenu = nil
+		}
+		return m, nil, true
+	case "ctx-close":
+		m.wizardCtxMenu = nil
+		return m, nil, true
 	case "modal-save":
 		m.saveOptionModal()
 		return m, nil, true
@@ -4022,7 +4130,7 @@ func (m Model) optionModalView() string {
 	return m.optionModal.popover.Render()
 }
 
-func (m Model) buildOptionModalBody(option wizardCLIOption, input textinput.Model, width int) string {
+func (m Model) buildOptionModalBody(option wizardCLIOption, input TextAreaField, width int) string {
 	lines := []string{
 		option.Long,
 		truncateToWidth(option.Description, width),
@@ -4049,10 +4157,13 @@ func (m Model) buildOptionModalBody(option wizardCLIOption, input textinput.Mode
 }
 
 func (m Model) applyWizardOptionOverlay(view string) string {
-	if m.optionModal == nil {
-		return view
+	switch {
+	case m.optionModal != nil:
+		return m.optionModal.popover.Apply(view)
+	case m.wizardCtxMenu != nil:
+		return m.wizardCtxMenu.popover.Apply(view)
 	}
-	return m.optionModal.popover.Apply(view)
+	return view
 }
 
 func (m Model) wizardOptionFromMouse(x int, y int) (wizardCLIOption, bool) {
@@ -4071,11 +4182,14 @@ func (m *Model) openOptionModal(option wizardCLIOption) {
 }
 
 func (m *Model) openOptionModalAt(option wizardCLIOption, row int, column int) {
-	input := textinput.New()
+	width := clampInt(m.width-column-2, 46, 74)
+	// Visible lines for the textarea: enough for oversize input without
+	// pushing the popover off-screen.
+	inputHeight := clampInt(m.height/5, 3, 8)
+	input := NewTextAreaField(width-4, inputHeight)
 	input.SetValue(m.wizardOptionOverrides[option.ID])
 	input.Focus()
 
-	width := clampInt(m.width-column-2, 46, 74)
 	body := m.buildOptionModalBody(option, input, width)
 	bodyLines := strings.Split(body, "\n")
 
@@ -4093,12 +4207,30 @@ func (m *Model) openOptionModalAt(option wizardCLIOption, row int, column int) {
 }
 
 func (m *Model) openWizardCommandEdit() {
-	input := textinput.New()
+	width := clampInt(m.wizardContentWidth(), 40, m.width-4)
+	visibleHeight := clampInt(m.height/6, 3, 6)
+	input := NewTextAreaField(width, visibleHeight)
 	input.SetValue(strings.Join(m.currentWizardCommandArgs(), " "))
 	input.Focus()
 	m.wizardCommandEdit = &wizardCommandEdit{input: input}
 	if m.managedScreen {
 		m.scrollOffset = m.maxScrollOffset()
+	}
+}
+
+// openInspectArgv sets the notice to show the generated command-line flag
+// for the given option based on its current override value.
+func (m *Model) openInspectArgv(option wizardCLIOption) {
+	flag := optionLabel(option)
+	value, hasOverride := m.wizardOptionOverrides[option.ID]
+	if !hasOverride {
+		m.notice = fmt.Sprintf("%s: using default (%s)", flag, fallback(option.DefaultText, "none"))
+		return
+	}
+	if value == "" {
+		m.notice = fmt.Sprintf("%s (bool flag, enabled)", flag)
+	} else {
+		m.notice = fmt.Sprintf("%s %s", flag, value)
 	}
 }
 

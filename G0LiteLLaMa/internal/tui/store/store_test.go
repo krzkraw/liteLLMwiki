@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -14,8 +15,8 @@ func TestCommandBusDispatchRevision(t *testing.T) {
 	initialRev := bus.State().Revision
 
 	_, err := bus.Dispatch(ctx, ActionEnvelope{
-		Type:   ActionTypeSelectTab,
-		Source: SourceTUI,
+		Type:    ActionTypeSelectTab,
+		Source:  SourceTUI,
 		Payload: MustPayload(SelectTabPayload{TabID: "dashboard"}),
 	})
 	if err != nil {
@@ -212,6 +213,46 @@ func TestUnknownActionTypePassesThrough(t *testing.T) {
 	}
 }
 
+func TestCommandBusDispatchRejectsEventLogError(t *testing.T) {
+	wantErr := errors.New("append failed")
+	bus := NewCommandBus(AppState{}, WithEventLog(failingEventLog{appendActionErr: wantErr}))
+
+	_, err := bus.Dispatch(context.Background(), ActionEnvelope{
+		Type:    ActionTypeSelectTab,
+		Source:  SourceTUI,
+		Payload: MustPayload(SelectTabPayload{TabID: "wizard"}),
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Dispatch error = %v, want %v", err, wantErr)
+	}
+	if got := bus.State().Revision; got != 0 {
+		t.Fatalf("revision = %d, want 0 after rejected action", got)
+	}
+	if got := len(bus.Log()); got != 0 {
+		t.Fatalf("log length = %d, want 0 after rejected action", got)
+	}
+}
+
+func TestCommandBusDispatchRejectsSnapshotError(t *testing.T) {
+	wantErr := errors.New("snapshot failed")
+	bus := NewCommandBus(AppState{}, WithSnapshotStore(failingSnapshotStore{saveErr: wantErr}))
+
+	_, err := bus.Dispatch(context.Background(), ActionEnvelope{
+		Type:    ActionTypeSelectTab,
+		Source:  SourceTUI,
+		Payload: MustPayload(SelectTabPayload{TabID: "wizard"}),
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Dispatch error = %v, want %v", err, wantErr)
+	}
+	if got := bus.State().Revision; got != 0 {
+		t.Fatalf("revision = %d, want 0 after rejected action", got)
+	}
+	if got := len(bus.Log()); got != 0 {
+		t.Fatalf("log length = %d, want 0 after rejected action", got)
+	}
+}
+
 func TestSubscriptionReceivesActions(t *testing.T) {
 	bus := NewCommandBus(AppState{})
 	ctx := context.Background()
@@ -237,4 +278,33 @@ func TestSubscriptionReceivesActions(t *testing.T) {
 	default:
 		t.Fatal("expected action on subscription channel")
 	}
+}
+
+type failingEventLog struct {
+	appendActionErr error
+	appendEventsErr error
+}
+
+func (f failingEventLog) AppendAction(ActionEnvelope) error {
+	return f.appendActionErr
+}
+
+func (f failingEventLog) AppendEvents([]StoredEvent) error {
+	return f.appendEventsErr
+}
+
+func (f failingEventLog) Since(StateRevision) ([]StoredEvent, error) {
+	return nil, nil
+}
+
+type failingSnapshotStore struct {
+	saveErr error
+}
+
+func (f failingSnapshotStore) LoadLatest() (AppState, StateRevision, error) {
+	return AppState{}, 0, nil
+}
+
+func (f failingSnapshotStore) Save(AppState) error {
+	return f.saveErr
 }

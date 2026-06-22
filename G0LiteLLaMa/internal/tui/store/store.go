@@ -104,11 +104,11 @@ type RuntimeState struct{}
 // ChatSession represents a single chat session, created by the TUI or by API
 // observation.
 type ChatSession struct {
-	ID        string       `json:"id"`
-	Source    ActionSource `json:"source"`
+	ID        string        `json:"id"`
+	Source    ActionSource  `json:"source"`
 	Messages  []ChatMessage `json:"messages,omitempty"`
-	CreatedAt time.Time    `json:"createdAt"`
-	UpdatedAt time.Time    `json:"updatedAt"`
+	CreatedAt time.Time     `json:"createdAt"`
+	UpdatedAt time.Time     `json:"updatedAt"`
 }
 
 // ChatMessage is a single message within a chat session.
@@ -119,8 +119,8 @@ type ChatMessage struct {
 
 // ChatState holds chat sessions.
 type ChatState struct {
-	Sessions       map[string]ChatSession `json:"sessions,omitempty"`
-	ActiveSessionID string                `json:"activeSessionId,omitempty"`
+	Sessions        map[string]ChatSession `json:"sessions,omitempty"`
+	ActiveSessionID string                 `json:"activeSessionId,omitempty"`
 }
 
 // WizardState holds launch wizard selections that should survive process restart.
@@ -131,8 +131,10 @@ type WizardState struct {
 	OptionOverrides map[string]string `json:"optionOverrides,omitempty"`
 }
 
-// TaskState holds active task tracking. Expanded in a later slice.
-type TaskState struct{}
+// TaskState holds active task tracking.
+type TaskState struct {
+	Items map[string]Task `json:"items,omitempty"`
+}
 
 // UIState holds user-interface-local state.
 type UIState struct {

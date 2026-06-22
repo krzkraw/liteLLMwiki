@@ -15,7 +15,7 @@ import (
 
 // ObservingRoundTripper wraps an http.RoundTripper and dispatches proxy
 // observation actions into a store.CommandBus for every proxied request and
-// response. Dispatch is asynchronous — it never blocks the RoundTrip caller.
+// response. Dispatch is synchronous so replay order matches proxy stream order.
 type ObservingRoundTripper struct {
 	inner      http.RoundTripper
 	commandBus *store.CommandBus
@@ -41,7 +41,6 @@ func (o *ObservingRoundTripper) RoundTrip(r *http.Request) (*http.Response, erro
 	cid := newCorrelationID()
 	role := roleForProxyPath(r.URL.Path)
 
-	// Dispatch request-start asynchronously — must not block the RoundTrip.
 	o.dispatchRequestStart(r, cid, role)
 
 	resp, err := o.inner.RoundTrip(r)
@@ -75,9 +74,7 @@ func (o *ObservingRoundTripper) dispatchRequestStart(r *http.Request, cid store.
 		CorrelationID: cid,
 		Payload:       mustMarshal(payload),
 	}
-	go func() {
-		_, _ = o.commandBus.Dispatch(context.Background(), env)
-	}()
+	_, _ = o.commandBus.Dispatch(context.Background(), env)
 }
 
 func (o *ObservingRoundTripper) dispatchError(cid store.ActionID, err error) {
@@ -91,9 +88,7 @@ func (o *ObservingRoundTripper) dispatchError(cid store.ActionID, err error) {
 		CorrelationID: cid,
 		Payload:       mustMarshal(payload),
 	}
-	go func() {
-		_, _ = o.commandBus.Dispatch(context.Background(), env)
-	}()
+	_, _ = o.commandBus.Dispatch(context.Background(), env)
 }
 
 // observingBody wraps an io.ReadCloser and dispatches a response-chunk action
@@ -114,20 +109,18 @@ func (o *observingBody) Read(p []byte) (int, error) {
 		data := make([]byte, n)
 		copy(data, p[:n])
 		idx := int(o.chunkIndex.Add(1) - 1)
-		go func() {
-			payload := store.ProxyResponseChunkPayload{
-				CorrelationID: string(o.correlationID),
-				Data:          data,
-				Index:         idx,
-			}
-			env := store.ActionEnvelope{
-				Type:          store.ActionTypeProxyResponseChunk,
-				Source:        store.SourceOpenAI,
-				CorrelationID: o.correlationID,
-				Payload:       mustMarshal(payload),
-			}
-			_, _ = o.commandBus.Dispatch(context.Background(), env)
-		}()
+		payload := store.ProxyResponseChunkPayload{
+			CorrelationID: string(o.correlationID),
+			Data:          data,
+			Index:         idx,
+		}
+		env := store.ActionEnvelope{
+			Type:          store.ActionTypeProxyResponseChunk,
+			Source:        store.SourceOpenAI,
+			CorrelationID: o.correlationID,
+			Payload:       mustMarshal(payload),
+		}
+		_, _ = o.commandBus.Dispatch(context.Background(), env)
 	}
 	return n, err
 }
@@ -146,9 +139,7 @@ func (o *observingBody) Close() error {
 			CorrelationID: o.correlationID,
 			Payload:       mustMarshal(payload),
 		}
-		go func() {
-			_, _ = o.commandBus.Dispatch(context.Background(), env)
-		}()
+		_, _ = o.commandBus.Dispatch(context.Background(), env)
 	}
 	return err
 }

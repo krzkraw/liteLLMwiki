@@ -60,8 +60,8 @@ type ModelOptions struct {
 	ManagedScreen     bool
 	LlamaRuntimeRoot  string
 	BackendConfigPath string
-	DBPath            string // SQLite database path; empty means use default
-	CommandBus        *store.CommandBus // if nil, created from DBPath
+	DBPath            string            // SQLite database path; empty means in-memory
+	CommandBus        *store.CommandBus // if nil, created from DBPath when set
 }
 
 type tickMsg time.Time
@@ -236,7 +236,7 @@ type Model struct {
 	chatTopP             string
 	chatMaxTokens        string
 	chatStream           bool
-	chatScrollBox ScrollBox
+	chatScrollBox        ScrollBox
 	managedScreen        bool
 	store                *store.CommandBus
 	persistCloser        io.Closer
@@ -427,8 +427,11 @@ func NewModel(options ModelOptions) Model {
 	}
 	bus := options.CommandBus
 	var closer io.Closer
-	if bus == nil {
+	if bus == nil && options.DBPath != "" {
 		bus, closer = newCommandBusWithSQLite(options)
+	}
+	if bus == nil {
+		bus = store.NewCommandBus(store.AppState{})
 	}
 	model := Model{
 		runtimeController:     options.RuntimeController,
@@ -5056,7 +5059,7 @@ func (m Model) chatMessagesBoxView(rows int) string {
 	// Build a box where the scrollbar sits flush against the right border.
 	// Line: │ <content> \x1b[48;5;24m<scrollbar2>\x1b[0m│
 	// (left border + 1 space + content + 2-char scrollbar + right border)
-	boxW := panelInnerWidth(m.width) // total box width incl borders
+	boxW := panelInnerWidth(m.width)        // total box width incl borders
 	contentW := panelBodyWidth(m.width) - 1 // text before scrollbar = m.width - 9
 	scrollContent := box.View(contentW)
 	lines := strings.Split(scrollContent, "\n")
@@ -6358,8 +6361,8 @@ func (m *Model) dispatchWizardState() {
 	}
 	ctx := context.Background()
 	m.store.Dispatch(ctx, store.ActionEnvelope{
-		Type:    store.ActionTypeWizard,
-		Source:  store.SourceTUI,
+		Type:   store.ActionTypeWizard,
+		Source: store.SourceTUI,
 		Payload: store.MustPayload(store.WizardStatePayload{
 			Runtime:         m.wizardRuntime,
 			Backend:         m.wizardBackend,

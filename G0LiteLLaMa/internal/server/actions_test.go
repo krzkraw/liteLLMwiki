@@ -18,6 +18,14 @@ func newActionTestServer(t *testing.T) http.Handler {
 	return s.Handler()
 }
 
+func newActionTestServerWithState(t *testing.T, state store.AppState) http.Handler {
+	t.Helper()
+
+	bus := store.NewCommandBus(state)
+	s := New(Options{CommandBus: bus})
+	return s.Handler()
+}
+
 func TestActionDispatchValid(t *testing.T) {
 	t.Parallel()
 	handler := newActionTestServer(t)
@@ -207,7 +215,16 @@ func TestGetStateModels(t *testing.T) {
 
 func TestGetChatSession(t *testing.T) {
 	t.Parallel()
-	handler := newActionTestServer(t)
+	handler := newActionTestServerWithState(t, store.AppState{
+		Chat: store.ChatState{
+			Sessions: map[string]store.ChatSession{
+				"abc123": {
+					ID:     "abc123",
+					Source: store.SourceTUI,
+				},
+			},
+		},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/g0litellama/v1/state/chat/sessions/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -215,6 +232,56 @@ func TestGetChatSession(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var session store.ChatSession
+	if err := json.NewDecoder(rec.Body).Decode(&session); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if session.ID != "abc123" {
+		t.Fatalf("session ID = %q, want abc123", session.ID)
+	}
+}
+
+func TestGetChatSessionNotFound(t *testing.T) {
+	t.Parallel()
+	handler := newActionTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/g0litellama/v1/state/chat/sessions/missing", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestGetTask(t *testing.T) {
+	t.Parallel()
+	handler := newActionTestServerWithState(t, store.AppState{
+		Tasks: store.TaskState{
+			Items: map[string]store.Task{
+				"abc123": {
+					ID:     "abc123",
+					Kind:   store.TaskKind("download"),
+					Status: store.TaskRunning,
+				},
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/g0litellama/v1/tasks/abc123", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var task store.Task
+	if err := json.NewDecoder(rec.Body).Decode(&task); err != nil {
+		t.Fatalf("decode task: %v", err)
+	}
+	if task.ID != "abc123" {
+		t.Fatalf("task ID = %q, want abc123", task.ID)
 	}
 }
 

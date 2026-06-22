@@ -58,14 +58,11 @@ func TestNewModelWithSQLite(t *testing.T) {
 }
 
 func TestNewModelWithoutSQLiteGraceful(t *testing.T) {
-	// No DBPath set — should fall back to default path which may not be
-	// writable in test environments, and degrade gracefully.
 	model := NewModel(ModelOptions{})
 	if model.store == nil {
 		t.Fatal("store should not be nil even without persistence")
 	}
 	if model.persistCloser != nil {
-		// If the default path happened to work, close cleanly.
-		model.persistCloser.Close()
+		t.Fatal("NewModel without DBPath should not open default user persistence")
 	}
 }

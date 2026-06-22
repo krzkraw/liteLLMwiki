@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -263,6 +264,46 @@ func TestObservingStreamingDispatchesChunks(t *testing.T) {
 	}
 }
 
+func TestObservingBodyCommitsEventsBeforeReturning(t *testing.T) {
+	bus := store.NewCommandBus(store.AppState{})
+	body := &observingBody{
+		body:          &scriptedReadCloser{chunks: [][]byte{[]byte("one"), []byte("two")}},
+		commandBus:    bus,
+		correlationID: "cid-1",
+		statusCode:    http.StatusOK,
+		contentType:   "text/event-stream",
+	}
+
+	buf := make([]byte, 8)
+	for {
+		_, err := body.Read(buf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+	}
+	if err := body.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	log := bus.Log()
+	if len(log) != 3 {
+		t.Fatalf("log length = %d, want 3", len(log))
+	}
+	want := []store.ActionType{
+		store.ActionTypeProxyResponseChunk,
+		store.ActionTypeProxyResponseChunk,
+		store.ActionTypeProxyResponseEnd,
+	}
+	for i, typ := range want {
+		if got := log[i].Action.Type; got != typ {
+			t.Fatalf("log[%d] type = %q, want %q", i, got, typ)
+		}
+	}
+}
+
 func TestObservingActionCorrelationIDs(t *testing.T) {
 	t.Parallel()
 	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -312,6 +353,24 @@ func TestObservingActionCorrelationIDs(t *testing.T) {
 	if cid == "" {
 		t.Fatal("request-start has empty correlation ID")
 	}
+}
+
+type scriptedReadCloser struct {
+	chunks [][]byte
+	index  int
+}
+
+func (r *scriptedReadCloser) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	chunk := r.chunks[r.index]
+	r.index++
+	return copy(p, chunk), nil
+}
+
+func (r *scriptedReadCloser) Close() error {
+	return nil
 }
 
 func TestRoleForProxyPath(t *testing.T) {

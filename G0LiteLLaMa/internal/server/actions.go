@@ -53,7 +53,7 @@ func (s *Server) handleActionDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := struct {
-		ActionID store.ActionID     `json:"actionId"`
+		ActionID store.ActionID      `json:"actionId"`
 		Revision store.StateRevision `json:"revision"`
 	}{
 		ActionID: env.ID,
@@ -75,9 +75,18 @@ func (s *Server) handleGetChatSession(w http.ResponseWriter, r *http.Request) {
 		WriteActionAPIError(w, &ActionAPIError{Status: http.StatusServiceUnavailable, Message: "command bus not available", Code: ErrCodeInternal})
 		return
 	}
-	// Chat sessions are not implemented yet — return empty.
+	id := r.PathValue("id")
+	if id == "" {
+		WriteActionAPIError(w, &ActionAPIError{Status: http.StatusBadRequest, Message: "chat session id is required", Code: ErrCodeBadRequest})
+		return
+	}
 	state := s.commandBus.State()
-	WriteActionJSON(w, state.Chat)
+	session, ok := state.Chat.Sessions[id]
+	if !ok {
+		WriteActionAPIError(w, &ActionAPIError{Status: http.StatusNotFound, Message: fmt.Sprintf("chat session %s not found", id), Code: ErrCodeNotFound})
+		return
+	}
+	WriteActionJSON(w, session)
 }
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
@@ -90,9 +99,13 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		WriteActionAPIError(w, &ActionAPIError{Status: http.StatusBadRequest, Message: "task id is required", Code: ErrCodeBadRequest})
 		return
 	}
-	// Tasks are schema-only; individual task lookup is WIP.
-	_ = id
-	WriteActionAPIError(w, &ActionAPIError{Status: http.StatusNotFound, Message: fmt.Sprintf("task %s not found", id), Code: ErrCodeNotFound})
+	state := s.commandBus.State()
+	task, ok := state.Tasks.Items[id]
+	if !ok {
+		WriteActionAPIError(w, &ActionAPIError{Status: http.StatusNotFound, Message: fmt.Sprintf("task %s not found", id), Code: ErrCodeNotFound})
+		return
+	}
+	WriteActionJSON(w, task)
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {

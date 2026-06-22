@@ -43,7 +43,7 @@ type CommandBus struct {
 // StoredAction is an action envelope paired with the revision at which it was
 // committed.
 type StoredAction struct {
-	Action  ActionEnvelope
+	Action   ActionEnvelope
 	Revision StateRevision
 }
 
@@ -79,28 +79,33 @@ func (b *CommandBus) Dispatch(_ context.Context, action ActionEnvelope) (AppStat
 	newState, effects := RootReduce(b.state, action)
 	_ = effects // effects are scheduled but not executed in this slice
 
-	b.state = newState
-	b.log = append(b.log, StoredAction{Action: action, Revision: b.state.Revision})
-
-	// Persist to optional backends. Writes are buffered by the implementations
-	// and flushed asynchronously, so these calls are non-blocking.
+	stored := StoredAction{Action: action, Revision: newState.Revision}
 	if b.eventLog != nil {
-		_ = b.eventLog.AppendAction(action)
-		_ = b.eventLog.AppendEvents([]StoredEvent{{
-			Revision:  b.state.Revision,
+		if err := b.eventLog.AppendAction(action); err != nil {
+			return b.state, fmt.Errorf("append action: %w", err)
+		}
+		if err := b.eventLog.AppendEvents([]StoredEvent{{
+			Revision:  newState.Revision,
 			ActionID:  action.ID,
 			Type:      action.Type,
 			Payload:   action.Payload,
 			CreatedAt: action.Time.UnixNano(),
-		}})
+		}}); err != nil {
+			return b.state, fmt.Errorf("append events: %w", err)
+		}
 	}
 	if b.snapshotStore != nil {
-		_ = b.snapshotStore.Save(b.state)
+		if err := b.snapshotStore.Save(newState); err != nil {
+			return b.state, fmt.Errorf("save snapshot: %w", err)
+		}
 	}
+
+	b.state = newState
+	b.log = append(b.log, stored)
 
 	for _, sub := range b.subs {
 		select {
-		case sub <- StoredAction{Action: action, Revision: b.state.Revision}:
+		case sub <- stored:
 		default:
 		}
 	}

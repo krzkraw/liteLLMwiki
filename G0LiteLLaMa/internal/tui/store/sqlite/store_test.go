@@ -75,6 +75,49 @@ func TestAppendActionAndFlush(t *testing.T) {
 	}
 }
 
+func TestFlushKeepsBuffersOnError(t *testing.T) {
+	db := newDB(t)
+	st := &Store{db: db}
+
+	action := store.ActionEnvelope{
+		ID:      "a1",
+		Type:    store.ActionTypeSelectTab,
+		Source:  store.SourceTUI,
+		Payload: store.MustPayload(store.SelectTabPayload{TabID: "wizard"}),
+	}
+	event := store.StoredEvent{
+		Revision: 1,
+		ActionID: "a1",
+		Type:     store.ActionTypeSelectTab,
+		Payload:  action.Payload,
+	}
+	if err := st.AppendAction(action); err != nil {
+		t.Fatalf("AppendAction: %v", err)
+	}
+	if err := st.AppendEvents([]store.StoredEvent{event}); err != nil {
+		t.Fatalf("AppendEvents: %v", err)
+	}
+	if err := st.Save(store.AppState{Revision: 1}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	if err := st.Flush(); err == nil {
+		t.Fatal("Flush error = nil, want closed database error")
+	}
+	if len(st.evBuf) != 1 {
+		t.Fatalf("action buffer length = %d, want 1", len(st.evBuf))
+	}
+	if len(st.evtBuf) != 1 {
+		t.Fatalf("event buffer length = %d, want 1", len(st.evtBuf))
+	}
+	if st.ssBuf == nil {
+		t.Fatal("snapshot buffer was dropped after failed flush")
+	}
+}
+
 func TestAppendManyActionsFlushInOneTx(t *testing.T) {
 	st := newStore(t)
 	defer st.Close()
@@ -223,16 +266,16 @@ func TestReplayFromSnapshot(t *testing.T) {
 
 	// Actions 1-2: build state to rev 2, snapshot at rev 2.
 	st1.AppendAction(store.ActionEnvelope{
-		ID: "[replay] act-1",
-		Type: store.ActionTypeSelectTab,
+		ID:      "[replay] act-1",
+		Type:    store.ActionTypeSelectTab,
 		Payload: store.MustPayload(store.SelectTabPayload{TabID: "dashboard"}),
-		Time: time.Now(),
+		Time:    time.Now(),
 	})
 	st1.AppendAction(store.ActionEnvelope{
-		ID: "[replay] act-2",
-		Type: store.ActionTypeSelectTab,
+		ID:      "[replay] act-2",
+		Type:    store.ActionTypeSelectTab,
 		Payload: store.MustPayload(store.SelectTabPayload{TabID: "wizard"}),
-		Time: time.Now(),
+		Time:    time.Now(),
 	})
 	st1.Save(store.AppState{Revision: 2, UI: store.UIState{ActiveTab: "wizard"}})
 
@@ -240,12 +283,12 @@ func TestReplayFromSnapshot(t *testing.T) {
 	st1.AppendEvents([]store.StoredEvent{
 		{
 			Revision: 3, ActionID: "[replay] act-3",
-			Type: store.ActionTypeSelectTab,
+			Type:    store.ActionTypeSelectTab,
 			Payload: store.MustPayload(store.SelectTabPayload{TabID: "chat"}),
 		},
 		{
 			Revision: 4, ActionID: "[replay] act-4",
-			Type: store.ActionTypeSelectTab,
+			Type:    store.ActionTypeSelectTab,
 			Payload: store.MustPayload(store.SelectTabPayload{TabID: "wizard"}),
 		},
 	})

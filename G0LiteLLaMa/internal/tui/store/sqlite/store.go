@@ -79,7 +79,11 @@ func (s *Store) Flush() error {
 	s.ssBuf = nil
 	s.ssMu.Unlock()
 
-	return s.flush(evBuf, evtBuf, ssBuf)
+	if err := s.flush(evBuf, evtBuf, ssBuf); err != nil {
+		s.requeue(evBuf, evtBuf, ssBuf)
+		return err
+	}
+	return nil
 }
 
 func (s *Store) flushLoop() {
@@ -104,7 +108,9 @@ func (s *Store) flushLoop() {
 		s.ssMu.Unlock()
 
 		if len(evBuf) > 0 || len(evtBuf) > 0 || ssBuf != nil {
-			_ = s.flush(evBuf, evtBuf, ssBuf)
+			if err := s.flush(evBuf, evtBuf, ssBuf); err != nil {
+				s.requeue(evBuf, evtBuf, ssBuf)
+			}
 		}
 	}
 
@@ -278,6 +284,26 @@ func nullString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func (s *Store) requeue(evBuf []store.ActionEnvelope, evtBuf []store.StoredEvent, ssBuf *store.AppState) {
+	if len(evBuf) > 0 {
+		s.evMu.Lock()
+		s.evBuf = append(evBuf, s.evBuf...)
+		s.evMu.Unlock()
+	}
+	if len(evtBuf) > 0 {
+		s.evtMu.Lock()
+		s.evtBuf = append(evtBuf, s.evtBuf...)
+		s.evtMu.Unlock()
+	}
+	if ssBuf != nil {
+		s.ssMu.Lock()
+		if s.ssBuf == nil {
+			s.ssBuf = ssBuf
+		}
+		s.ssMu.Unlock()
+	}
 }
 
 // LoadAndReplay opens the database at dbPath, loads the latest snapshot,

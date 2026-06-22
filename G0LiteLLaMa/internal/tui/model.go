@@ -24,6 +24,7 @@ import (
 	"g0litellama/internal/catalog"
 	"g0litellama/internal/runtimeconfig"
 	"g0litellama/internal/server"
+	"g0litellama/internal/tui/store"
 )
 
 const refreshInterval = time.Second
@@ -227,6 +228,7 @@ type Model struct {
 	chatStream           bool
 	chatTranscriptScroll int
 	managedScreen        bool
+	store                *store.CommandBus
 	scrollOffset         int
 
 	wizardRuntime           string
@@ -425,6 +427,7 @@ func NewModel(options ModelOptions) Model {
 		chatMaxTokens:         "default",
 		chatStream:            true,
 		active:                0,
+		store:                 store.NewCommandBus(store.AppState{}),
 		managedScreen:         options.ManagedScreen,
 		wizardRuntime:         "litert",
 		wizardBackend:         "cpu",
@@ -621,12 +624,10 @@ func (m Model) handleBottomBarAction(x int, y int) (Model, tea.Cmd, bool) {
 		m.globalPaletteMenuOpen = false
 		return m, nil, true
 	case "next":
-		m.active = (m.active + 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(1)
 		return m, nil, true
 	case "previous":
-		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(-1)
 		return m, nil, true
 	case "quit":
 		return m, tea.Quit, true
@@ -842,14 +843,12 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 	case "menu", "next", "previous", "quit", "runner-start", "runner-stop", "runner-restart", "runner-edit-command", "runner-close", "chat-clear", "chat-new":
 		return m.handleBottomBarOrRunnerHit(hit)
 	case "global-next":
-		m.active = (m.active + 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(1)
 		m.globalMenuOpen = false
 		m.globalPaletteMenuOpen = false
 		return m, nil, true
 	case "global-previous":
-		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(-1)
 		m.globalMenuOpen = false
 		m.globalPaletteMenuOpen = false
 		return m, nil, true
@@ -979,12 +978,10 @@ func (m Model) handleBottomBarOrRunnerHit(hit buttonHit) (Model, tea.Cmd, bool) 
 		m.globalPaletteMenuOpen = false
 		return m, nil, true
 	case "next":
-		m.active = (m.active + 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(1)
 		return m, nil, true
 	case "previous":
-		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(-1)
 		return m, nil, true
 	case "quit":
 		return m, tea.Quit, true
@@ -1052,14 +1049,12 @@ func (m Model) handleGlobalMenuClick(x int, y int) (Model, tea.Cmd, bool) {
 
 	switch y - menuTop {
 	case 2:
-		m.active = (m.active + 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(1)
 		m.globalMenuOpen = false
 		m.globalPaletteMenuOpen = false
 		return m, nil, true
 	case 3:
-		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
-		m.resetScroll()
+		m.cycleTab(-1)
 		m.globalMenuOpen = false
 		m.globalPaletteMenuOpen = false
 		return m, nil, true
@@ -1323,23 +1318,17 @@ func (m Model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.globalPaletteMenuOpen = false
 		return m, nil
 	case tea.KeyRight:
-		m.active = (m.active + 1) % len(m.tabs())
-		m.resetScroll()
-		m.pinChatRunnerIfUnset()
+		m.cycleTab(1)
 		return m, nil
 	case tea.KeyTab:
 		if key.Mod.Contains(tea.ModShift) {
-			m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
+			m.cycleTab(-1)
 		} else {
-			m.active = (m.active + 1) % len(m.tabs())
+			m.cycleTab(1)
 		}
-		m.resetScroll()
-		m.pinChatRunnerIfUnset()
 		return m, nil
 	case tea.KeyLeft:
-		m.active = (m.active + len(m.tabs()) - 1) % len(m.tabs())
-		m.resetScroll()
-		m.pinChatRunnerIfUnset()
+		m.cycleTab(-1)
 		return m, nil
 	case tea.KeyBackspace, tea.KeyEnter:
 		if m.activeTabID() == "wizard" && key.Code == tea.KeyEnter {
@@ -2107,6 +2096,18 @@ func (m Model) newSecretRuntimeEdit(
 
 func (m Model) activeTabID() string {
 	tabs := m.tabs()
+	if m.store != nil {
+		s := m.store.State()
+		if s.UI.ActiveTab != "" {
+			for _, t := range tabs {
+				if t.id == s.UI.ActiveTab {
+					return s.UI.ActiveTab
+				}
+			}
+			// Stored tab ID no longer exists in current tabs (e.g. runner was
+			// closed). Fall through to the local fallback.
+		}
+	}
 	if len(tabs) == 0 {
 		return "dashboard"
 	}
@@ -2198,6 +2199,29 @@ func (m *Model) refresh() {
 	)
 	m.clampSetupSelection()
 	m.normalizeWizardSelection()
+	if m.store != nil {
+		s := m.store.State()
+		if s.UI.ActiveTab != "" && len(m.tabs()) > 0 {
+			tabIndex := -1
+			for i, t := range m.tabs() {
+				if t.id == s.UI.ActiveTab {
+					tabIndex = i
+					break
+				}
+			}
+			if tabIndex >= 0 {
+				m.active = tabIndex
+			} else {
+				// Stored tab no longer exists; reset to first tab.
+				_, _ = m.store.Dispatch(m.ctx, store.ActionEnvelope{
+					Type:    store.ActionTypeSelectTab,
+					Source:  store.SourceSystem,
+					Payload: store.MustPayload(store.SelectTabPayload{TabID: m.tabs()[0].id}),
+				})
+				m.active = 0
+			}
+		}
+	}
 	if m.active >= len(m.tabs()) {
 		m.active = 0
 	}
@@ -2365,7 +2389,23 @@ func (m Model) chatTarget() string {
 	return "main"
 }
 
+func (m *Model) cycleTab(delta int) {
+	tabs := m.tabs()
+	next := (m.active + delta) % len(tabs)
+	if next < 0 {
+		next += len(tabs)
+	}
+	m.setActiveTab(tabs[next].id)
+}
+
 func (m *Model) setActiveTab(id string) {
+	if m.store != nil {
+		_, _ = m.store.Dispatch(m.ctx, store.ActionEnvelope{
+			Type:    store.ActionTypeSelectTab,
+			Source:  store.SourceTUI,
+			Payload: store.MustPayload(store.SelectTabPayload{TabID: id}),
+		})
+	}
 	for index, item := range m.tabs() {
 		if item.id == id {
 			if m.active != index {
@@ -2390,12 +2430,13 @@ func (m *Model) pinChatRunnerIfUnset() {
 func (m Model) tabBar() string {
 	tabs := m.tabs()
 	parts := make([]string, 0, len(tabs))
+	activeID := m.activeTabID()
 	for index, item := range tabs {
 		label := fmt.Sprintf("%d %s", index+1, item.label)
 		style := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("250")).
 			Background(lipgloss.Color(m.palette().tabBG))
-		if index == m.active {
+		if item.id == activeID {
 			style = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("16")).

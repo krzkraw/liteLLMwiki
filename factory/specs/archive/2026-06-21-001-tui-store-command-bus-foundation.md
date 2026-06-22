@@ -1,7 +1,7 @@
 ---
 id: tui-store-command-bus-foundation
 title: TUI store and command bus foundation
-status: inbox
+status: active
 agent: codex
 verification:
   - cd G0LiteLLaMa && go test ./...
@@ -47,6 +47,19 @@ path through the new command bus. This is a foundation slice only.
 - No SQLite dependency is added in this slice.
 - No Harmonica dependency is added in this slice.
 - Charm v2 imports remain in use.
+
+## Grill Gate
+
+Decisions recorded before dispatch:
+
+- **Tab state ownership**: `AppState.UI.ActiveTab` is the source of truth.
+  `setActiveTab` dispatches a `SelectTab` action through the CommandBus.
+  The Model reads `AppState.UI.ActiveTab` instead of `m.active` for
+  rendering.
+- **AppState shape**: Define all substate types from the design doc
+  (Viewport, Runners, Models, Runtime, Chat, Wizard, Tasks, UI) even if
+  as empty structs. Reducers for unused domains return state unchanged.
+  This keeps the state shape stable across slices.
 
 ## Notes
 

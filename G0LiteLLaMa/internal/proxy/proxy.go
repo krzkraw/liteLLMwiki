@@ -50,6 +50,15 @@ func (p *Proxy) SetTargetResolver(resolver TargetResolver) {
 	p.lastErr = ""
 }
 
+// SetTransport replaces the underlying reverse proxy's transport. Use this to
+// wire custom round trippers (e.g. for observation) without replacing the
+// entire Proxy.
+func (p *Proxy) SetTransport(transport http.RoundTripper) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reverse.Transport = transport
+}
+
 func (p *Proxy) TargetForPath(path string) string {
 	target := p.targetForRequest(&http.Request{URL: &url.URL{Path: path}})
 	return target.String()

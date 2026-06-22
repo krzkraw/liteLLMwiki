@@ -303,6 +303,12 @@ func New(options Options) *Server {
 }
 
 func (s *Server) Handler() http.Handler {
+	// Wire the observing round tripper on the proxy transport when the command
+	// bus is available. This must happen here rather than in New() because the
+	// proxy may be set or replaced after construction.
+	if s.commandBus != nil && s.proxy != nil {
+		s.proxy.SetTransport(NewObservingRoundTripper(http.DefaultTransport, s.commandBus))
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/g0litellama/v1/status", s.handleStatus)
 	mux.HandleFunc("/g0litellama/v1/ws", s.handleWebSocket)

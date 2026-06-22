@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // Action types for the UI domain.
@@ -32,6 +33,14 @@ func RootReduce(state AppState, action ActionEnvelope) (AppState, []EffectSpec) 
 	switch action.Type {
 	case ActionTypeSelectTab:
 		return reduceSelectTab(state, action)
+	case ActionTypeProxyRequestStart:
+		return ReduceProxy(state, action)
+	case ActionTypeProxyResponseChunk:
+		return ReduceProxy(state, action)
+	case ActionTypeProxyResponseEnd:
+		return ReduceProxy(state, action)
+	case ActionTypeProxyResponseError:
+		return ReduceProxy(state, action)
 	default:
 		return state, nil
 	}
@@ -76,9 +85,95 @@ func ReduceRuntime(state AppState, _ ActionEnvelope) (AppState, []EffectSpec) {
 	return state, nil
 }
 
-// ReduceChat is a pass-through reducer for the Chat domain.
-func ReduceChat(state AppState, _ ActionEnvelope) (AppState, []EffectSpec) {
+// ReduceChat handles Chat-domain actions and proxy observations that create
+// or update chat sessions.
+func ReduceChat(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
+	switch action.Type {
+	case ActionTypeProxyRequestStart:
+		return reduceChatFromProxyRequestStart(state, action)
+	default:
+		return state, nil
+	}
+}
+
+// ReduceProxy handles proxy observation actions. Chat-relevant observations
+// are forwarded to ReduceChat for session management.
+func ReduceProxy(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
+	switch action.Type {
+	case ActionTypeProxyRequestStart:
+		return reduceProxyRequestStart(state, action)
+	case ActionTypeProxyResponseChunk:
+		return reduceProxyResponseChunk(state, action)
+	case ActionTypeProxyResponseEnd:
+		return reduceProxyResponseEnd(state, action)
+	case ActionTypeProxyResponseError:
+		return reduceProxyResponseError(state, action)
+	default:
+		return state, nil
+	}
+}
+
+func reduceProxyRequestStart(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
+	var p ProxyRequestStartPayload
+	if err := json.Unmarshal(action.Payload, &p); err != nil {
+		return state, nil
+	}
+	// Route chat-completions request starts to the chat reducer for
+	// auto-creating API sessions.
+	if isChatPath(p.Path) {
+		return ReduceChat(state, action)
+	}
 	return state, nil
+}
+
+func reduceProxyResponseChunk(state AppState, _ ActionEnvelope) (AppState, []EffectSpec) {
+	// Store-level chunk tracking is pass-through in this slice. The action
+	// remains in the event log for debugging and TUI observation.
+	return state, nil
+}
+
+func reduceProxyResponseEnd(state AppState, _ ActionEnvelope) (AppState, []EffectSpec) {
+	return state, nil
+}
+
+func reduceProxyResponseError(state AppState, _ ActionEnvelope) (AppState, []EffectSpec) {
+	return state, nil
+}
+
+func reduceChatFromProxyRequestStart(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
+	var p ProxyRequestStartPayload
+	if err := json.Unmarshal(action.Payload, &p); err != nil {
+		return state, nil
+	}
+	if !isChatPath(p.Path) {
+		return state, nil
+	}
+	cid := action.CorrelationID
+	if cid == "" {
+		cid = action.ID
+	}
+	sessionID := string(cid)
+
+	if state.Chat.Sessions == nil {
+		state.Chat.Sessions = make(map[string]ChatSession)
+	}
+	if _, exists := state.Chat.Sessions[sessionID]; !exists {
+		state.Chat.Sessions[sessionID] = ChatSession{
+			ID:        sessionID,
+			Source:    SourceOpenAI,
+			CreatedAt: action.Time,
+			UpdatedAt: action.Time,
+		}
+	}
+	// Do not change ActiveSessionID — API sessions are observed but never
+	// replace the active local TUI session.
+	return state, nil
+}
+
+// isChatPath returns true when path corresponds to a chat/completions route.
+func isChatPath(path string) bool {
+	return path == "/v1/chat/completions" || path == "/v1/chat/completions/" ||
+		strings.HasPrefix(path, "/v1/chat/completions/")
 }
 
 // ReduceWizard is a pass-through reducer for the Wizard domain.

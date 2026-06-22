@@ -30,6 +30,42 @@ const (
 	SourceSystem ActionSource = "system"
 )
 
+// Proxy observation action types. Dispatched by the proxy round tripper when
+// observing OpenAI-compatible /v1/* traffic through the store.
+const (
+	ActionTypeProxyRequestStart  ActionType = "proxy:request-start"
+	ActionTypeProxyResponseChunk ActionType = "proxy:response-chunk"
+	ActionTypeProxyResponseEnd   ActionType = "proxy:response-end"
+	ActionTypeProxyResponseError ActionType = "proxy:response-error"
+)
+
+// ProxyRequestStartPayload is the payload for proxy:request-start actions.
+type ProxyRequestStartPayload struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Role   string `json:"role"`
+}
+
+// ProxyResponseChunkPayload is the payload for proxy:response-chunk actions.
+type ProxyResponseChunkPayload struct {
+	CorrelationID string `json:"correlationId"`
+	Data          []byte `json:"data"`
+	Index         int    `json:"index"`
+}
+
+// ProxyResponseEndPayload is the payload for proxy:response-end actions.
+type ProxyResponseEndPayload struct {
+	CorrelationID string `json:"correlationId"`
+	StatusCode    int    `json:"statusCode"`
+	ContentType   string `json:"contentType,omitempty"`
+}
+
+// ProxyResponseErrorPayload is the payload for proxy:response-error actions.
+type ProxyResponseErrorPayload struct {
+	CorrelationID string `json:"correlationId"`
+	Error         string `json:"error"`
+}
+
 // ActionEnvelope wraps every action with routing, tracing, and timing metadata.
 type ActionEnvelope struct {
 	ID            ActionID        `json:"id"`
@@ -56,8 +92,27 @@ type ModelsState struct{}
 // RuntimeState holds runtime status. Expanded in a later slice.
 type RuntimeState struct{}
 
-// ChatState holds chat sessions. Expanded in a later slice.
-type ChatState struct{}
+// ChatSession represents a single chat session, created by the TUI or by API
+// observation.
+type ChatSession struct {
+	ID        string       `json:"id"`
+	Source    ActionSource `json:"source"`
+	Messages  []ChatMessage `json:"messages,omitempty"`
+	CreatedAt time.Time    `json:"createdAt"`
+	UpdatedAt time.Time    `json:"updatedAt"`
+}
+
+// ChatMessage is a single message within a chat session.
+type ChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// ChatState holds chat sessions.
+type ChatState struct {
+	Sessions       map[string]ChatSession `json:"sessions,omitempty"`
+	ActiveSessionID string                `json:"activeSessionId,omitempty"`
+}
 
 // WizardState holds the launch wizard state. Expanded in a later slice.
 type WizardState struct{}

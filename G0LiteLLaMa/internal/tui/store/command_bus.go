@@ -10,13 +10,34 @@ import (
 	"time"
 )
 
+// CommandBusOption configures a CommandBus.
+type CommandBusOption func(*CommandBus)
+
+// WithEventLog sets the event log backend for the CommandBus. Each dispatched
+// action is recorded via AppendAction and AppendEvents.
+func WithEventLog(el EventLog) CommandBusOption {
+	return func(b *CommandBus) {
+		b.eventLog = el
+	}
+}
+
+// WithSnapshotStore sets the snapshot store backend for the CommandBus. On
+// each dispatch the current AppState is passed to Save.
+func WithSnapshotStore(ss SnapshotStore) CommandBusOption {
+	return func(b *CommandBus) {
+		b.snapshotStore = ss
+	}
+}
+
 // CommandBus dispatches actions through the root reducer, appends them to the
 // event log, and increments the state revision atomically.
 type CommandBus struct {
-	mu    sync.RWMutex
-	state AppState
-	log   []StoredAction
-	subs  []chan StoredAction
+	mu            sync.RWMutex
+	state         AppState
+	log           []StoredAction
+	subs          []chan StoredAction
+	eventLog      EventLog
+	snapshotStore SnapshotStore
 }
 
 // StoredAction is an action envelope paired with the revision at which it was
@@ -26,11 +47,16 @@ type StoredAction struct {
 	Revision StateRevision
 }
 
-// NewCommandBus returns a CommandBus initialised with the given state.
-func NewCommandBus(initial AppState) *CommandBus {
-	return &CommandBus{
+// NewCommandBus returns a CommandBus initialised with the given state and
+// optional persistence backends.
+func NewCommandBus(initial AppState, opts ...CommandBusOption) *CommandBus {
+	b := &CommandBus{
 		state: initial,
 	}
+	for _, o := range opts {
+		o(b)
+	}
+	return b
 }
 
 // Dispatch applies the action through the root reducer, commits the result
@@ -55,6 +81,22 @@ func (b *CommandBus) Dispatch(_ context.Context, action ActionEnvelope) (AppStat
 
 	b.state = newState
 	b.log = append(b.log, StoredAction{Action: action, Revision: b.state.Revision})
+
+	// Persist to optional backends. Writes are buffered by the implementations
+	// and flushed asynchronously, so these calls are non-blocking.
+	if b.eventLog != nil {
+		_ = b.eventLog.AppendAction(action)
+		_ = b.eventLog.AppendEvents([]StoredEvent{{
+			Revision:  b.state.Revision,
+			ActionID:  action.ID,
+			Type:      action.Type,
+			Payload:   action.Payload,
+			CreatedAt: action.Time.UnixNano(),
+		}})
+	}
+	if b.snapshotStore != nil {
+		_ = b.snapshotStore.Save(b.state)
+	}
 
 	for _, sub := range b.subs {
 		select {

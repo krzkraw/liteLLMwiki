@@ -1,7 +1,7 @@
 ---
 id: tui-sqlite-event-log-persistence
 title: SQLite event log and app persistence
-status: inbox
+status: active
 agent: codex
 verification:
   - cd G0LiteLLaMa && go test ./...

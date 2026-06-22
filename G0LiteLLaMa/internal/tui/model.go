@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"g0litellama/internal/runtimeconfig"
 	"g0litellama/internal/server"
 	"g0litellama/internal/tui/store"
+	"g0litellama/internal/tui/store/sqlite"
 )
 
 const refreshInterval = time.Second
@@ -58,6 +60,7 @@ type ModelOptions struct {
 	ManagedScreen     bool
 	LlamaRuntimeRoot  string
 	BackendConfigPath string
+	DBPath            string // SQLite database path; empty means use default
 }
 
 type tickMsg time.Time
@@ -229,6 +232,7 @@ type Model struct {
 	chatTranscriptScroll int
 	managedScreen        bool
 	store                *store.CommandBus
+	persistCloser        io.Closer
 	scrollOffset         int
 
 	wizardRuntime           string
@@ -412,6 +416,7 @@ func NewModel(options ModelOptions) Model {
 	if chatEndpoint == "" {
 		chatEndpoint = defaultChatEndpoint
 	}
+	bus, closer := newCommandBusWithSQLite(options)
 	model := Model{
 		runtimeController:     options.RuntimeController,
 		runnerController:      options.RunnerController,
@@ -427,7 +432,8 @@ func NewModel(options ModelOptions) Model {
 		chatMaxTokens:         "default",
 		chatStream:            true,
 		active:                0,
-		store:                 store.NewCommandBus(store.AppState{}),
+		store:                 bus,
+		persistCloser:         closer,
 		managedScreen:         options.ManagedScreen,
 		wizardRuntime:         "litert",
 		wizardBackend:         "cpu",
@@ -441,6 +447,34 @@ func NewModel(options ModelOptions) Model {
 	model.refresh()
 	model.normalizeWizardSelection()
 	return model
+}
+
+// newCommandBusWithSQLite creates a CommandBus with optional SQLite persistence.
+// If SQLite cannot be opened (e.g. in tests or CI without a writable home dir)
+// the bus operates without a persistence backend. The second return value is a
+// closer for the SQLite store; it is nil when persistence is not active.
+func newCommandBusWithSQLite(options ModelOptions) (*store.CommandBus, io.Closer) {
+	dbPath := options.DBPath
+	if dbPath == "" {
+		var err error
+		dbPath, err = sqlite.DBPath()
+		if err != nil {
+			log.Printf("persistence: resolve db path: %v — continuing without persistence", err)
+			return store.NewCommandBus(store.AppState{}), nil
+		}
+	}
+
+	s, err := sqlite.New(dbPath)
+	if err != nil {
+		log.Printf("persistence: open db %s: %v — continuing without persistence", dbPath, err)
+		return store.NewCommandBus(store.AppState{}), nil
+	}
+
+	bus := store.NewCommandBus(store.AppState{},
+		store.WithEventLog(s),
+		store.WithSnapshotStore(s),
+	)
+	return bus, s
 }
 
 func Run(
@@ -461,7 +495,10 @@ func Run(
 		}),
 		tea.WithContext(ctx),
 	)
-	_, err := program.Run()
+	finalModel, err := program.Run()
+	if m, ok := finalModel.(Model); ok && m.persistCloser != nil {
+		m.persistCloser.Close()
+	}
 	return err
 }
 

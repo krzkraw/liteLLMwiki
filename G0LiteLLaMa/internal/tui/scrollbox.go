@@ -101,7 +101,7 @@ func (s *ScrollBox) VisibleLines() []string {
 	return s.Lines[start:end]
 }
 
-const scrollBarWidth = 1
+const scrollBarWidth = 2
 
 // View renders the visible lines with a right-side scrollbar.
 // The rendered width is width+1 (content + scrollbar column).

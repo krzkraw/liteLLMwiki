@@ -1815,16 +1815,17 @@ func (m *Model) handleChatScrollbarClick(x, y int) bool {
 	if m.activeTabID() != "chat" {
 		return false
 	}
-	// Scrollbar is at column panelBodyWidth(m.width) (the 1-char bar at the
-	// right edge of the messages box content area).  Determine the row range
-	// of the messages box inside the full view.
-	m.chatScrollBox.ViewLines = m.chatScrollViewLines()
-	m.chatScrollBox.SetLines(m.chatMessageLines())
-
-	scrollCol := panelBodyWidth(m.width)
-	if x < scrollCol || x > scrollCol+1 {
+	// Scrollbar is the rightmost 2 columns of the box inner content area.
+	// In the full view (padded to m.width), scrollbar occupies:
+	//   col = m.width - 6  and  col = m.width - 5
+	scrollStart := m.width - 6
+	scrollEnd := m.width - 5
+	if x < scrollStart || x > scrollEnd {
 		return false
 	}
+
+	m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+	m.chatScrollBox.SetLines(m.chatMessageLines())
 
 	// Compute the starting row of the messages box in the full view.
 	var startRow int
@@ -1839,25 +1840,30 @@ func (m *Model) handleChatScrollbarClick(x, y int) bool {
 		return false
 	}
 
-	// Arrow clicks: top row ▲ scrolls up, bottom row ▼ scrolls down.
+	// Arrow clicks: top row ▲ scrolls up 1, bottom row ▼ scrolls down 1.
 	if boxRow == 0 {
-		m.chatScrollBox.ScrollUp(m.chatScrollBox.ViewLines / 2)
+		m.chatScrollBox.ScrollUp(1)
 		return true
 	}
 	if boxRow == m.chatScrollBox.ViewLines-1 {
-		m.chatScrollBox.ScrollDown(m.chatScrollBox.ViewLines / 2)
+		m.chatScrollBox.ScrollDown(1)
 		return true
 	}
 
-	// Track click: map click row to scroll offset proportionally.
+	// Track click: jump to exact proportional position.
 	total := len(m.chatScrollBox.Lines)
 	if total <= m.chatScrollBox.ViewLines {
-		return true // no scrolling needed
+		return true
 	}
 	maxOff := total - m.chatScrollBox.ViewLines
-	m.chatScrollBox.Pinned = false
-	m.chatScrollBox.Offset = boxRow * maxOff / (m.chatScrollBox.ViewLines - 1)
-	m.chatScrollBox.ClampOffset()
+	// Track area excludes the first and last row (arrows).
+	trackRows := m.chatScrollBox.ViewLines - 2
+	trackRow := boxRow - 1
+	if trackRows > 0 {
+		m.chatScrollBox.Pinned = false
+		m.chatScrollBox.Offset = trackRow * maxOff / trackRows
+		m.chatScrollBox.ClampOffset()
+	}
 	return true
 }
 
@@ -1971,12 +1977,22 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Quit
-	case tea.KeyPgUp, tea.KeyUp:
+	case tea.KeyPgUp:
+		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+		m.chatScrollBox.SetLines(m.chatMessageLines())
+		m.chatScrollBox.ScrollUp(m.chatScrollBox.ViewLines)
+		return m, nil
+	case tea.KeyUp:
 		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
 		m.chatScrollBox.SetLines(m.chatMessageLines())
 		m.chatScrollBox.ScrollUp(1)
 		return m, nil
-	case tea.KeyPgDown, tea.KeyDown:
+	case tea.KeyPgDown:
+		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+		m.chatScrollBox.SetLines(m.chatMessageLines())
+		m.chatScrollBox.ScrollDown(m.chatScrollBox.ViewLines)
+		return m, nil
+	case tea.KeyDown:
 		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
 		m.chatScrollBox.SetLines(m.chatMessageLines())
 		m.chatScrollBox.ScrollDown(1)
@@ -4820,7 +4836,7 @@ func (m Model) chatMessageLines() []string {
 		return nil
 	}
 
-	fullWidth := panelBodyWidth(m.width) - 1 // content before scrollbar column
+	fullWidth := panelBodyWidth(m.width) - 1 // content before scrollbar
 	lines := make([]string, 0, len(m.chatMessages))
 	for _, message := range m.chatMessages {
 		for _, line := range strings.Split(message.content, "\n") {
@@ -4897,7 +4913,6 @@ func (m Model) chatSettingsLines() []string {
 func (m Model) chatMessagesBoxView(rows int) string {
 	box := m.chatScrollBox
 	box.ViewLines = maxInt(1, rows)
-	box.ContentBg = "24" // match renderBox background
 	box.SetLines(m.chatMessageLines())
 	if len(box.Lines) == 0 {
 		empty := []string{mutedStyle.Render("No messages yet.")}
@@ -4906,14 +4921,29 @@ func (m Model) chatMessagesBoxView(rows int) string {
 		}
 		return renderBox(empty, "45", m.width)
 	}
-	// renderBox uses Width(panelInnerWidth(m.width)).  The inner content
-	// area (after borders + padding) is panelBodyWidth(m.width) wide.
-	// Scrollbox needs 1 column for the scrollbar, so content fits when
-	// we pass panelBodyWidth(m.width)-1 to View().
-	innerW := panelBodyWidth(m.width) // m.width - 8
-	scrollContent := box.View(innerW - 1)
+	// Build a box where the scrollbar sits flush against the right border.
+	// Line: │ <content> \x1b[48;5;24m<scrollbar2>\x1b[0m│
+	// (left border + 1 space + content + 2-char scrollbar + right border)
+	boxW := panelInnerWidth(m.width) // total box width incl borders
+	contentW := panelBodyWidth(m.width) - 1 // text before scrollbar = m.width - 9
+	scrollContent := box.View(contentW)
 	lines := strings.Split(scrollContent, "\n")
-	return renderBox(lines, "45", m.width)
+
+	borderStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("45")).Width(boxW)
+
+	// Top border: ╭──────────╮ (top + left + right)
+	topBorder := borderStyle.Border(lipgloss.NormalBorder(), true, true, false, true).Render("")
+	// Bottom border: ╰──────────╯ (left + bottom + right)
+	bottomBorder := borderStyle.Border(lipgloss.NormalBorder(), false, true, true, true).Render("")
+
+	var body strings.Builder
+	for _, line := range lines {
+		body.WriteString("│ ")
+		body.WriteString(line)
+		body.WriteString("│\n")
+	}
+
+	return topBorder + "\n" + strings.TrimRight(body.String(), "\n") + "\n" + bottomBorder
 }
 
 func (m Model) chatInputBoxView() string {

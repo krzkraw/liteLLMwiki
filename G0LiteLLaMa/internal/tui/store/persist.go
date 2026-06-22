@@ -5,11 +5,11 @@ import "encoding/json"
 // StoredEvent pairs an action with the revision at which it was committed,
 // for replay and persistence.
 type StoredEvent struct {
-	Revision   StateRevision
-	ActionID   ActionID
-	Type       ActionType
-	Payload    json.RawMessage
-	CreatedAt  int64 // unix nanos
+	Revision  StateRevision  `json:"revision"`
+	ActionID  ActionID       `json:"actionId"`
+	Type      ActionType     `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt int64          `json:"createdAt"`
 }
 
 // EventLog records actions for persistence and enables replay from a given

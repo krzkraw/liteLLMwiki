@@ -16,6 +16,7 @@ import (
 	"g0litellama/internal/catalog"
 	"g0litellama/internal/platform"
 	"g0litellama/internal/proxy"
+	"g0litellama/internal/tui/store"
 )
 
 const (
@@ -246,6 +247,7 @@ type Options struct {
 	BackendReporter   BackendReporter
 	MultimodalRunner  MultimodalRunner
 	ModelCatalog      *catalog.Catalog
+	CommandBus        *store.CommandBus
 }
 
 type Server struct {
@@ -259,6 +261,7 @@ type Server struct {
 	backendReporter   BackendReporter
 	multimodalRunner  MultimodalRunner
 	modelCatalog      *catalog.Catalog
+	commandBus        *store.CommandBus
 }
 
 func New(options Options) *Server {
@@ -295,6 +298,7 @@ func New(options Options) *Server {
 		backendReporter:   options.BackendReporter,
 		multimodalRunner:  options.MultimodalRunner,
 		modelCatalog:      options.ModelCatalog,
+		commandBus:        options.CommandBus,
 	}
 }
 
@@ -307,6 +311,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/g0litellama/v1/models", s.handleModels)
 	mux.HandleFunc("/g0litellama/v1/runners/", s.handleRunnerAction)
 	mux.HandleFunc("/g0litellama/v1/runners", s.handleRunners)
+	mux.HandleFunc("/g0litellama/v1/events/stream", s.handleEventStream)
+	mux.HandleFunc("/g0litellama/v1/events", s.handleGetEvents)
+	mux.HandleFunc("/g0litellama/v1/actions", s.handleActionDispatch)
+	mux.HandleFunc("/g0litellama/v1/state/chat/sessions/{id}", s.handleGetChatSession)
+	mux.HandleFunc("/g0litellama/v1/state/runners", s.handleGetStateRunners)
+	mux.HandleFunc("/g0litellama/v1/state/models", s.handleGetStateModels)
+	mux.HandleFunc("/g0litellama/v1/state", s.handleGetState)
+	mux.HandleFunc("/g0litellama/v1/tasks/{id}", s.handleGetTask)
+	mux.HandleFunc("/g0litellama/v1/settings", s.handleGetSettings)
 	mux.HandleFunc("/v1/", s.handleProxy)
 	mux.HandleFunc("/v1", s.handleProxy)
 

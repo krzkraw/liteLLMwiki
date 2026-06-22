@@ -1,7 +1,7 @@
 ---
 id: openai-proxy-observation
 title: OpenAI proxy observation into action store
-status: inbox
+status: active
 agent: codex
 verification:
   - cd G0LiteLLaMa && go test ./...

@@ -32,19 +32,19 @@ const (
 
 // ActionEnvelope wraps every action with routing, tracing, and timing metadata.
 type ActionEnvelope struct {
-	ID            ActionID
-	Type          ActionType
-	Source        ActionSource
-	CorrelationID ActionID
-	ParentID      ActionID
-	Time          time.Time
-	Payload       json.RawMessage
+	ID            ActionID        `json:"id"`
+	Type          ActionType      `json:"type"`
+	Source        ActionSource    `json:"source"`
+	CorrelationID ActionID        `json:"correlationId,omitempty"`
+	ParentID      ActionID        `json:"parentId,omitempty"`
+	Time          time.Time       `json:"time"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 // ViewportState holds the terminal dimensions.
 type ViewportState struct {
-	Width  int
-	Height int
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // RunnersState holds runner snapshots. Expanded in a later slice.
@@ -67,19 +67,19 @@ type TaskState struct{}
 
 // UIState holds user-interface-local state.
 type UIState struct {
-	ActiveTab string
+	ActiveTab string `json:"activeTab"`
 }
 
 // AppState is the root application state. All substates are defined upfront so
 // the state shape is stable across implementation slices.
 type AppState struct {
-	Revision StateRevision
-	Viewport ViewportState
-	Runners  RunnersState
-	Models   ModelsState
-	Runtime  RuntimeState
-	Chat     ChatState
-	Wizard   WizardState
-	Tasks    TaskState
-	UI       UIState
+	Revision StateRevision `json:"revision"`
+	Viewport ViewportState `json:"viewport,omitempty"`
+	Runners  RunnersState  `json:"runners,omitempty"`
+	Models   ModelsState   `json:"models,omitempty"`
+	Runtime  RuntimeState  `json:"runtime,omitempty"`
+	Chat     ChatState     `json:"chat,omitempty"`
+	Wizard   WizardState   `json:"wizard,omitempty"`
+	Tasks    TaskState     `json:"tasks,omitempty"`
+	UI       UIState       `json:"ui,omitempty"`
 }

@@ -134,6 +134,31 @@ func (b *CommandBus) Subscribe() <-chan StoredAction {
 	return ch
 }
 
+// Unsubscribe removes a previously subscribed channel so it no longer receives
+// committed actions. It is safe to call multiple times with the same channel.
+func (b *CommandBus) Unsubscribe(ch <-chan StoredAction) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i, sub := range b.subs {
+		if sub == ch {
+			b.subs = append(b.subs[:i], b.subs[i+1:]...)
+			return
+		}
+	}
+}
+
+// EventsSince returns all stored events with a revision greater than after.
+// When the CommandBus has no EventLog backend it returns an empty slice.
+func (b *CommandBus) EventsSince(after StateRevision) ([]StoredEvent, error) {
+	b.mu.RLock()
+	el := b.eventLog
+	b.mu.RUnlock()
+	if el == nil {
+		return nil, nil
+	}
+	return el.Since(after)
+}
+
 // Replay rebuilds AppState by running a set of actions through RootReduce
 // starting from a zero state. It returns the final state and the number of
 // actions that were applied.

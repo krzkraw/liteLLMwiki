@@ -61,6 +61,7 @@ type ModelOptions struct {
 	LlamaRuntimeRoot  string
 	BackendConfigPath string
 	DBPath            string // SQLite database path; empty means use default
+	CommandBus        *store.CommandBus // if nil, created from DBPath
 }
 
 type tickMsg time.Time
@@ -416,7 +417,11 @@ func NewModel(options ModelOptions) Model {
 	if chatEndpoint == "" {
 		chatEndpoint = defaultChatEndpoint
 	}
-	bus, closer := newCommandBusWithSQLite(options)
+	bus := options.CommandBus
+	var closer io.Closer
+	if bus == nil {
+		bus, closer = newCommandBusWithSQLite(options)
+	}
 	model := Model{
 		runtimeController:     options.RuntimeController,
 		runnerController:      options.RunnerController,
@@ -483,7 +488,12 @@ func Run(
 	runnerController server.RunnerController,
 	logs *server.LogBroadcaster,
 	modelCatalog *catalog.Catalog,
+	opts ...RunOption,
 ) error {
+	ro := runOptions{}
+	for _, o := range opts {
+		o(&ro)
+	}
 	program := tea.NewProgram(
 		NewModel(ModelOptions{
 			RuntimeController: runtimeController,
@@ -492,6 +502,7 @@ func Run(
 			Catalog:           modelCatalog,
 			Context:           ctx,
 			ManagedScreen:     true,
+			CommandBus:        ro.commandBus,
 		}),
 		tea.WithContext(ctx),
 	)
@@ -500,6 +511,21 @@ func Run(
 		m.persistCloser.Close()
 	}
 	return err
+}
+
+// RunOption configures optional Run behaviour.
+type RunOption func(*runOptions)
+
+type runOptions struct {
+	commandBus *store.CommandBus
+}
+
+// WithCommandBus passes a shared CommandBus to the TUI. When set, the TUI
+// skips its own CommandBus creation and does not own the close lifecycle.
+func WithCommandBus(bus *store.CommandBus) RunOption {
+	return func(o *runOptions) {
+		o.commandBus = bus
+	}
 }
 
 func (m Model) Init() tea.Cmd {

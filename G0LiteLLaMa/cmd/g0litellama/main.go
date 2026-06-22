@@ -23,6 +23,8 @@ import (
 	"g0litellama/internal/server"
 	"g0litellama/internal/supervisor"
 	"g0litellama/internal/tui"
+	"g0litellama/internal/tui/store"
+	"g0litellama/internal/tui/store/sqlite"
 )
 
 type launchMode string
@@ -99,6 +101,13 @@ func main() {
 	runnerController := supervisorRunnerController{
 		supervisor: runtimeSupervisor,
 	}
+
+	// Shared command bus with SQLite persistence.
+	commandBus, commandBusCloser := newSharedCommandBus()
+	if commandBusCloser != nil {
+		defer commandBusCloser.Close()
+	}
+
 	handler := server.New(server.Options{
 		Proxy:             upstreamProxy,
 		RuntimeController: runtimeController,
@@ -106,6 +115,7 @@ func main() {
 		Logs:              logs,
 		StatusEvents:      statusEvents,
 		ModelCatalog:      modelCatalog,
+		CommandBus:        commandBus,
 		BackendReporter: func(ctx context.Context) ([]server.BackendStatus, error) {
 			status := runtimeSupervisor.LegacyStatus()
 			return reportBackends(ctx, status.Upstream, status.ModelID)
@@ -141,7 +151,7 @@ func main() {
 	if mode == G0LiteLLaMaModeTUI {
 		tuiErr := make(chan error, 1)
 		go func() {
-			tuiErr <- tui.Run(ctx, runtimeController, runnerController, logs, modelCatalog)
+			tuiErr <- tui.Run(ctx, runtimeController, runnerController, logs, modelCatalog, tui.WithCommandBus(commandBus))
 		}()
 		select {
 		case <-ctx.Done():
@@ -188,6 +198,27 @@ func terminalLogTees(mode launchMode) (io.Writer, io.Writer) {
 		return os.Stdout, os.Stderr
 	}
 	return nil, nil
+}
+
+// newSharedCommandBus constructs the shared CommandBus with SQLite persistence
+// for use by both the HTTP server and the TUI. Returns nil closer if
+// persistence cannot be opened.
+func newSharedCommandBus() (*store.CommandBus, io.Closer) {
+	dbPath, err := sqlite.DBPath()
+	if err != nil {
+		log.Printf("persistence: resolve db path: %v — running without persistence", err)
+		return store.NewCommandBus(store.AppState{}), nil
+	}
+	s, err := sqlite.New(dbPath)
+	if err != nil {
+		log.Printf("persistence: open db %s: %v — running without persistence", dbPath, err)
+		return store.NewCommandBus(store.AppState{}), nil
+	}
+	bus := store.NewCommandBus(store.AppState{},
+		store.WithEventLog(s),
+		store.WithSnapshotStore(s),
+	)
+	return bus, s
 }
 
 func shouldStartDefaultRunner(mode launchMode) bool {

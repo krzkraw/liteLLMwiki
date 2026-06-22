@@ -1,7 +1,7 @@
 ---
 id: native-action-api-and-projections
 title: Native action API and state projections
-status: inbox
+status: archived
 agent: codex
 verification:
   - cd G0LiteLLaMa && go test ./...

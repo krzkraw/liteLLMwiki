@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"g0litellama/internal/tui/shapes"
 )
 
@@ -112,6 +113,7 @@ func (s *ScrollBox) View(width int) string {
 	scrollCol := lipgloss.NewStyle().Width(scrollBarWidth).Align(lipgloss.Left)
 	trackStyle := scrollCol.Background(lipgloss.Color("236"))
 	thumbStyle := scrollCol.Background(lipgloss.Color("243"))
+	arrowStyle := scrollCol.Background(lipgloss.Color("236")).Foreground(lipgloss.Color("243"))
 
 	total := len(s.Lines)
 	if total < s.ViewLines {
@@ -121,21 +123,28 @@ func (s *ScrollBox) View(width int) string {
 	thumbHeight := thumbSize(s.ViewLines, total)
 	thumbStart := thumbPos(s.Offset, s.ViewLines, total, thumbHeight)
 
-	contentStyle := lipgloss.NewStyle().Width(width)
-
 	var b strings.Builder
 	for i := 0; i < s.ViewLines; i++ {
-		// Content cell
+		// Content cell — pad to width while preserving existing ANSI styling.
 		cell := ""
 		if i < len(visible) {
 			cell = visible[i]
 		}
-		b.WriteString(contentStyle.Render(cell))
+		cw := ansi.StringWidth(cell)
+		if cw < width {
+			cell += strings.Repeat(" ", width-cw)
+		}
+		b.WriteString(cell)
 
 		// Scrollbar cell
-		if i >= thumbStart && i < thumbStart+thumbHeight {
+		switch {
+		case i == 0:
+			b.WriteString(arrowStyle.Render("▲"))
+		case i == s.ViewLines-1:
+			b.WriteString(arrowStyle.Render("▼"))
+		case i >= thumbStart && i < thumbStart+thumbHeight:
 			b.WriteString(thumbStyle.Render(" "))
-		} else {
+		default:
 			b.WriteString(trackStyle.Render(" "))
 		}
 

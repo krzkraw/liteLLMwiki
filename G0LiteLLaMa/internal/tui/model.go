@@ -1793,6 +1793,10 @@ func (m Model) updateWizardCommandEditMouse(msg tea.MouseClickMsg) (tea.Model, t
 }
 
 func (m Model) updateChatMouse(x int, y int) (tea.Model, tea.Cmd) {
+	// Check scrollbar click first.
+	if m.handleChatScrollbarClick(x, y) {
+		return m, nil
+	}
 	if hit, ok := m.buttonHitAt(x, y); ok {
 		next, cmd, _ := m.handleButtonHit(hit)
 		return next, cmd
@@ -1803,6 +1807,58 @@ func (m Model) updateChatMouse(x int, y int) (tea.Model, tea.Cmd) {
 	m.chatCustomField = ""
 	m.chatCustomValue = ""
 	return m, nil
+}
+
+// handleChatScrollbarClick computes the scrollbar position and scrolls the
+// chat ScrollBox to the row corresponding to the click position.
+func (m *Model) handleChatScrollbarClick(x, y int) bool {
+	if m.activeTabID() != "chat" {
+		return false
+	}
+	// Scrollbar is at column panelBodyWidth(m.width) (the 1-char bar at the
+	// right edge of the messages box content area).  Determine the row range
+	// of the messages box inside the full view.
+	m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+	m.chatScrollBox.SetLines(m.chatMessageLines())
+
+	scrollCol := panelBodyWidth(m.width)
+	if x < scrollCol || x > scrollCol+1 {
+		return false
+	}
+
+	// Compute the starting row of the messages box in the full view.
+	var startRow int
+	if m.managedScreen {
+		startRow = viewLineCount(m.managedTopView()) + 1
+	} else {
+		startRow = viewLineCount(m.headerView()) + viewLineCount(m.tabBar()) + 2
+	}
+
+	boxRow := y - startRow
+	if boxRow < 0 || boxRow >= m.chatScrollBox.ViewLines {
+		return false
+	}
+
+	// Arrow clicks: top row ▲ scrolls up, bottom row ▼ scrolls down.
+	if boxRow == 0 {
+		m.chatScrollBox.ScrollUp(m.chatScrollBox.ViewLines / 2)
+		return true
+	}
+	if boxRow == m.chatScrollBox.ViewLines-1 {
+		m.chatScrollBox.ScrollDown(m.chatScrollBox.ViewLines / 2)
+		return true
+	}
+
+	// Track click: map click row to scroll offset proportionally.
+	total := len(m.chatScrollBox.Lines)
+	if total <= m.chatScrollBox.ViewLines {
+		return true // no scrolling needed
+	}
+	maxOff := total - m.chatScrollBox.ViewLines
+	m.chatScrollBox.Pinned = false
+	m.chatScrollBox.Offset = boxRow * maxOff / (m.chatScrollBox.ViewLines - 1)
+	m.chatScrollBox.ClampOffset()
+	return true
 }
 
 func (m *Model) saveOptionModal() {

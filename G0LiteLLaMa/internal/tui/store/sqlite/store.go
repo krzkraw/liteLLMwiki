@@ -279,3 +279,43 @@ func nullString(s string) *string {
 	}
 	return &s
 }
+
+// LoadAndReplay opens the database at dbPath, loads the latest snapshot,
+// replays all subsequent events through store.RootReduce, and returns the
+// resulting AppState. Returns a zero AppState when the DB is empty or cannot
+// be read.
+func LoadAndReplay(dbPath string) (store.AppState, error) {
+	s, err := New(dbPath)
+	if err != nil {
+		return store.AppState{}, err
+	}
+	defer s.Close()
+	return ReplayFromStore(s)
+}
+
+// ReplayFromStore loads the latest snapshot from an already-open Store,
+// replays all subsequent events through store.RootReduce, and returns the
+// resulting AppState.
+func ReplayFromStore(s *Store) (store.AppState, error) {
+	snapshotState, snapshotRev, err := s.LoadLatest()
+	if err != nil {
+		snapshotState = store.AppState{}
+		snapshotRev = 0
+	}
+
+	events, err := s.Since(snapshotRev)
+	if err != nil {
+		return store.AppState{}, fmt.Errorf("load events after rev %d: %w", snapshotRev, err)
+	}
+
+	replayState := snapshotState
+	for _, e := range events {
+		action := store.ActionEnvelope{
+			ID:      e.ActionID,
+			Type:    e.Type,
+			Payload: e.Payload,
+		}
+		replayState, _ = store.RootReduce(replayState, action)
+	}
+	return replayState, nil
+}

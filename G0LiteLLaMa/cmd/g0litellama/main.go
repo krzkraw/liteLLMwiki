@@ -214,7 +214,15 @@ func newSharedCommandBus() (*store.CommandBus, io.Closer) {
 		log.Printf("persistence: open db %s: %v — running without persistence", dbPath, err)
 		return store.NewCommandBus(store.AppState{}), nil
 	}
-	bus := store.NewCommandBus(store.AppState{},
+
+	// Load persisted state from SQLite (latest snapshot + event replay).
+	initialState, err := sqlite.ReplayFromStore(s)
+	if err != nil {
+		log.Printf("persistence: replay: %v — starting fresh", err)
+		initialState = store.AppState{}
+	}
+
+	bus := store.NewCommandBus(initialState,
 		store.WithEventLog(s),
 		store.WithSnapshotStore(s),
 	)

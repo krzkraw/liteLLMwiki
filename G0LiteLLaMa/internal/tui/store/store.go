@@ -114,8 +114,13 @@ type ChatState struct {
 	ActiveSessionID string                `json:"activeSessionId,omitempty"`
 }
 
-// WizardState holds the launch wizard state. Expanded in a later slice.
-type WizardState struct{}
+// WizardState holds launch wizard selections that should survive process restart.
+type WizardState struct {
+	Runtime         string            `json:"runtime,omitempty"`
+	Backend         string            `json:"backend,omitempty"`
+	Role            string            `json:"role,omitempty"`
+	OptionOverrides map[string]string `json:"optionOverrides,omitempty"`
+}
 
 // TaskState holds active task tracking. Expanded in a later slice.
 type TaskState struct{}

@@ -440,10 +440,10 @@ func NewModel(options ModelOptions) Model {
 		store:                 bus,
 		persistCloser:         closer,
 		managedScreen:         options.ManagedScreen,
-		wizardRuntime:         "litert",
-		wizardBackend:         "cpu",
-		wizardRole:            "main",
-		wizardOptionOverrides: map[string]string{},
+		wizardRuntime:         strOrDefault(bus.State().Wizard.Runtime, "litert"),
+		wizardBackend:         strOrDefault(bus.State().Wizard.Backend, "cpu"),
+		wizardRole:            strOrDefault(bus.State().Wizard.Role, "main"),
+		wizardOptionOverrides: mapOrDefault(bus.State().Wizard.OptionOverrides),
 		wizardRemovedDefaults: map[string]bool{},
 		llamaRuntimeRoot:      options.LlamaRuntimeRoot,
 		backendConfigPath:     resolveBackendConfigPath(options.BackendConfigPath),
@@ -475,7 +475,14 @@ func newCommandBusWithSQLite(options ModelOptions) (*store.CommandBus, io.Closer
 		return store.NewCommandBus(store.AppState{}), nil
 	}
 
-	bus := store.NewCommandBus(store.AppState{},
+	// Load persisted state from SQLite (latest snapshot + event replay).
+	initialState, err := sqlite.ReplayFromStore(s)
+	if err != nil {
+		log.Printf("persistence: replay: %v — starting fresh", err)
+		initialState = store.AppState{}
+	}
+
+	bus := store.NewCommandBus(initialState,
 		store.WithEventLog(s),
 		store.WithSnapshotStore(s),
 	)
@@ -938,11 +945,13 @@ func (m Model) handleButtonHit(hit buttonHit) (Model, tea.Cmd, bool) {
 		m.wizardModelSelection = 0
 		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
+		m.dispatchWizardState()
 		return m, nil, true
 	case "wizard-backend":
 		m.wizardBackend = hit.payload
 		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
+		m.dispatchWizardState()
 		return m, nil, true
 	case "wizard-role":
 		m.setWizardRole(hit.payload)
@@ -1246,6 +1255,7 @@ func (m Model) updateWizardMouse(x int, y int) (tea.Model, tea.Cmd) {
 			return m, m.wizardCreateCmd()
 		}
 	}
+	m.dispatchWizardState()
 	return m, nil
 }
 
@@ -1888,10 +1898,12 @@ func (m *Model) saveOptionModalValue(value string) {
 	if m.optionModal.option.Kind == "bool" && value == "off" {
 		delete(m.wizardOptionOverrides, m.optionModal.option.ID)
 		m.optionModal = nil
+		m.dispatchWizardState()
 		return
 	}
 	m.wizardOptionOverrides[m.optionModal.option.ID] = value
 	m.optionModal = nil
+	m.dispatchWizardState()
 }
 
 func (m *Model) saveWizardCommandEdit() {
@@ -6168,6 +6180,7 @@ func (m *Model) toggleWizardRuntime() {
 	m.wizardModelSelection = 0
 	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
+	m.dispatchWizardState()
 }
 
 func (m *Model) cycleWizardVariant() {
@@ -6186,6 +6199,7 @@ func (m *Model) cycleWizardVariant() {
 		m.wizardBackend = options[(current+1)%len(options)]
 		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
+		m.dispatchWizardState()
 		return
 	}
 
@@ -6203,6 +6217,24 @@ func (m *Model) cycleWizardVariant() {
 	m.wizardBackend = options[(current+1)%len(options)]
 	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
+	m.dispatchWizardState()
+}
+
+func (m *Model) dispatchWizardState() {
+	if m.store == nil {
+		return
+	}
+	ctx := context.Background()
+	m.store.Dispatch(ctx, store.ActionEnvelope{
+		Type:    store.ActionTypeWizard,
+		Source:  store.SourceTUI,
+		Payload: store.MustPayload(store.WizardStatePayload{
+			Runtime:         m.wizardRuntime,
+			Backend:         m.wizardBackend,
+			Role:            m.wizardRole,
+			OptionOverrides: m.wizardOptionOverrides,
+		}),
+	})
 }
 
 func (m *Model) setWizardRole(role string) {
@@ -6210,6 +6242,7 @@ func (m *Model) setWizardRole(role string) {
 	m.wizardModelSelection = 0
 	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
+	m.dispatchWizardState()
 }
 
 func (m *Model) cycleWizardModel(delta int) {
@@ -6234,6 +6267,7 @@ func (m *Model) setWizardVariantFromMouse(x int) {
 		m.wizardBackend = options[index]
 		m.wizardOptionPage = 0
 		m.normalizeWizardSelection()
+		m.dispatchWizardState()
 		return
 	}
 	options := m.litertBackendOptions()
@@ -6244,6 +6278,7 @@ func (m *Model) setWizardVariantFromMouse(x int) {
 	m.wizardBackend = options[index]
 	m.wizardOptionPage = 0
 	m.normalizeWizardSelection()
+	m.dispatchWizardState()
 }
 
 func (m *Model) setWizardModelSelection(index int) {
@@ -7248,6 +7283,20 @@ func maxInt(left int, right int) int {
 		return left
 	}
 	return right
+}
+
+func strOrDefault(val, def string) string {
+	if val == "" {
+		return def
+	}
+	return val
+}
+
+func mapOrDefault(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
 
 func minInt(left int, right int) int {

@@ -7,12 +7,21 @@ import (
 
 // Action types for the UI domain.
 const (
-	ActionTypeSelectTab ActionType = "ui:select-tab"
+	ActionTypeSelectTab  ActionType = "ui:select-tab"
+	ActionTypeWizard     ActionType = "wizard:state"
 )
 
 // SelectTabPayload is the payload for a tab selection action.
 type SelectTabPayload struct {
 	TabID string `json:"tab_id"`
+}
+
+// WizardStatePayload carries the full wizard configuration snapshot.
+type WizardStatePayload struct {
+	Runtime         string            `json:"runtime,omitempty"`
+	Backend         string            `json:"backend,omitempty"`
+	Role            string            `json:"role,omitempty"`
+	OptionOverrides map[string]string `json:"optionOverrides,omitempty"`
 }
 
 // EffectSpec represents scheduled side-effect work returned by a reducer.
@@ -41,6 +50,8 @@ func RootReduce(state AppState, action ActionEnvelope) (AppState, []EffectSpec) 
 		return ReduceProxy(state, action)
 	case ActionTypeProxyResponseError:
 		return ReduceProxy(state, action)
+	case ActionTypeWizard:
+		return ReduceWizard(state, action)
 	default:
 		return state, nil
 	}
@@ -176,8 +187,34 @@ func isChatPath(path string) bool {
 		strings.HasPrefix(path, "/v1/chat/completions/")
 }
 
-// ReduceWizard is a pass-through reducer for the Wizard domain.
-func ReduceWizard(state AppState, _ ActionEnvelope) (AppState, []EffectSpec) {
+// ReduceWizard handles wizard:state actions to persist configuration across
+// process restarts.
+func ReduceWizard(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
+	switch action.Type {
+	case ActionTypeWizard:
+		return reduceWizardState(state, action)
+	default:
+		return state, nil
+	}
+}
+
+func reduceWizardState(state AppState, action ActionEnvelope) (AppState, []EffectSpec) {
+	var p WizardStatePayload
+	if err := json.Unmarshal(action.Payload, &p); err != nil {
+		return state, nil
+	}
+	if p.Runtime != "" {
+		state.Wizard.Runtime = p.Runtime
+	}
+	if p.Backend != "" {
+		state.Wizard.Backend = p.Backend
+	}
+	if p.Role != "" {
+		state.Wizard.Role = p.Role
+	}
+	if p.OptionOverrides != nil {
+		state.Wizard.OptionOverrides = p.OptionOverrides
+	}
 	return state, nil
 }
 

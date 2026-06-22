@@ -128,12 +128,9 @@ func (s *ScrollBox) View(width int) string {
 	thumbStart := thumbPos(s.Offset, s.ViewLines, total, thumbHeight)
 
 	var b strings.Builder
-	bgStyle := lipgloss.NewStyle()
-	if s.ContentBg != "" {
-		bgStyle = bgStyle.Background(lipgloss.Color(s.ContentBg))
-	}
 	for i := 0; i < s.ViewLines; i++ {
-		// Content cell — pad to width, then layer on optional background.
+		// Content cell — lines are already padded to full width with proper
+		// background by the caller.  Write them as-is.
 		cell := ""
 		if i < len(visible) {
 			cell = visible[i]
@@ -141,9 +138,6 @@ func (s *ScrollBox) View(width int) string {
 		cw := ansi.StringWidth(cell)
 		if cw < width {
 			cell += strings.Repeat(" ", width-cw)
-		}
-		if s.ContentBg != "" {
-			cell = bgStyle.Render(cell)
 		}
 		b.WriteString(cell)
 

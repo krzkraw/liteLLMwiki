@@ -4820,6 +4820,7 @@ func (m Model) chatMessageLines() []string {
 		return nil
 	}
 
+	fullWidth := panelBodyWidth(m.width) - 1 // content before scrollbar column
 	lines := make([]string, 0, len(m.chatMessages))
 	for _, message := range m.chatMessages {
 		for _, line := range strings.Split(message.content, "\n") {
@@ -4827,11 +4828,27 @@ func (m Model) chatMessageLines() []string {
 			switch message.role {
 			case "user":
 				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("53")).Padding(0, 1).Render(line)
-				rendered = strings.Repeat(" ", maxInt(0, panelBodyWidth(m.width)-lipgloss.Width(rendered))) + rendered
+				// Right-align user messages: prepend styled spaces.
+				cw := lipgloss.Width(rendered)
+				if cw < fullWidth {
+					pad := lipgloss.NewStyle().Background(lipgloss.Color("53")).Render(strings.Repeat(" ", fullWidth-cw))
+					rendered = pad + rendered
+				}
 			case "assistant":
 				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("219")).Background(lipgloss.Color("24")).Padding(0, 1).Render(line)
+				// Fill remaining width with styled spaces matching bg.
+				cw := lipgloss.Width(rendered)
+				if cw < fullWidth {
+					pad := lipgloss.NewStyle().Background(lipgloss.Color("24")).Render(strings.Repeat(" ", fullWidth-cw))
+					rendered += pad
+				}
 			case "error":
 				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("160")).Padding(0, 1).Render(line)
+				cw := lipgloss.Width(rendered)
+				if cw < fullWidth {
+					pad := lipgloss.NewStyle().Background(lipgloss.Color("160")).Render(strings.Repeat(" ", fullWidth-cw))
+					rendered += pad
+				}
 			default:
 				rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("219")).Render(line)
 			}

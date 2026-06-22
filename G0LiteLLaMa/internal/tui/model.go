@@ -25,6 +25,7 @@ import (
 	"g0litellama/internal/catalog"
 	"g0litellama/internal/runtimeconfig"
 	"g0litellama/internal/server"
+	"g0litellama/internal/tui/shapes"
 	"g0litellama/internal/tui/store"
 	"g0litellama/internal/tui/store/sqlite"
 )
@@ -140,10 +141,9 @@ type runtimeEdit struct {
 }
 
 type optionModal struct {
-	option wizardCLIOption
-	input  textinput.Model
-	row    int
-	column int
+	option  wizardCLIOption
+	input   textinput.Model
+	popover Popover
 }
 
 type wizardCommandEdit struct {
@@ -230,7 +230,7 @@ type Model struct {
 	chatTopP             string
 	chatMaxTokens        string
 	chatStream           bool
-	chatTranscriptScroll int
+	chatScrollBox ScrollBox
 	managedScreen        bool
 	store                *store.CommandBus
 	persistCloser        io.Closer
@@ -624,13 +624,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if m.activeTabID() == "chat" {
+		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+		m.chatScrollBox.SetLines(m.chatMessageLines())
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			m.chatTranscriptScroll++
+			m.chatScrollBox.ScrollUp(1)
 		case tea.MouseWheelDown:
-			m.chatTranscriptScroll--
+			m.chatScrollBox.ScrollDown(1)
 		}
-		m.clampChatTranscriptScroll()
 		return m, nil
 	}
 	return m, nil
@@ -1744,10 +1745,21 @@ func (m Model) updateOptionModalMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
-	if hit, ok := m.buttonHitAt(msg.X, msg.Y); ok {
-		next, cmd, _ := m.handleButtonHit(hit)
-		return next, cmd
+	p := shapes.Point{Row: msg.Y, Col: msg.X}
+	if m.optionModal.popover.Contains(p) {
+		// Close button hit.
+		if m.optionModal.popover.CloseHitTarget().Rect.Contains(p) {
+			m.optionModal = nil
+			return m, nil
+		}
+		// Check for save/reset/sample button hits (text-search for now).
+		if hit, ok := m.buttonHitAt(msg.X, msg.Y); ok {
+			next, cmd, _ := m.handleButtonHit(hit)
+			return next, cmd
+		}
+		return m, nil
 	}
+	// Outside click closes.
 	m.optionModal = nil
 	return m, nil
 }
@@ -1904,12 +1916,14 @@ func (m Model) updateChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case tea.KeyPgUp, tea.KeyUp:
-		m.chatTranscriptScroll++
-		m.clampChatTranscriptScroll()
+		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+		m.chatScrollBox.SetLines(m.chatMessageLines())
+		m.chatScrollBox.ScrollUp(1)
 		return m, nil
 	case tea.KeyPgDown, tea.KeyDown:
-		m.chatTranscriptScroll--
-		m.clampChatTranscriptScroll()
+		m.chatScrollBox.ViewLines = m.chatScrollViewLines()
+		m.chatScrollBox.SetLines(m.chatMessageLines())
+		m.chatScrollBox.ScrollDown(1)
 		return m, nil
 	}
 	if msg.String() == "ctrl+h" {
@@ -3935,11 +3949,13 @@ func (m Model) optionModalView() string {
 	if m.optionModal == nil {
 		return ""
 	}
-	option := m.optionModal.option
-	width := clampInt(m.width-m.optionModal.column-2, 46, 74)
+	return m.optionModal.popover.Render()
+}
+
+func (m Model) buildOptionModalBody(option wizardCLIOption, input textinput.Model, width int) string {
 	lines := []string{
 		option.Long,
-		truncateToWidth(option.Description, panelBodyWidth(width)),
+		truncateToWidth(option.Description, width),
 		formatKV("Default", fallback(option.DefaultText, "none")),
 	}
 	if option.Short != "" {
@@ -3950,28 +3966,23 @@ func (m Model) optionModalView() string {
 		for _, sample := range samples {
 			buttons = append(buttons, "["+sample+"]")
 		}
-		lines = append(lines, wrapWords("Samples:", buttons, panelBodyWidth(width))...)
+		lines = append(lines, wrapWords("Samples:", buttons, width)...)
 	}
 	lines = append(lines,
 		"",
 		"Input",
-		m.optionModal.input.View(),
+		input.View(),
 		"",
 		"[ Save ]  [ Reset ]  [ X ]",
 	)
-	return renderMenuPanelWidth("CLI Option "+wizardOptionDisplayName(option), lines, m.palette(), width)
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) applyWizardOptionOverlay(view string) string {
 	if m.optionModal == nil {
 		return view
 	}
-	block := m.optionModalView()
-	rows := strings.Split(view, "\n")
-	maxRow := len(rows) - viewLineCount(m.footerView()) - viewLineCount(block)
-	row := clampInt(m.optionModal.row, 0, maxInt(0, maxRow))
-	column := clampInt(m.optionModal.column, 0, maxInt(0, m.width-lipgloss.Width(firstRenderedLine(block))-1))
-	return overlayBlock(view, block, row, column)
+	return m.optionModal.popover.Apply(view)
 }
 
 func (m Model) wizardOptionFromMouse(x int, y int) (wizardCLIOption, bool) {
@@ -3993,7 +4004,22 @@ func (m *Model) openOptionModalAt(option wizardCLIOption, row int, column int) {
 	input := textinput.New()
 	input.SetValue(m.wizardOptionOverrides[option.ID])
 	input.Focus()
-	m.optionModal = &optionModal{option: option, input: input, row: row, column: column}
+
+	width := clampInt(m.width-column-2, 46, 74)
+	body := m.buildOptionModalBody(option, input, width)
+	bodyLines := strings.Split(body, "\n")
+
+	popover := Popover{
+		Title:  "CLI Option " + wizardOptionDisplayName(option),
+		Body:   body,
+		Width:  width,
+		Height: len(bodyLines),
+	}
+	anchor := shapes.Rect{Row: row, Col: column, Rows: 1, Cols: width}
+	viewport := shapes.Rect{Row: 0, Col: 0, Rows: m.height, Cols: m.width}
+	popover.Layout(anchor, viewport)
+
+	m.optionModal = &optionModal{option: option, input: input, popover: popover}
 }
 
 func (m *Model) openWizardCommandEdit() {
@@ -4733,7 +4759,7 @@ func (m Model) chatComposerLines() []string {
 	}
 }
 
-func (m Model) chatMessageLines(window int) []string {
+func (m Model) chatMessageLines() []string {
 	if len(m.chatMessages) == 0 {
 		return nil
 	}
@@ -4752,14 +4778,7 @@ func (m Model) chatMessageLines(window int) []string {
 			lines = append(lines, rendered)
 		}
 	}
-	if window < 1 {
-		window = 1
-	}
-	maxScroll := maxInt(0, len(lines)-window)
-	scroll := minInt(maxInt(m.chatTranscriptScroll, 0), maxScroll)
-	start := maxInt(0, len(lines)-window-scroll)
-	end := minInt(len(lines), start+window)
-	return lines[start:end]
+	return lines
 }
 
 func (m Model) chatParityLines() []string {
@@ -4799,17 +4818,17 @@ func (m Model) chatSettingsLines() []string {
 }
 
 func (m Model) chatMessagesBoxView(rows int) string {
-	lines := []string{"[up]"}
-	messageLines := m.chatMessageLines(maxInt(1, rows-2))
-	if len(messageLines) == 0 {
-		messageLines = []string{mutedStyle.Render("No messages yet.")}
+	box := m.chatScrollBox
+	box.ViewLines = maxInt(1, rows)
+	box.SetLines(m.chatMessageLines())
+	if len(box.Lines) == 0 {
+		empty := []string{mutedStyle.Render("No messages yet.")}
+		for len(empty) < rows {
+			empty = append(empty, "")
+		}
+		return renderBox(empty, "45", m.width)
 	}
-	for len(messageLines) < maxInt(1, rows-2) {
-		messageLines = append(messageLines, "")
-	}
-	lines = append(lines, messageLines...)
-	lines = append(lines, "[down]")
-	return renderBox(lines, "45", m.width)
+	return box.View(panelBodyWidth(m.width))
 }
 
 func (m Model) chatInputBoxView() string {
@@ -5089,14 +5108,17 @@ func (m Model) submitChatPrompt() (Model, tea.Cmd) {
 	return m, m.chatCompletionCmd(ctx, prompt, runner)
 }
 
-func (m *Model) clampChatTranscriptScroll() {
-	maxScroll := maxInt(0, len(m.chatMessages)-8)
-	if m.chatTranscriptScroll < 0 {
-		m.chatTranscriptScroll = 0
+// chatScrollViewLines computes the number of visible rows available for the
+// chat transcript ScrollBox based on the current model state and window size.
+func (m Model) chatScrollViewLines() int {
+	if m.height <= 0 {
+		return 8
 	}
-	if m.chatTranscriptScroll > maxScroll {
-		m.chatTranscriptScroll = maxScroll
-	}
+	available := m.chatBodyTargetHeight()
+	// Top = status line (1) + settings box (4 rows with border)
+	// Input = input box (4 rows with border)
+	// Subtract 2 for gap padding
+	return maxInt(1, available-1-4-4-2)
 }
 
 func (m Model) modelsView() string {
@@ -5547,9 +5569,8 @@ func (m Model) applyChatStreamChunk(msg chatStreamChunkMsg) (Model, tea.Cmd) {
 	if elapsed > 0 {
 		m.chatTokensPerSecond = float64(len(strings.Fields(m.chatMessages[m.chatAssistantIndex].content))) / elapsed
 	}
-	if m.chatTranscriptScroll == 0 {
-		m.clampChatTranscriptScroll()
-	}
+	// Update ScrollBox with new content. Pinned mode auto-follows.
+	m.chatScrollBox.SetLines(m.chatMessageLines())
 	if msg.chunks == nil {
 		return m, nil
 	}
@@ -6817,46 +6838,6 @@ func renderBox(lines []string, color string, width int) string {
 		style = style.Width(panelInnerWidth(width))
 	}
 	return style.Render(body)
-}
-
-func overlayBlock(base string, block string, row int, column int) string {
-	lines := strings.Split(base, "\n")
-	blockLines := strings.Split(block, "\n")
-	if len(blockLines) == 0 {
-		return base
-	}
-	shadow := lipgloss.NewStyle().Background(lipgloss.Color("236")).Render(strings.Repeat(" ", lipgloss.Width(firstRenderedLine(block))))
-	for index := range blockLines {
-		shadowRow := row + index + 1
-		if shadowRow >= 0 && shadowRow < len(lines) {
-			lines[shadowRow] = overlayLine(lines[shadowRow], shadow, column+2)
-		}
-	}
-	for index, blockLine := range blockLines {
-		targetRow := row + index
-		if targetRow >= 0 && targetRow < len(lines) {
-			lines[targetRow] = overlayLine(lines[targetRow], blockLine, column)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func overlayLine(base string, block string, column int) string {
-	if column < 0 {
-		column = 0
-	}
-	baseWidth := ansi.StringWidth(base)
-	prefix := ansi.Cut(base, 0, minInt(column, baseWidth))
-	for ansi.StringWidth(prefix) < column {
-		prefix += " "
-	}
-	blockWidth := lipgloss.Width(block)
-	suffix := ""
-	suffixStart := column + blockWidth
-	if suffixStart < baseWidth {
-		suffix = ansi.Cut(base, suffixStart, baseWidth)
-	}
-	return prefix + block + suffix
 }
 
 func renderMenuPanel(title string, lines []string, palette tuiPalette) string {

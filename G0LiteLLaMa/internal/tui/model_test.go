@@ -447,7 +447,7 @@ func TestChatMessageAndInputBoxesUseMessengerAlignment(t *testing.T) {
 		{role: "user", content: "right question"},
 	}
 	view := ansi.Strip(model.View().Content)
-	for _, expected := range []string{"[up]", "[down]", "Ready. Input your prompt", "Send"} {
+	for _, expected := range []string{"Ready. Input your prompt", "Send"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("boxed chat/input missing %q:\n%s", expected, view)
 		}
@@ -467,7 +467,7 @@ func TestChatMessageColorOnlyHighlightsUser(t *testing.T) {
 		{role: "assistant", content: "plain assistant"},
 		{role: "user", content: "colored user"},
 	}
-	lines := model.chatMessageLines(10)
+	lines := model.chatMessageLines()
 	assistantLine := lineContaining(strings.Join(lines, "\n"), "plain assistant")
 	userLine := lineContaining(strings.Join(lines, "\n"), "colored user")
 	if strings.Contains(assistantLine, "[48;5;") {
@@ -609,7 +609,7 @@ func TestChatTranscriptScrollIsInternal(t *testing.T) {
 	if model.scrollOffset != beforeTerminalScroll {
 		t.Fatalf("terminal scroll changed from %d to %d", beforeTerminalScroll, model.scrollOffset)
 	}
-	if model.chatTranscriptScroll == 0 {
+	if model.chatScrollBox.Offset == 0 {
 		t.Fatalf("chat transcript scroll did not move")
 	}
 }
@@ -1646,8 +1646,8 @@ func TestLaunchWizardCLIOptionsRenderAsButtonRowsAndBottomEditor(t *testing.T) {
 	if model.optionModal == nil {
 		t.Fatalf("option editor missing:\n%s", view)
 	}
-	if distance := absInt(model.optionModal.row - (y + 1)); distance > 1 {
-		t.Fatalf("option editor should pop up near clicked row, got click row %d editor row %d:\n%s", y, model.optionModal.row, view)
+	if distance := absInt(model.optionModal.popover.Rect.Row - (y + 1)); distance > 1 {
+		t.Fatalf("option editor should pop up near clicked row, got click row %d editor row %d:\n%s", y, model.optionModal.popover.Rect.Row, view)
 	}
 	for _, expected := range []string{
 		"--cache-type-k",

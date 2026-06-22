@@ -4880,6 +4880,7 @@ func (m Model) chatSettingsLines() []string {
 func (m Model) chatMessagesBoxView(rows int) string {
 	box := m.chatScrollBox
 	box.ViewLines = maxInt(1, rows)
+	box.ContentBg = "24" // match renderBox background
 	box.SetLines(m.chatMessageLines())
 	if len(box.Lines) == 0 {
 		empty := []string{mutedStyle.Render("No messages yet.")}
@@ -4888,9 +4889,11 @@ func (m Model) chatMessagesBoxView(rows int) string {
 		}
 		return renderBox(empty, "45", m.width)
 	}
-	// Render scrollbox content at the inner box width minus 1 to leave room
-	// for the scrollbar column.  Then wrap in renderBox for the border.
-	innerW := panelBodyWidth(m.width) //  m.width - 8
+	// renderBox uses Width(panelInnerWidth(m.width)).  The inner content
+	// area (after borders + padding) is panelBodyWidth(m.width) wide.
+	// Scrollbox needs 1 column for the scrollbar, so content fits when
+	// we pass panelBodyWidth(m.width)-1 to View().
+	innerW := panelBodyWidth(m.width) // m.width - 8
 	scrollContent := box.View(innerW - 1)
 	lines := strings.Split(scrollContent, "\n")
 	return renderBox(lines, "45", m.width)

@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"g0litellama/internal/tui/shapes"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ScrollBox renders a vertically scrollable content area with a right-side
@@ -115,6 +115,10 @@ func (s *ScrollBox) View(width int) string {
 	}
 
 	scrollCol := lipgloss.NewStyle().Width(scrollBarWidth).Align(lipgloss.Left)
+	padStyle := lipgloss.NewStyle()
+	if s.ContentBg != "" {
+		padStyle = padStyle.Background(lipgloss.Color(s.ContentBg))
+	}
 	trackStyle := scrollCol.Background(lipgloss.Color("236"))
 	thumbStyle := scrollCol.Background(lipgloss.Color("243"))
 	arrowStyle := scrollCol.Background(lipgloss.Color("236")).Foreground(lipgloss.Color("243"))
@@ -137,7 +141,7 @@ func (s *ScrollBox) View(width int) string {
 		}
 		cw := ansi.StringWidth(cell)
 		if cw < width {
-			cell += strings.Repeat(" ", width-cw)
+			cell += padStyle.Render(strings.Repeat(" ", width-cw))
 		}
 		b.WriteString(cell)
 

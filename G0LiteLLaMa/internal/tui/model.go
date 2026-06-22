@@ -443,6 +443,7 @@ func NewModel(options ModelOptions) Model {
 		chatTargetRole:        "main",
 		chatStatus:            "idle",
 		chatAssistantIndex:    -1,
+		chatScrollBox:         ScrollBox{Pinned: true},
 		chatTemperature:       "default",
 		chatTopP:              "default",
 		chatMaxTokens:         "default",
@@ -627,6 +628,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			role:    "assistant",
 			content: msg.response,
 		})
+		m.chatScrollBox.SetLines(m.chatMessageLines())
+		if m.chatScrollBox.Pinned {
+			m.chatScrollBox.ScrollToBottom()
+		}
 		m.notice = "sent chat prompt through /v1/chat/completions"
 	case chatStreamStartMsg:
 		return m, waitForChatStreamChunk(msg.chunks)
@@ -2212,8 +2217,8 @@ func (m Model) fullView() string {
 	builder.WriteString("\n")
 	builder.WriteString(m.tabBar())
 	builder.WriteString("\n\n")
-	if strings.TrimSpace(m.notice) != "" {
-		builder.WriteString(noticeStyle.Render(m.notice))
+	if notice := m.noticeView(); notice != "" {
+		builder.WriteString(notice)
 		builder.WriteString("\n\n")
 	}
 
@@ -2228,6 +2233,24 @@ func (m Model) fullView() string {
 func (m Model) managedScreenView() string {
 	top := m.managedTopView()
 	footer := m.footerView()
+	if m.activeTabID() == "chat" {
+		bodyHeight := m.chatManagedBodyHeight(top, footer)
+		if bodyHeight <= 0 {
+			topHeight := m.height - viewLineCount(footer) - 2
+			if topHeight < 0 {
+				topHeight = 0
+			}
+			return fitLinesToHeight(joinPanels(sliceRenderedLines(top, 0, topHeight), footer), m.height)
+		}
+		chat := m.chatView()
+		offset := 0
+		if count := viewLineCount(chat); count > bodyHeight {
+			offset = count - bodyHeight
+		}
+		visibleBody := fitLinesToHeight(sliceRenderedLines(chat, offset, bodyHeight), bodyHeight)
+		return m.applyWizardOptionOverlay(pinFooterToBottomClipped(joinPanels(top, visibleBody), footer, m.height))
+	}
+
 	bodyHeight := managedBodyHeight(m.height, top, footer)
 	if bodyHeight <= 0 {
 		topHeight := m.height - viewLineCount(footer) - 2
@@ -2267,11 +2290,22 @@ func (m Model) managedTopView() string {
 	builder.WriteString(m.headerView())
 	builder.WriteString("\n")
 	builder.WriteString(m.tabBar())
-	if strings.TrimSpace(m.notice) != "" {
+	if notice := m.noticeView(); notice != "" {
 		builder.WriteString("\n\n")
-		builder.WriteString(noticeStyle.Render(m.notice))
+		builder.WriteString(notice)
 	}
 	return builder.String()
+}
+
+func (m Model) noticeView() string {
+	notice := strings.TrimSpace(m.notice)
+	if notice == "" {
+		return ""
+	}
+	if m.width > 0 {
+		notice = truncateToWidth(notice, maxInt(1, m.width-noticeStyle.GetHorizontalFrameSize()))
+	}
+	return noticeStyle.Render(notice)
 }
 
 func (m Model) activeContentView() string {
@@ -4859,6 +4893,10 @@ func (m Model) chatView() string {
 	top := joinChatPanels(status, settings)
 	messageRows := m.chatTranscriptWindowSize(top, input)
 	messages := m.chatMessagesBoxView(messageRows)
+	for messageRows > 1 && viewLineCount(joinChatPanels(top, messages, input)) > m.chatBodyTargetHeight() {
+		messageRows--
+		messages = m.chatMessagesBoxView(messageRows)
+	}
 	panels := []string{status, settings, messages, input}
 	if m.chatSettingsDropdown != "" || m.chatCommandPopup || m.chatSystemEditing {
 		base := joinChatPanels(panels...)
@@ -4888,13 +4926,21 @@ func (m Model) chatTranscriptWindowSize(top string, composer string) int {
 
 func (m Model) chatBodyTargetHeight() int {
 	if m.managedScreen {
-		return managedBodyHeight(m.height, m.managedTopView(), m.footerView())
+		return m.chatManagedBodyHeight(m.managedTopView(), m.footerView())
 	}
 	prefix := viewLineCount(m.headerView()) + viewLineCount(m.tabBar()) + 3
-	if strings.TrimSpace(m.notice) != "" {
-		prefix += viewLineCount(noticeStyle.Render(m.notice)) + 2
+	if notice := m.noticeView(); notice != "" {
+		prefix += viewLineCount(notice) + 2
 	}
 	return maxInt(0, m.height-prefix-viewLineCount(m.footerView()))
+}
+
+func (m Model) chatManagedBodyHeight(top string, footer string) int {
+	bodyHeight := m.height - viewLineCount(top) - viewLineCount(footer) - 1
+	if bodyHeight < 0 {
+		return 0
+	}
+	return bodyHeight
 }
 
 func (m Model) chatRunnerLines() []string {
@@ -5032,22 +5078,30 @@ func (m Model) chatSettingsLines() []string {
 		systemPrompt = systemPrompt[:77] + "..."
 	}
 	target := m.chatTarget()
-	return []string{
-		strings.Join([]string{
-			"Thinking: " + boolOnOff(m.chatThinking),
-			"Target: " + target,
-			"System: " + systemPrompt,
-			"Temperature: " + m.chatTemperature,
-			"Top P: " + m.chatTopP,
-			"Max Tokens: " + m.chatMaxTokens,
-			"Stream: " + boolOnOff(m.chatStream),
-		}, "  "),
+	line := strings.Join([]string{
+		"Thinking: " + boolOnOff(m.chatThinking),
+		"Target: " + target,
+		"System: " + systemPrompt,
+		"Temperature: " + m.chatTemperature,
+		"Top P: " + m.chatTopP,
+		"Max Tokens: " + m.chatMaxTokens,
+		"Stream: " + boolOnOff(m.chatStream),
+	}, "  ")
+	maxWidth := maxInt(1, panelBodyWidth(m.width)-2)
+	if lipgloss.Width(line) > maxWidth {
+		if maxWidth > 3 {
+			line = truncateToWidth(line, maxWidth-3) + "..."
+		} else {
+			line = truncateToWidth(line, maxWidth)
+		}
 	}
+	return []string{line}
 }
 
 func (m Model) chatMessagesBoxView(rows int) string {
 	box := m.chatScrollBox
 	box.ViewLines = maxInt(1, rows)
+	box.ContentBg = "24"
 	box.SetLines(m.chatMessageLines())
 	if len(box.Lines) == 0 {
 		empty := []string{mutedStyle.Render("No messages yet.")}
@@ -5064,18 +5118,18 @@ func (m Model) chatMessagesBoxView(rows int) string {
 	scrollContent := box.View(contentW)
 	lines := strings.Split(scrollContent, "\n")
 
-	borderStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("45")).Width(boxW)
-
-	// Top border: ╭──────────╮ (top + left + right)
-	topBorder := borderStyle.Border(lipgloss.NormalBorder(), true, true, false, true).Render("")
-	// Bottom border: ╰──────────╯ (left + bottom + right)
-	bottomBorder := borderStyle.Border(lipgloss.NormalBorder(), false, true, true, true).Render("")
+	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("45"))
+	topBorder := borderStyle.Render("┌" + strings.Repeat("─", maxInt(0, boxW-2)) + "┐")
+	bottomBorder := borderStyle.Render("└" + strings.Repeat("─", maxInt(0, boxW-2)) + "┘")
+	bodyBG := lipgloss.NewStyle().Background(lipgloss.Color("24"))
 
 	var body strings.Builder
 	for _, line := range lines {
-		body.WriteString("│ ")
+		body.WriteString(borderStyle.Render("│"))
+		body.WriteString(bodyBG.Render(" "))
 		body.WriteString(line)
-		body.WriteString("│\n")
+		body.WriteString(borderStyle.Render("│"))
+		body.WriteString("\n")
 	}
 
 	return topBorder + "\n" + strings.TrimRight(body.String(), "\n") + "\n" + bottomBorder
@@ -5089,9 +5143,11 @@ func (m Model) chatInputBoxView() string {
 	value := m.chatDraft
 	if strings.TrimSpace(value) == "" {
 		value = mutedStyle.Render(placeholder)
+	} else {
+		value = strings.ReplaceAll(value, "\n", " / ")
+		value = truncateToWidth(value, maxInt(1, panelBodyWidth(m.width)))
 	}
-	lines := strings.Split(value, "\n")
-	lines = append(lines, m.chatSendLabel())
+	lines := []string{value, m.chatSendLabel()}
 	return renderBox(lines, "214", m.width)
 }
 
@@ -5365,6 +5421,8 @@ func (m Model) submitChatPrompt() (Model, tea.Cmd) {
 		role:    "user",
 		content: prompt,
 	})
+	m.chatScrollBox.SetLines(m.chatMessageLines())
+	m.chatScrollBox.ScrollToBottom()
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.chatCancel = cancel
 	return m, m.chatCompletionCmd(ctx, prompt, runner)
@@ -7378,6 +7436,28 @@ func pinFooterToBottom(body string, footer string, height int) string {
 	}
 	if len(bodyLines) > bodyHeight {
 		return joinPanels(body, footer)
+	}
+	for len(bodyLines) < bodyHeight {
+		bodyLines = append(bodyLines, "")
+	}
+	return strings.Join(append(bodyLines, footerLines...), "\n")
+}
+
+func pinFooterToBottomClipped(body string, footer string, height int) string {
+	if height <= 0 {
+		return joinPanels(body, footer)
+	}
+	footerLines := strings.Split(footer, "\n")
+	if len(footerLines) > height {
+		return strings.Join(footerLines[len(footerLines)-height:], "\n")
+	}
+	bodyHeight := height - len(footerLines)
+	bodyLines := []string{}
+	if body != "" {
+		bodyLines = strings.Split(body, "\n")
+	}
+	if len(bodyLines) > bodyHeight {
+		bodyLines = bodyLines[:bodyHeight]
 	}
 	for len(bodyLines) < bodyHeight {
 		bodyLines = append(bodyLines, "")

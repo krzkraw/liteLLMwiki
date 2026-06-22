@@ -1149,6 +1149,107 @@ func TestFullViewBottomBarStaysOnTerminalBottom(t *testing.T) {
 	}
 }
 
+func TestChatViewKeepsComposerAndFooterPinnedUnderGrowth(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.managedScreen = true
+	model.width = 100
+	model.height = 22
+	for i := 0; i < 80; i++ {
+		model.chatMessages = append(model.chatMessages, chatMessage{
+			role:    "assistant",
+			content: strings.Repeat("streamed response chunk ", 3) + strconv.Itoa(i),
+		})
+	}
+	model.chatDraft = strings.Join([]string{
+		"first line",
+		"second line",
+		"third line",
+		"fourth line",
+		"fifth line",
+		"sixth line",
+	}, "\n")
+
+	view := model.View().Content
+	lines := strings.Split(view, "\n")
+	if got := len(lines); got != model.height {
+		t.Fatalf("view line count = %d, want %d:\n%s", got, model.height, view)
+	}
+	for i, line := range lines {
+		if got := lipgloss.Width(line); got != model.width {
+			t.Fatalf("line %d width = %d, want %d: %q\n%s", i, got, model.width, line, view)
+		}
+	}
+	if !strings.Contains(ansi.Strip(view), "Send") {
+		t.Fatalf("chat composer send control is not visible:\n%s", view)
+	}
+	strippedLines := strings.Split(ansi.Strip(view), "\n")
+	sendRow := -1
+	for i, line := range strippedLines {
+		if strings.Contains(line, "Send") {
+			sendRow = i
+			break
+		}
+	}
+	if sendRow < 0 || sendRow+1 >= len(strippedLines) || !strings.Contains(strippedLines[sendRow+1], "╰") {
+		t.Fatalf("chat composer bottom border is not visible after Send:\n%s", view)
+	}
+	if sendRow+1 != len(strippedLines)-2 {
+		t.Fatalf("chat composer should sit directly above bottom bar, composer bottom row=%d bottom bar row=%d:\n%s", sendRow+1, len(strippedLines)-1, view)
+	}
+	messageRows := 0
+	for _, line := range strippedLines {
+		if strings.Contains(line, "streamed response chunk") {
+			messageRows++
+		}
+	}
+	if messageRows < 2 {
+		t.Fatalf("chat transcript collapsed to %d visible message rows:\n%s", messageRows, view)
+	}
+	bottom := ansi.Strip(lines[len(lines)-1])
+	if !strings.Contains(bottom, "Menu") || !strings.Contains(bottom, "Clear") || !strings.Contains(bottom, "New") {
+		t.Fatalf("bottom row missing chat action bar: %q\n%s", bottom, view)
+	}
+}
+
+func TestChatErrorNoticeDoesNotPushFooterOffscreen(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.managedScreen = true
+	model.width = 140
+	model.height = 40
+	model.chatMessages = []chatMessage{{role: "user", content: "hello chat"}}
+	model.chatDraft = "hello chat"
+	model.chatStatus = "error"
+	model.notice = `chat prompt failed: send chat request: Post "http://127.0.0.1:9379/v1/chat/completions": dial tcp 127.0.0.1:9379: connect: connection refused`
+
+	next, _ := model.Update(specialKey(tea.KeyPgUp))
+	model = next.(Model)
+	view := model.View().Content
+	lines := strings.Split(view, "\n")
+	if got := len(lines); got != model.height {
+		t.Fatalf("view line count = %d, want %d:\n%s", got, model.height, view)
+	}
+	bottom := ansi.Strip(lines[len(lines)-1])
+	if !strings.Contains(bottom, "Clear") || !strings.Contains(bottom, "New") {
+		t.Fatalf("chat footer missing after long notice and PageUp: %q\n%s", bottom, view)
+	}
+}
+
+func TestChatTranscriptBoxDoesNotAddPhantomRows(t *testing.T) {
+	t.Parallel()
+
+	model := newChatTestModel(t)
+	model.chatMessages = []chatMessage{{role: "assistant", content: "hello"}}
+
+	view := model.chatMessagesBoxView(2)
+	if got := viewLineCount(view); got != 4 {
+		t.Fatalf("transcript box lines = %d, want 4:\n%s", got, view)
+	}
+}
+
 func TestViewRendersMutedBackdropAndTintedPanels(t *testing.T) {
 	t.Parallel()
 

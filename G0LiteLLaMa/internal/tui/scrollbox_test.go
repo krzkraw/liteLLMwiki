@@ -107,6 +107,15 @@ func TestScrollBoxViewContainsScrollbar(t *testing.T) {
 	}
 }
 
+func TestScrollBoxContentBackgroundPadsEmptyCells(t *testing.T) {
+	s := ScrollBox{ViewLines: 3, Lines: []string{"x"}, ContentBg: "24"}
+
+	view := s.View(6)
+	if !strings.Contains(view, "\x1b[48;5;24m") {
+		t.Fatalf("expected content background padding in:\n%q", view)
+	}
+}
+
 func TestScrollBoxHitTargets(t *testing.T) {
 	s := ScrollBox{ViewLines: 5, Lines: strLines(0, 10)}
 	targets := s.HitTargets(10, 5)

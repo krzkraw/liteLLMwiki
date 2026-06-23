@@ -5,16 +5,37 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
+func TestMissingWSLDistroOutputIsSkippable(t *testing.T) {
+	output := []byte(`Windows Subsystem for Linux has no installed distributions.
+You can resolve this by installing a distribution with the instructions below:
+`)
+	if !missingWSLDistroOutput(output) {
+		t.Fatal("missing WSL distro output was not recognized")
+	}
+}
+
 func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 	t.Parallel()
 
-	if _, err := exec.LookPath("bash"); err != nil {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
 		t.Skip("bash is required to run real-runtime-smoke.sh")
+	}
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command(bash, "-lc", "printf ok")
+		output, err := cmd.CombinedOutput()
+		if err != nil && missingWSLDistroOutput(output) {
+			t.Skip("bash is backed by WSL, but no WSL distribution is installed")
+		}
+		if err != nil {
+			t.Fatalf("bash smoke check failed: %v\n%s", err, output)
+		}
 	}
 	if _, err := exec.LookPath("bun"); err != nil {
 		t.Skip("bun is required by real-runtime-smoke.sh and the fake runtime")
@@ -38,7 +59,7 @@ func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", filepath.Join(root, "scripts", "real-runtime-smoke.sh"))
+	cmd := exec.CommandContext(ctx, bash, filepath.Join(root, "scripts", "real-runtime-smoke.sh"))
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
 		"LITERT_LM_BIN="+fakeRuntime,
@@ -63,6 +84,10 @@ func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 	if !strings.Contains(text, "Multimodal assistant: fake multimodal response") {
 		t.Fatalf("multimodal smoke output missing assistant response:\n%s", text)
 	}
+}
+
+func missingWSLDistroOutput(output []byte) bool {
+	return strings.Contains(string(output), "Windows Subsystem for Linux has no installed distributions")
 }
 
 func fakeLiteRTLM() string {

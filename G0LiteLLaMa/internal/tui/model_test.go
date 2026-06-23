@@ -2627,7 +2627,7 @@ func TestLaunchWizardClickStartCreatesAndStartsNumberedRunner(t *testing.T) {
 	}
 	created := controller.runners[len(controller.runners)-1]
 	preview := wizardCommandPreviewForTest(t, model)
-	if got := strings.Join(created.Command, " "); got != preview {
+	if got := runnerCommandLine(created.Command); got != preview {
 		t.Fatalf("created command = %q, want preview %q", got, preview)
 	}
 }

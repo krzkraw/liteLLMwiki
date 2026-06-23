@@ -443,6 +443,11 @@ func newDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+	})
 	return db
 }
 

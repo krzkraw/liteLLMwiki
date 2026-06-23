@@ -2,6 +2,7 @@ package scripts
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,12 @@ You can resolve this by installing a distribution with the instructions below:
 	}
 }
 
+func TestWindowsBashProbeFailureWithoutCapturedOutputIsSkippable(t *testing.T) {
+	if reason := windowsBashSkipReason(errors.New("exit status 1"), nil); reason == "" {
+		t.Fatal("Windows bash probe failure should be skippable even without captured output")
+	}
+}
+
 func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 	t.Parallel()
 
@@ -30,11 +37,8 @@ func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		cmd := exec.Command(bash, "-lc", "printf ok")
 		output, err := cmd.CombinedOutput()
-		if err != nil && missingWSLDistroOutput(output) {
-			t.Skip("bash is backed by WSL, but no WSL distribution is installed")
-		}
-		if err != nil {
-			t.Fatalf("bash smoke check failed: %v\n%s", err, output)
+		if reason := windowsBashSkipReason(err, output); reason != "" {
+			t.Skip(reason)
 		}
 	}
 	if _, err := exec.LookPath("bun"); err != nil {
@@ -88,6 +92,16 @@ func TestRealRuntimeSmokeCoversTextAndMultimodal(t *testing.T) {
 
 func missingWSLDistroOutput(output []byte) bool {
 	return strings.Contains(string(output), "Windows Subsystem for Linux has no installed distributions")
+}
+
+func windowsBashSkipReason(err error, output []byte) string {
+	if err == nil {
+		return ""
+	}
+	if missingWSLDistroOutput(output) {
+		return "bash is backed by WSL, but no WSL distribution is installed"
+	}
+	return "bash is installed but not usable on Windows"
 }
 
 func fakeLiteRTLM() string {

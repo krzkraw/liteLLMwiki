@@ -1149,6 +1149,30 @@ func TestFullViewBottomBarStaysOnTerminalBottom(t *testing.T) {
 	}
 }
 
+func TestManagedRunnerBottomBarStaysOnTerminalBottom(t *testing.T) {
+	t.Parallel()
+
+	runner := testRunner("LM-M-1", "llamacpp", "main", "running")
+	model := NewModel(ModelOptions{
+		RunnerController: newFakeRunnerController([]server.RunnerSnapshot{runner}),
+		Logs:             server.NewLogBroadcaster(8),
+		Catalog:          testCatalogWithPresentModels(t),
+		ManagedScreen:    true,
+	})
+	model.width = 247
+	model.height = 68
+	model.setActiveTab("runner:LM-M-1")
+
+	lines := strings.Split(model.View().Content, "\n")
+	if got := len(lines); got != model.height {
+		t.Fatalf("view line count = %d, want %d:\n%s", got, model.height, model.View().Content)
+	}
+	bottom := ansi.Strip(lines[len(lines)-1])
+	if !strings.Contains(bottom, "Menu") || !strings.Contains(bottom, "Runner LM-M-1") {
+		t.Fatalf("managed runner bottom row missing action bar: %q\n%s", bottom, model.View().Content)
+	}
+}
+
 func TestChatViewKeepsComposerAndFooterPinnedUnderGrowth(t *testing.T) {
 	t.Parallel()
 

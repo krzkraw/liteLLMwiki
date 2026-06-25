@@ -2267,7 +2267,7 @@ func (m Model) managedScreenView() string {
 	}
 	visibleBody = fitLinesToHeight(visibleBody, bodyHeight)
 
-	return m.applyWizardOptionOverlay(fitLinesToHeight(joinPanels(top, visibleBody, footer), m.height))
+	return m.applyWizardOptionOverlay(pinFooterToBottomClipped(joinPanels(top, visibleBody), footer, m.height))
 }
 
 func (m Model) managedStartupView() string {

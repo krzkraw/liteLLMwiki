@@ -32,23 +32,9 @@ Useful flags:
 --headless
 ```
 
-## Routes
+## API Reference
 
-```text
-GET  /g0litellama/v1/status
-GET  /g0litellama/v1/models
-POST /g0litellama/v1/models/download
-GET  /g0litellama/v1/runners
-POST /g0litellama/v1/runners
-PATCH /g0litellama/v1/runners/{id}
-POST /g0litellama/v1/runners/{id}/start
-POST /g0litellama/v1/runners/{id}/restart
-POST /g0litellama/v1/runners/{id}/stop
-POST /g0litellama/v1/runners/{id}/close
-POST /g0litellama/v1/multimodal
-WS   /g0litellama/v1/ws
-ANY  /v1/*
-```
+See `../API.md` for the canonical API map.
 
 ## Release Builds
 

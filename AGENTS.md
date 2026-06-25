@@ -17,6 +17,7 @@ them in Git.
 ## Source Of Truth
 
 - `README.md` - human setup, structure, model policy, and verification commands.
+- `API.md` - canonical HTTP, WebSocket, action bus, and proxy API surface.
 - `G0LiteLLaMa/README.md` - runtime contract and release commands.
 - `G0LiteLLaMa/go.mod` - Go module definition.
 - `docs/loop-factory.md` - spec queue operation and Loop Factory commands.
@@ -177,6 +178,9 @@ E2E is not required.
   pnpm unless the user explicitly asks.
 - Update `README.md` and this file when setup, commands, structure, or model
   policy changes.
+- API changes MUST update `API.md` in the same change. This includes HTTP
+  routes, WebSocket messages, action types, proxy routing, request/response
+  schemas, and API error behavior.
 - Treat renames and path moves as whole-repo migrations: update docs, scripts,
   tests, ignore rules, and run a repo-wide `rg` sweep for stale paths.
 - When changing runtime downloads, package versions, or hard-coded checksums,

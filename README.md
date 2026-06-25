@@ -7,6 +7,7 @@ native TUI/API process directly.
 ## Layout
 
 - `G0LiteLLaMa/` - Go source, TUI, HTTP/WebSocket API, runtime supervisor.
+- `API.md` - canonical HTTP, WebSocket, action bus, and proxy API map.
 - `G0LiteLLaMa/dist/` - ignored release artifacts; keep only `README.md`.
 - `G0LiteLLaMa/litert-runtimes/` - ignored repo-local LiteRT-LM installs.
 - `G0LiteLLaMa/llama-runtimes/` - ignored repo-local llama.cpp installs.
